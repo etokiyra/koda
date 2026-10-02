@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Editing & UX
+
+- Undo grouping: consecutive typing, backspacing and forward-deletes coalesce
+  into one undo step; moving the cursor breaks the group.
+- Auto-pairing for brackets and double quotes, with skip-over, empty-pair
+  deletion and selection wrapping.
+- Smart newline: Enter between an empty pair expands to an indented block, and
+  indentation deepens after an opening bracket.
+- Selection-aware Tab/Shift+Tab indent and outdent.
+- Line operations: move line up/down and duplicate line.
+- The command palette now shows a description for every command, marks
+  unavailable commands with a reason (for example "not available for Rust",
+  "nothing to undo") and keeps shortcuts right-aligned.
+- New commands: Save All, Close All Tabs, Toggle Hidden Files, Indent, Outdent,
+  Move Line Up/Down and Duplicate Line.
+- Quick Open lists recently opened files first.
+- Closing a modified tab now asks for confirmation instead of refusing.
+
 ### Visual identity (Mellow)
 
 - Replaced the placeholder palette with the **Mellow** colour language (the

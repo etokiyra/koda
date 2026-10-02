@@ -6,13 +6,13 @@
 pub mod overlay;
 
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::DefaultTerminal;
 
-use crate::commands::{CommandRegistry, ids};
+use crate::commands::{Command, CommandRegistry, ids};
 use crate::editor::{Document, Editor, Position, Selection};
 use crate::filesystem;
 use crate::language::{Capability, LanguageId, LanguageService};
@@ -45,6 +45,7 @@ pub struct App {
     pub overlay: Overlay,
     pub search: Search,
     pub clipboard: String,
+    pub recent_files: Vec<PathBuf>,
     pub tree_visible: bool,
     pub focus: Focus,
     pub status: Status,
@@ -52,6 +53,8 @@ pub struct App {
     pub viewport_height: usize,
     pub should_quit: bool,
     quit_armed: bool,
+    /// Tab index armed for a forced close (dirty, first Ctrl+W).
+    close_armed: Option<usize>,
 }
 
 impl App {
@@ -76,12 +79,14 @@ impl App {
             overlay: Overlay::None,
             search: Search::default(),
             clipboard: String::new(),
+            recent_files: Vec::new(),
             tree_visible: true,
             focus: Focus::Editor,
             status: Status::default(),
             viewport_height: 20,
             should_quit: false,
             quit_armed: false,
+            close_armed: None,
         };
 
         if let Some(path) = target
@@ -289,12 +294,13 @@ impl App {
         match key.code {
             KeyCode::Up => self.workspace.tree.select_up(),
             KeyCode::Down => self.workspace.tree.select_down(),
-            KeyCode::Enter | KeyCode::Right => {
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char(' ') => {
                 if let Some(path) = self.workspace.tree.activate_selected() {
                     self.open_path(path);
                 }
             }
             KeyCode::Left => self.workspace.tree.collapse_selected(),
+            KeyCode::Char('.') => self.toggle_hidden(),
             KeyCode::Esc => self.focus = Focus::Editor,
             _ => {}
         }
@@ -306,7 +312,7 @@ impl App {
         enum Outcome {
             Nothing,
             Close,
-            Run(PickerAction),
+            Run(PickerAction, Option<String>),
             Submit(PromptKind, String),
         }
 
@@ -323,7 +329,10 @@ impl App {
                     Outcome::Nothing
                 }
                 KeyCode::Enter => match picker.selected_item() {
-                    Some(item) => Outcome::Run(item.action.clone()),
+                    Some(item) => Outcome::Run(
+                        item.action.clone(),
+                        item.hint.clone().filter(|_| !item.enabled),
+                    ),
                     None => Outcome::Close,
                 },
                 KeyCode::Backspace => {
@@ -354,9 +363,12 @@ impl App {
         match outcome {
             Outcome::Nothing => {}
             Outcome::Close => self.overlay = Overlay::None,
-            Outcome::Run(action) => {
+            Outcome::Run(action, hint) => {
                 self.overlay = Overlay::None;
-                self.run_picker_action(action);
+                match hint {
+                    Some(hint) => self.set_status(hint),
+                    None => self.run_picker_action(action),
+                }
             }
             Outcome::Submit(kind, input) => {
                 self.overlay = Overlay::None;
@@ -421,9 +433,11 @@ impl App {
     pub fn execute_command(&mut self, id: &str) {
         match id {
             ids::SAVE => self.save(),
+            ids::SAVE_ALL => self.save_all(),
             ids::OPEN => self.open_prompt(PromptKind::OpenPath, "Open file", "path/to/file.rs"),
             ids::QUICK_OPEN => self.open_quick_open(),
             ids::CLOSE_TAB => self.close_tab(),
+            ids::CLOSE_ALL => self.close_all(),
             ids::QUIT => self.request_quit(),
             ids::UNDO => self.with_doc(|d| d.undo()),
             ids::REDO => self.with_doc(|d| d.redo()),
@@ -435,8 +449,14 @@ impl App {
             ids::REPLACE => self.open_search(true),
             ids::GOTO_LINE => self.open_prompt(PromptKind::GotoLine, "Go to line", "42"),
             ids::TOGGLE_COMMENT => self.toggle_comment(),
+            ids::INDENT => self.with_doc(|d| d.indent()),
+            ids::OUTDENT => self.with_doc(|d| d.outdent()),
+            ids::MOVE_LINE_UP => self.with_doc(|d| d.move_line_up()),
+            ids::MOVE_LINE_DOWN => self.with_doc(|d| d.move_line_down()),
+            ids::DUPLICATE_LINE => self.with_doc(|d| d.duplicate_line()),
             ids::TOGGLE_TREE => self.toggle_tree(),
             ids::FOCUS_TREE => self.focus_tree(),
+            ids::TOGGLE_HIDDEN => self.toggle_hidden(),
             ids::NEXT_TAB => self.editor.next_tab(),
             ids::PREV_TAB => self.editor.previous_tab(),
             ids::PALETTE => self.open_command_palette(),
@@ -628,9 +648,22 @@ impl App {
                 self.detect_language_for_active();
                 self.workspace.tree.select_path(&path);
                 self.focus = Focus::Editor;
+                self.close_armed = None;
+                self.remember_recent(&path);
                 self.set_status(format!("Opened {}", path.display()));
             }
             Err(err) => self.set_error(format!("Could not open {}: {err}", path.display())),
+        }
+    }
+
+    fn remember_recent(&mut self, path: &Path) {
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        self.recent_files.retain(|existing| {
+            existing.canonicalize().unwrap_or_else(|_| existing.clone()) != canonical
+        });
+        self.recent_files.push(canonical);
+        if self.recent_files.len() > 20 {
+            self.recent_files.remove(0);
         }
     }
 
@@ -673,18 +706,68 @@ impl App {
 
     fn close_tab(&mut self) {
         let index = self.editor.active_index();
-        if self
+        let dirty = self
             .editor
             .documents
             .get(index)
             .map(|doc| doc.is_dirty())
-            .unwrap_or(false)
-        {
+            .unwrap_or(false);
+        if dirty && self.close_armed != Some(index) {
+            self.close_armed = Some(index);
+            self.set_error("Unsaved changes — press Ctrl+W again to close without saving");
+            return;
+        }
+        self.close_armed = None;
+        self.editor.close(index);
+        self.set_status("Tab closed");
+    }
+
+    fn close_all(&mut self) {
+        if self.editor.has_unsaved() {
             self.set_error("Unsaved changes — save first (Ctrl+S)");
             return;
         }
-        self.editor.close(index);
-        self.set_status("Tab closed");
+        self.editor.close_all();
+        self.close_armed = None;
+        self.set_status("All tabs closed");
+    }
+
+    fn save_all(&mut self) {
+        let mut saved = 0usize;
+        let mut error = None;
+        for doc in &mut self.editor.documents {
+            if doc.is_dirty() && doc.buffer.path.is_some() {
+                match doc.buffer.save() {
+                    Ok(true) => saved += 1,
+                    Ok(false) => {}
+                    Err(err) => {
+                        error = Some(err);
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some(err) = error {
+            self.set_error(format!("Save failed: {err}"));
+            return;
+        }
+        if saved > 0 {
+            self.workspace.refresh_git();
+            self.quit_armed = false;
+            self.set_status(format!("Saved {saved} file(s)"));
+        } else {
+            self.set_status("Nothing to save");
+        }
+    }
+
+    fn toggle_hidden(&mut self) {
+        self.workspace.tree.toggle_hidden();
+        let state = if self.workspace.tree.show_hidden {
+            "shown"
+        } else {
+            "hidden"
+        };
+        self.set_status(format!("Dotfiles {state}"));
     }
 
     fn detect_language_for_active(&mut self) {
@@ -798,11 +881,18 @@ impl App {
             .commands
             .all()
             .iter()
-            .map(|command| PickerItem {
-                label: command.palette_label(),
-                detail: command.category.to_string(),
-                shortcut: command.shortcut.unwrap_or("").to_string(),
-                action: PickerAction::Command(command.id),
+            .map(|command| {
+                let (enabled, hint) = self.command_availability(command);
+                let mut item = PickerItem::new(
+                    command.palette_label(),
+                    command.description.to_string(),
+                    PickerAction::Command(command.id),
+                )
+                .shortcut(command.shortcut.unwrap_or(""));
+                if !enabled {
+                    item = item.disabled(hint.unwrap_or_else(|| "unavailable".to_string()));
+                }
+                item
             })
             .collect();
         let mut picker = Picker::new("Command Palette", "Type a command…", items);
@@ -810,10 +900,73 @@ impl App {
         self.overlay = Overlay::Picker(picker);
     }
 
+    /// Whether a command can run right now, and why not when it cannot.
+    fn command_availability(&self, command: &Command) -> (bool, Option<String>) {
+        let document = self.editor.active_document();
+        if command.needs_doc && document.is_none() {
+            return (false, Some("no file open".to_string()));
+        }
+        if let Some(capability) = command.capability {
+            let language = document
+                .map(|doc| doc.buffer.language)
+                .unwrap_or(LanguageId::Unknown);
+            if !self
+                .language
+                .provider(language)
+                .capabilities()
+                .contains(&capability)
+            {
+                return (
+                    false,
+                    Some(format!("not available for {}", language.name())),
+                );
+            }
+        }
+        match command.id {
+            ids::UNDO if !document.is_some_and(|doc| doc.can_undo()) => {
+                (false, Some("nothing to undo".to_string()))
+            }
+            ids::REDO if !document.is_some_and(|doc| doc.can_redo()) => {
+                (false, Some("nothing to redo".to_string()))
+            }
+            ids::COPY | ids::CUT if !document.is_some_and(|doc| doc.has_selection()) => {
+                (false, Some("nothing selected".to_string()))
+            }
+            ids::NEXT_TAB | ids::PREV_TAB if self.editor.len() < 2 => {
+                (false, Some("only one tab".to_string()))
+            }
+            ids::CLOSE_TAB | ids::CLOSE_ALL | ids::SAVE_ALL if self.editor.is_empty() => {
+                (false, Some("no files open".to_string()))
+            }
+            _ => (true, None),
+        }
+    }
+
     fn open_quick_open(&mut self) {
         let root = self.workspace.root().to_path_buf();
         let files = filesystem::collect_files(&root, 8000);
-        let items = files
+
+        // Recently-opened files come first, so Ctrl+P then Enter reopens the last
+        // file without typing.
+        let mut ordered: Vec<PathBuf> = Vec::new();
+        let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        for path in self.recent_files.iter().rev() {
+            let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+            if !seen.insert(canonical) {
+                continue;
+            }
+            if path.is_file() {
+                ordered.push(path.clone());
+            }
+        }
+        for path in files {
+            let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+            if seen.insert(canonical) {
+                ordered.push(path);
+            }
+        }
+
+        let items = ordered
             .into_iter()
             .map(|path| {
                 let label = path
@@ -826,12 +979,7 @@ impl App {
                     .unwrap_or(&path)
                     .display()
                     .to_string();
-                PickerItem {
-                    label,
-                    detail,
-                    shortcut: String::new(),
-                    action: PickerAction::OpenPath(path),
-                }
+                PickerItem::new(label, detail, PickerAction::OpenPath(path))
             })
             .collect();
         let mut picker = Picker::new("Quick Open", "Type a file name…", items);
@@ -1025,6 +1173,101 @@ mod tests {
         app.execute_command(ids::FOCUS_TREE);
         assert_eq!(app.focus, Focus::Editor);
 
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn palette_marks_unavailable_commands() {
+        let dir = temp_project("palette-avail");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+        app.execute_command(ids::PALETTE);
+
+        let Overlay::Picker(picker) = &app.overlay else {
+            panic!("expected the command palette");
+        };
+        let find = |needle: &str| {
+            (0..picker.filtered.len())
+                .filter_map(|index| picker.item(index))
+                .find(|item| item.label.contains(needle))
+        };
+
+        assert!(find("File: Save").expect("save").enabled);
+        assert!(
+            !find("Format Document").expect("format").enabled,
+            "formatting is not available for Rust yet"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn quick_open_lists_recent_files_first() {
+        let dir = temp_project("recents");
+        let a = dir.join("src/main.rs");
+        let b = dir.join("src/lib.rs");
+        fs::write(&b, "pub fn lib() {}\n").unwrap();
+
+        let mut app = App::new(Some(&a)).unwrap();
+        app.open_path(b.clone());
+        app.execute_command(ids::QUICK_OPEN);
+
+        let Overlay::Picker(picker) = &app.overlay else {
+            panic!("expected quick open");
+        };
+        let first = picker.item(0).expect("an item");
+        match &first.action {
+            PickerAction::OpenPath(path) => {
+                assert_eq!(path, &b.canonicalize().unwrap());
+            }
+            _ => panic!("expected a file"),
+        }
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn closing_a_dirty_tab_asks_first() {
+        let dir = temp_project("close-dirty");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .insert_text("// x\n");
+
+        app.execute_command(ids::CLOSE_TAB);
+        assert_eq!(app.editor.len(), 1, "the dirty tab should stay open");
+
+        app.execute_command(ids::CLOSE_TAB);
+        assert_eq!(app.editor.len(), 0, "the second press closes it");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn save_all_writes_every_dirty_file() {
+        let dir = temp_project("save-all");
+        let a = dir.join("src/main.rs");
+        let b = dir.join("src/lib.rs");
+        fs::write(&b, "pub fn f() {}\n").unwrap();
+
+        let mut app = App::new(Some(&a)).unwrap();
+        app.open_path(b.clone());
+        app.editor.documents[0].insert_text("// a\n");
+        app.editor.documents[1].insert_text("// b\n");
+
+        app.execute_command(ids::SAVE_ALL);
+        assert!(!app.editor.has_unsaved());
+        assert!(fs::read_to_string(&a).unwrap().starts_with("// a\n"));
+        assert!(fs::read_to_string(&b).unwrap().starts_with("// b\n"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn toggle_hidden_flips_tree_state() {
+        let dir = temp_project("hidden");
+        let mut app = App::new(Some(&dir)).unwrap();
+        assert!(!app.workspace.tree.show_hidden);
+        app.execute_command(ids::TOGGLE_HIDDEN);
+        assert!(app.workspace.tree.show_hidden);
         fs::remove_dir_all(&dir).ok();
     }
 }

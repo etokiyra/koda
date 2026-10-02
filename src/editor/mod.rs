@@ -110,6 +110,12 @@ impl Editor {
         self.documents.iter().any(|d| d.is_dirty())
     }
 
+    /// Close every tab.
+    pub fn close_all(&mut self) {
+        self.documents.clear();
+        self.active = 0;
+    }
+
     /// Save the active document, if it has a path.
     pub fn save_active(&mut self) -> std::io::Result<bool> {
         match self.active_document_mut() {

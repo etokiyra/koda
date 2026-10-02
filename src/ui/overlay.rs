@@ -82,7 +82,9 @@ pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
             continue;
         };
         let selected = index == picker.selected;
-        let label_style = if selected {
+        let label_style = if !item.enabled {
+            theme::muted()
+        } else if selected {
             theme::bright_bold()
         } else {
             theme::text()
@@ -93,10 +95,25 @@ pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
         } else {
             Span::raw("   ")
         };
+
+        // A disabled command shows why; an available one shows what it does.
+        let description = if item.enabled {
+            item.detail.as_str()
+        } else {
+            item.hint.as_deref().unwrap_or("")
+        };
+        let reserved = 3 + item.label.chars().count() + item.shortcut.chars().count() + 2;
+        let description = truncate(description, width.saturating_sub(reserved));
+
         let mut spans = vec![marker, Span::styled(item.label.clone(), label_style)];
-        if !item.detail.is_empty() {
+        if !description.is_empty() {
             spans.push(Span::styled("  ", theme::dim()));
-            spans.push(Span::styled(item.detail.clone(), theme::dim()));
+            let style = if item.enabled {
+                theme::dim()
+            } else {
+                theme::muted()
+            };
+            spans.push(Span::styled(description, style));
         }
 
         if !item.shortcut.is_empty() {
@@ -227,4 +244,20 @@ fn pad_line(spans: &mut Vec<Span<'static>>, width: u16) {
         " ".repeat(pad),
         Style::default().bg(theme::PANEL_BG),
     ));
+}
+
+/// Shorten text to `max` columns, appending an ellipsis when clipped.
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    if max == 0 {
+        return String::new();
+    }
+    if max == 1 {
+        return "…".to_string();
+    }
+    let mut out: String = text.chars().take(max - 1).collect();
+    out.push('…');
+    out
 }

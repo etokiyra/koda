@@ -18,6 +18,34 @@ pub struct PickerItem {
     pub detail: String,
     pub shortcut: String,
     pub action: PickerAction,
+    /// Whether the action can run right now.
+    pub enabled: bool,
+    /// Why the action is unavailable, when it is.
+    pub hint: Option<String>,
+}
+
+impl PickerItem {
+    pub fn new(label: impl Into<String>, detail: impl Into<String>, action: PickerAction) -> Self {
+        PickerItem {
+            label: label.into(),
+            detail: detail.into(),
+            shortcut: String::new(),
+            action,
+            enabled: true,
+            hint: None,
+        }
+    }
+
+    pub fn shortcut(mut self, shortcut: impl Into<String>) -> Self {
+        self.shortcut = shortcut.into();
+        self
+    }
+
+    pub fn disabled(mut self, hint: impl Into<String>) -> Self {
+        self.enabled = false;
+        self.hint = Some(hint.into());
+        self
+    }
 }
 
 /// A filterable list overlay, used for the command palette and quick open.
