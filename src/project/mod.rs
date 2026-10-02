@@ -124,7 +124,9 @@ impl Workspace {
         let start = start.canonicalize().unwrap_or(start);
         let project = Project::detect(&start);
         let tree = FileTree::new(&project.root);
-        let git = GitInfo::detect(&project.root);
+        // Git status is loaded by the background worker so startup never waits on
+        // a potentially slow `git status`.
+        let git = GitInfo::default();
         Ok(Workspace { project, tree, git })
     }
 
@@ -132,14 +134,9 @@ impl Workspace {
         &self.project.root
     }
 
-    /// Re-read the file tree and refresh git information.
+    /// Re-read the file tree.
     pub fn refresh(&mut self) {
         self.tree.refresh();
-        self.git = GitInfo::detect(&self.project.root);
-    }
-
-    pub fn refresh_git(&mut self) {
-        self.git = GitInfo::detect(&self.project.root);
     }
 
     pub fn marker_names(&self) -> Vec<String> {

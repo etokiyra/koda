@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- Added a background worker thread. Language detection and git status now run
+  off the UI thread and their results are applied as they arrive, so opening a
+  file, saving, or starting Koda never waits on `git status` or disk reads.
+  This is the foundation for asynchronous language intelligence (diagnostics,
+  completion, and so on).
+- Koda repaints only when input arrives, background work completes, a status
+  message expires, or the terminal is resized.
+
 ### Editing & UX
 
 - Undo grouping: consecutive typing, backspacing and forward-deletes coalesce

@@ -20,6 +20,7 @@
 //! * [`git`] — lightweight git integration.
 
 pub mod app;
+pub mod background;
 pub mod commands;
 pub mod editor;
 pub mod filesystem;

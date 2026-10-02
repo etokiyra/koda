@@ -7,11 +7,13 @@ pub mod overlay;
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::DefaultTerminal;
 
+use crate::background::{Background, Event as BackgroundEvent};
 use crate::commands::{Command, CommandRegistry, ids};
 use crate::editor::{Document, Editor, Position, Selection};
 use crate::filesystem;
@@ -40,7 +42,8 @@ pub struct Status {
 pub struct App {
     pub workspace: Workspace,
     pub editor: Editor,
-    pub language: LanguageService,
+    pub language: Arc<LanguageService>,
+    background: Background,
     pub commands: CommandRegistry,
     pub overlay: Overlay,
     pub search: Search,
@@ -70,11 +73,14 @@ impl App {
 
     /// Build the application state for a target path.
     pub fn new(target: Option<&std::path::Path>) -> io::Result<Self> {
+        let language = Arc::new(LanguageService::builtin());
+        let background = Background::spawn(Arc::clone(&language));
         let workspace = Workspace::open(target)?;
         let mut app = App {
             workspace,
             editor: Editor::new(),
-            language: LanguageService::builtin(),
+            language,
+            background,
             commands: CommandRegistry::builtin(),
             overlay: Overlay::None,
             search: Search::default(),
@@ -94,16 +100,21 @@ impl App {
         {
             app.open_path(path.to_path_buf());
         }
+        app.request_git_refresh();
+        // Apply the initial detection and git snapshot before the first frame so
+        // startup is deterministic.
+        app.pump_background(Duration::from_millis(300));
         Ok(app)
     }
 
     fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         let mut needs_redraw = true;
         while !self.should_quit {
-            // Only repaint when something changed: input arrived, a status
-            // message expired, or the terminal was resized. An idle Koda does no
-            // work at all.
-            if needs_redraw || self.tick_status() {
+            // Only repaint when something changed: input arrived, background
+            // work completed, a status message expired, or the terminal was
+            // resized. An idle Koda does no work at all.
+            let background_changed = self.apply_background_events();
+            if needs_redraw || background_changed || self.tick_status() {
                 terminal.draw(|frame| ui::render(frame, self))?;
                 needs_redraw = false;
             }
@@ -656,7 +667,7 @@ impl App {
     pub fn open_path(&mut self, path: PathBuf) {
         match self.editor.open_path(&path) {
             Ok(_) => {
-                self.detect_language_for_active();
+                self.request_detection_for_active();
                 self.workspace.tree.select_path(&path);
                 self.focus = Focus::Editor;
                 self.close_armed = None;
@@ -690,7 +701,7 @@ impl App {
         }
         match self.editor.save_active() {
             Ok(true) => {
-                self.workspace.refresh_git();
+                self.request_git_refresh();
                 self.quit_armed = false;
                 self.set_status("Saved");
             }
@@ -706,8 +717,8 @@ impl App {
             .map(|doc| doc.buffer.save_as(&path));
         match result {
             Some(Ok(true)) => {
-                self.detect_language_for_active();
-                self.workspace.refresh_git();
+                self.request_detection_for_active();
+                self.request_git_refresh();
                 self.set_status(format!("Saved {}", path.display()));
             }
             Some(Err(err)) => self.set_error(format!("Save failed: {err}")),
@@ -763,7 +774,7 @@ impl App {
             return;
         }
         if saved > 0 {
-            self.workspace.refresh_git();
+            self.request_git_refresh();
             self.quit_armed = false;
             self.set_status(format!("Saved {saved} file(s)"));
         } else {
@@ -781,14 +792,70 @@ impl App {
         self.set_status(format!("Dotfiles {state}"));
     }
 
-    fn detect_language_for_active(&mut self) {
+    /// Ask the background worker to detect the active file's language.
+    fn request_detection_for_active(&mut self) {
         let markers = self.workspace.marker_names();
-        if let Some(doc) = self.editor.active_document_mut()
-            && let Some(path) = doc.buffer.path.clone()
+        if let Some(path) = self
+            .editor
+            .active_document()
+            .and_then(|doc| doc.buffer.path.clone())
         {
-            let result = self.language.detect_file(&path, &markers);
-            doc.set_language(result.language);
+            self.background.detect(path, markers);
         }
+    }
+
+    /// Ask the background worker to refresh git status.
+    fn request_git_refresh(&self) {
+        self.background
+            .refresh_git(self.workspace.root().to_path_buf());
+    }
+
+    /// Apply any finished background work. Returns `true` if something changed.
+    fn apply_background_events(&mut self) -> bool {
+        let mut changed = false;
+        while let Some(event) = self.background.try_recv() {
+            changed |= self.apply_background_event(event);
+        }
+        changed
+    }
+
+    fn apply_background_event(&mut self, event: BackgroundEvent) -> bool {
+        match event {
+            BackgroundEvent::Detected { path, language, .. } => {
+                if let Some(doc) = self
+                    .editor
+                    .documents
+                    .iter_mut()
+                    .find(|doc| same_file(doc.buffer.path.as_deref(), &path))
+                {
+                    doc.set_language(language);
+                    return true;
+                }
+                false
+            }
+            BackgroundEvent::Git(info) => {
+                self.workspace.git = info;
+                true
+            }
+        }
+    }
+
+    /// Wait up to `timeout` for startup background work to settle.
+    fn pump_background(&mut self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match self.background.recv_timeout(remaining) {
+                Some(event) => {
+                    self.apply_background_event(event);
+                }
+                None => break,
+            }
+        }
+        self.apply_background_events();
     }
 
     // ----------------------------------------------------------------------
@@ -1103,6 +1170,16 @@ impl App {
             Some(self.status.message.as_str())
         }
     }
+}
+
+/// Whether two optional/actual paths refer to the same file.
+fn same_file(a: Option<&Path>, b: &Path) -> bool {
+    let Some(a) = a else {
+        return false;
+    };
+    let a = a.canonicalize().unwrap_or_else(|_| a.to_path_buf());
+    let b = b.canonicalize().unwrap_or_else(|_| b.to_path_buf());
+    a == b
 }
 
 #[cfg(test)]
