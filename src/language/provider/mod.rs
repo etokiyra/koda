@@ -1,0 +1,193 @@
+//! Language provider abstraction.
+//!
+//! A [`LanguageProvider`] bundles everything Koda knows about supporting one
+//! language: how to recognise it, how to highlight it, and which capabilities it
+//! offers. Language-specific logic lives here — never in the editor core.
+
+use std::collections::HashMap;
+use std::ops::Range;
+
+use crate::language::detection::LanguageDescriptor;
+use crate::language::id::LanguageId;
+
+/// A feature a provider may offer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Capability {
+    SyntaxHighlighting,
+    Completion,
+    Diagnostics,
+    Hover,
+    GotoDefinition,
+    GotoReference,
+    DocumentSymbols,
+    Rename,
+    Formatting,
+    CodeActions,
+}
+
+impl Capability {
+    pub fn label(self) -> &'static str {
+        match self {
+            Capability::SyntaxHighlighting => "syntax",
+            Capability::Completion => "completion",
+            Capability::Diagnostics => "diagnostics",
+            Capability::Hover => "hover",
+            Capability::GotoDefinition => "go-to-definition",
+            Capability::GotoReference => "references",
+            Capability::DocumentSymbols => "symbols",
+            Capability::Rename => "rename",
+            Capability::Formatting => "formatting",
+            Capability::CodeActions => "code actions",
+        }
+    }
+}
+
+/// Lexical category attached to a highlighted span.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenKind {
+    Plain,
+    Keyword,
+    Type,
+    Function,
+    String,
+    Number,
+    Comment,
+    Macro,
+    Constant,
+    Operator,
+    Attribute,
+}
+
+/// A highlighted region, measured in **characters** relative to the line start.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HighlightSpan {
+    pub range: Range<usize>,
+    pub kind: TokenKind,
+}
+
+impl HighlightSpan {
+    pub fn new(start: usize, end: usize, kind: TokenKind) -> Self {
+        HighlightSpan {
+            range: start..end,
+            kind,
+        }
+    }
+}
+
+/// Carry-over state for multi-line constructs such as block comments.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HighlightState {
+    pub in_block_comment: bool,
+}
+
+/// The contract every language implementation fulfils.
+pub trait LanguageProvider: Send + Sync {
+    fn id(&self) -> LanguageId;
+    fn display_name(&self) -> &'static str;
+
+    /// The detection descriptor for this language.
+    fn descriptor(&self) -> LanguageDescriptor;
+
+    /// Capabilities this provider currently offers.
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::SyntaxHighlighting]
+    }
+
+    /// Highlight a single line, given the state carried in from the previous line.
+    ///
+    /// Returns the spans for this line and the state to carry into the next one.
+    fn highlight(&self, line: &str, state: HighlightState) -> (Vec<HighlightSpan>, HighlightState);
+
+    /// The comment marker used by "toggle comment" and friends.
+    fn line_comment(&self) -> &'static str {
+        "//"
+    }
+}
+
+/// A minimal provider used for files Koda does not yet recognise.
+pub struct PlainTextProvider;
+
+impl LanguageProvider for PlainTextProvider {
+    fn id(&self) -> LanguageId {
+        LanguageId::Unknown
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Plain Text"
+    }
+
+    fn descriptor(&self) -> LanguageDescriptor {
+        LanguageDescriptor {
+            id: LanguageId::Unknown,
+            extensions: &[],
+            project_markers: &[],
+            file_names: &[],
+            shebangs: &[],
+            content_hints: &[],
+        }
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[]
+    }
+
+    fn highlight(
+        &self,
+        _line: &str,
+        state: HighlightState,
+    ) -> (Vec<HighlightSpan>, HighlightState) {
+        (Vec::new(), state)
+    }
+}
+
+/// Owns every registered provider and resolves language ids to implementations.
+pub struct ProviderRegistry {
+    providers: HashMap<LanguageId, Box<dyn LanguageProvider>>,
+}
+
+impl ProviderRegistry {
+    /// The registry Koda ships with. This is the single place where built-in
+    /// languages are wired in.
+    pub fn builtin() -> Self {
+        let mut registry = ProviderRegistry {
+            providers: HashMap::new(),
+        };
+        registry.register(Box::new(PlainTextProvider));
+        registry.register(Box::new(crate::language::rust::RustProvider));
+        registry.register(Box::new(crate::language::go::GoProvider));
+        registry
+    }
+
+    pub fn register(&mut self, provider: Box<dyn LanguageProvider>) {
+        self.providers.insert(provider.id(), provider);
+    }
+
+    /// Resolve a language to its provider, falling back to plain text.
+    pub fn get(&self, id: LanguageId) -> &dyn LanguageProvider {
+        match self.providers.get(&id) {
+            Some(provider) => provider.as_ref(),
+            None => self
+                .providers
+                .get(&LanguageId::Unknown)
+                .map(|p| p.as_ref())
+                .expect("plain text provider must always be registered"),
+        }
+    }
+
+    pub fn get_opt(&self, id: LanguageId) -> Option<&dyn LanguageProvider> {
+        self.providers.get(&id).map(|p| p.as_ref())
+    }
+
+    /// Descriptors for every real provider, used to build the detection engine.
+    pub fn descriptors(&self) -> Vec<LanguageDescriptor> {
+        self.providers
+            .values()
+            .filter(|p| p.id() != LanguageId::Unknown)
+            .map(|p| p.descriptor())
+            .collect()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &dyn LanguageProvider> {
+        self.providers.values().map(|p| p.as_ref())
+    }
+}

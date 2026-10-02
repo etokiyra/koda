@@ -1,0 +1,25 @@
+[package]
+name = "koda"
+version = "0.1.0"
+edition = "2024"
+description = "A modern, lightweight, terminal-native IDE"
+license = "MIT"
+default-run = "koda"
+
+[lib]
+name = "koda"
+path = "src/lib.rs"
+
+[[bin]]
+name = "koda"
+path = "src/main.rs"
+
+[dependencies]
+crossterm = "0.29.0"
+ratatui = "0.30.2"
+ropey = "1.6.1"
+unicode-width = "0.2.2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
