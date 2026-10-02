@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   navigation and Enter to open.
 - Find prefills from a single-line selection and starts at the first match at
   or after the cursor instead of always jumping to the top of the file.
+- The statusline shows the size of the current selection (characters or lines).
 - Find searches line by line instead of copying the whole file on every
   keystroke, and Koda now only repaints when something actually changes.
 

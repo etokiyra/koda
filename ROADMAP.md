@@ -44,8 +44,10 @@ then expand
 
 The highest-value work. These turn Koda from an editor into an IDE.
 
-- [ ] **Asynchronous language work.** Introduce a worker/event channel so
-      language operations never block the UI. All items below depend on this.
+- [x] **Asynchronous language work (foundation).** A background worker thread with
+      a request/event channel now runs language detection and git status off the
+      UI thread; the event loop applies results as they arrive. Language
+      intelligence will reuse this channel.
 - [ ] **Diagnostics pipeline.** Provider → diagnostics store → inline markers and
       a diagnostics list.
 - [ ] **Completion.** A completion popup driven by providers, with filtering and
@@ -66,8 +68,10 @@ command palette already reports which are available. Filling them in is additive
 
 ## Then — deepen the editing experience
 
+- [x] Bracket matching and auto-closing pairs.
+- [x] Selection-aware indentation, line move/duplicate, and grouped undo.
+- [x] Inline fuzzy file filtering in the sidebar.
 - [ ] Multiple cursors.
-- [ ] Bracket matching and auto-closing pairs.
 - [ ] Indentation guides and a more complete tokenizer (strings, lifetimes,
       generics) for both providers.
 - [ ] Incremental search options (case sensitivity, whole word, regex).

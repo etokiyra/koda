@@ -71,10 +71,16 @@ Implemented:
 - A contextual, confidence-based language **detection engine** that combines
   project markers, extensions, file names, shebangs and content signals.
 - A command palette, quick open, find/replace, go-to-line and file open.
+- IDE editing behaviour: grouped undo, auto-pairing, smart newline,
+  selection-aware indent/outdent, line move/duplicate and bracket matching.
+- An inline fuzzy file filter in the sidebar, tab overflow scrolling and
+  name disambiguation.
 - Lightweight git integration (branch + per-file status, via the `git` binary).
 - A distinctive Mellow-based visual identity: a semantic theme layer, an
   adaptive ASCII welcome scene, the Koda familiar and personality-rich empty
   states — all transparency-friendly.
+- A background worker keeps language detection and git off the UI thread, and
+  Koda repaints only when something changes.
 - A clean provider/registry abstraction that makes adding a language
   straightforward.
 
@@ -124,13 +130,19 @@ and establishes language context automatically.
 | `Ctrl+A` | Select all |
 | `Ctrl+B` | Toggle file tree |
 | `Ctrl+E` | Focus file tree / editor |
-| `Ctrl+W` | Close tab |
+| `Ctrl+W` | Close tab (press twice to discard unsaved changes) |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+/` | Toggle comment |
+| `Tab` / `Shift+Tab` | Indent / outdent selection |
+| `Alt+↑` / `Alt+↓` | Move line up / down |
+| `Ctrl+Shift+D` | Duplicate line |
+| `/` (in the tree) | Filter project files |
+| `.` (in the tree) | Toggle hidden files |
 
 Editor keys behave as you would expect: arrows, `Home`/`End`, `PageUp`/`PageDown`,
-`Shift`+arrows to select, `Ctrl`+arrows for word movement, and `Tab` inserts
-indentation. Typing with a selection replaces it.
+`Shift`+arrows to select, `Ctrl`+arrows for word movement. Typing with a
+selection replaces it, brackets and quotes pair up, and consecutive typing
+undoes as one step.
 
 ## Architecture
 
@@ -148,11 +160,13 @@ src/
 │   └── go/       # Go provider
 ├── project/      # workspace, project detection, file tree
 ├── terminal/     # terminal lifecycle + OSC 52 clipboard
+├── background.rs # worker thread for detection, git, and future language work
 └── ui/           # rendering for every surface
 ```
 
 The guiding rule: **language-specific logic never leaks into the editor or UI**.
 Detection answers *what is this file*; providers answer *how do we support it*.
+Expensive work runs on a background worker so the UI never blocks on it.
 
 See [`AGENTS.md`](AGENTS.md) for the full architecture and conventions.
 

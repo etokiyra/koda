@@ -38,6 +38,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             ));
         }
 
+        if let Some(selected) = doc.selected_text() {
+            let lines = selected.matches('\n').count() + 1;
+            let label = if lines > 1 {
+                format!("  {lines} lines")
+            } else {
+                format!("  {} sel", selected.chars().count())
+            };
+            spans.push(Span::styled(
+                label,
+                Style::default().fg(theme::ACCENT).bg(theme::PANEL_BG),
+            ));
+        }
+
         if app.workspace.git.available
             && let Some(branch) = app.workspace.git.branch_label()
         {

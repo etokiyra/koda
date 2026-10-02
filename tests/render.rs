@@ -240,3 +240,24 @@ fn tree_filter_lists_matching_files() {
     );
     cleanup(&dir);
 }
+
+#[test]
+fn statusline_shows_selection_size() {
+    let dir = temp_project("selection-status");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    {
+        let doc = app.editor.active_document_mut().unwrap();
+        doc.selection = Some(koda::editor::Selection::new(koda::editor::Position::new(
+            0, 0,
+        )));
+        doc.cursor = koda::editor::Position::new(0, 5);
+    }
+
+    let screen = draw_at(&mut app, 100, 20);
+    assert!(
+        screen.contains("sel"),
+        "the selection size should be visible:\n{screen}"
+    );
+    cleanup(&dir);
+}
