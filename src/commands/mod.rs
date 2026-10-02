@@ -31,6 +31,7 @@ pub mod ids {
     pub const CODE_ACTIONS: &str = "language.codeActions";
 
     pub const TOGGLE_TREE: &str = "view.toggleTree";
+    pub const FOCUS_TREE: &str = "view.focusTree";
     pub const NEXT_TAB: &str = "view.nextTab";
     pub const PREV_TAB: &str = "view.previousTab";
     pub const PALETTE: &str = "view.commandPalette";
@@ -114,6 +115,12 @@ impl CommandRegistry {
                 Some("Ctrl+."),
             ),
             c(ids::TOGGLE_TREE, "Toggle File Tree", "View", Some("Ctrl+B")),
+            c(
+                ids::FOCUS_TREE,
+                "Focus File Tree / Editor",
+                "View",
+                Some("Ctrl+E"),
+            ),
             c(ids::NEXT_TAB, "Next Tab", "View", Some("Ctrl+Tab")),
             c(
                 ids::PREV_TAB,

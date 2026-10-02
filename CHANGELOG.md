@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Ctrl+Shift+P` command palette, `Ctrl+F` find, `Ctrl+H` replace,
   `Ctrl+G` go to line, `Ctrl+Z`/`Ctrl+Shift+Z` undo/redo, `Ctrl+A` select all,
   `Ctrl+C`/`Ctrl+X`/`Ctrl+V` clipboard, `Ctrl+B` toggle file tree,
-  `Ctrl+W` close tab, `Ctrl+Tab`/`Ctrl+Shift+Tab` tabs, `Ctrl+/` toggle comment.
+  `Ctrl+E` focus file tree, `Ctrl+W` close tab, `Ctrl+Tab`/`Ctrl+Shift+Tab`
+  tabs, `Ctrl+/` toggle comment.
 
 [Unreleased]: https://example.com/koda/compare/main...HEAD

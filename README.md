@@ -96,6 +96,7 @@ and establishes language context automatically.
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
 | `Ctrl+A` | Select all |
 | `Ctrl+B` | Toggle file tree |
+| `Ctrl+E` | Focus file tree / editor |
 | `Ctrl+W` | Close tab |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+/` | Toggle comment |

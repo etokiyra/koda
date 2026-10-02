@@ -152,6 +152,7 @@ impl App {
                     ('h', _) => self.open_search(true),
                     ('g', _) => self.execute_command(ids::GOTO_LINE),
                     ('b', _) => self.toggle_tree(),
+                    ('e', _) => self.focus_tree(),
                     ('w', _) => self.execute_command(ids::CLOSE_TAB),
                     _ => return false,
                 }
@@ -417,6 +418,7 @@ impl App {
             ids::GOTO_LINE => self.open_prompt(PromptKind::GotoLine, "Go to line", "42"),
             ids::TOGGLE_COMMENT => self.toggle_comment(),
             ids::TOGGLE_TREE => self.toggle_tree(),
+            ids::FOCUS_TREE => self.focus_tree(),
             ids::NEXT_TAB => self.editor.next_tab(),
             ids::PREV_TAB => self.editor.previous_tab(),
             ids::PALETTE => self.open_command_palette(),
@@ -836,6 +838,20 @@ impl App {
         };
     }
 
+    /// Move keyboard focus to the file tree, showing it first if needed. If the
+    /// tree already has focus, return to the editor.
+    fn focus_tree(&mut self) {
+        if !self.tree_visible {
+            self.tree_visible = true;
+            self.focus = Focus::FileTree;
+        } else {
+            self.focus = match self.focus {
+                Focus::FileTree => Focus::Editor,
+                Focus::Editor => Focus::FileTree,
+            };
+        }
+    }
+
     fn request_quit(&mut self) {
         if self.editor.has_unsaved() && !self.quit_armed {
             self.quit_armed = true;
@@ -976,6 +992,21 @@ mod tests {
         let mut app = App::new(Some(&file)).unwrap();
         app.execute_command(ids::PALETTE);
         assert!(!app.overlay.is_none());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn focus_tree_command_toggles_focus() {
+        let dir = temp_project("focus");
+        let mut app = App::new(Some(&dir)).unwrap();
+        assert_eq!(app.focus, Focus::Editor);
+
+        app.execute_command(ids::FOCUS_TREE);
+        assert_eq!(app.focus, Focus::FileTree);
+
+        app.execute_command(ids::FOCUS_TREE);
+        assert_eq!(app.focus, Focus::Editor);
+
         fs::remove_dir_all(&dir).ok();
     }
 }

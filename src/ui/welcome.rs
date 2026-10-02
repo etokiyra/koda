@@ -23,6 +23,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         shortcut("Ctrl+Shift+P", "Command palette"),
         shortcut("Ctrl+O", "Open file"),
         shortcut("Ctrl+B", "Toggle file tree"),
+        shortcut("Ctrl+E", "Focus file tree"),
         shortcut("Ctrl+F", "Find"),
         Line::from(""),
         Line::from(Span::styled(
