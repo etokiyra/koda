@@ -219,15 +219,17 @@ impl App {
                         'c' => self.copy(),
                         'x' => self.cut(),
                         'v' => self.paste(),
+                        'd' if shift => self.with_doc(|d| d.duplicate_line()),
                         '/' => self.toggle_comment(),
                         _ => {}
                     }
                 } else if !alt {
-                    self.with_doc(|d| d.insert_char(c));
+                    self.with_doc(|d| d.type_char(c));
                 }
             }
             KeyCode::Enter => self.with_doc(|d| d.insert_newline()),
-            KeyCode::Tab => self.with_doc(|d| d.insert_text("    ")),
+            KeyCode::Tab => self.with_doc(|d| d.indent()),
+            KeyCode::BackTab => self.with_doc(|d| d.outdent()),
             KeyCode::Backspace => self.with_doc(|d| d.backspace()),
             KeyCode::Delete => self.with_doc(|d| d.delete_forward()),
             KeyCode::Left => self.with_doc(|d| {
@@ -244,8 +246,24 @@ impl App {
                     d.move_right(shift);
                 }
             }),
-            KeyCode::Up => self.with_doc(|d| d.move_up(shift)),
-            KeyCode::Down => self.with_doc(|d| d.move_down(shift)),
+            KeyCode::Up => {
+                if alt {
+                    self.with_doc(|d| d.move_line_up());
+                } else {
+                    self.with_doc(|d| d.move_up(shift));
+                }
+            }
+            KeyCode::Down => {
+                if alt {
+                    if shift {
+                        self.with_doc(|d| d.duplicate_line());
+                    } else {
+                        self.with_doc(|d| d.move_line_down());
+                    }
+                } else {
+                    self.with_doc(|d| d.move_down(shift));
+                }
+            }
             KeyCode::Home => self.with_doc(|d| {
                 if ctrl {
                     d.move_document_start(shift);

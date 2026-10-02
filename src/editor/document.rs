@@ -4,10 +4,13 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::editor::buffer::{Buffer, LineEnding};
-use crate::editor::history::{Edit, History};
+use crate::editor::history::{Coalesce, Edit, History};
 use crate::editor::position::{Position, Selection};
 use crate::language::id::LanguageId;
 use crate::language::provider::{HighlightSpan, HighlightState, LanguageProvider, TokenKind};
+
+/// The number of columns one level of indentation represents.
+pub const INDENT_WIDTH: usize = 4;
 
 /// One open file.
 pub struct Document {
@@ -70,6 +73,17 @@ impl Document {
     /// The core edit primitive. Replaces the text between `start` and `end` with
     /// `inserted`, recording a single reversible [`Edit`].
     fn apply_edit(&mut self, start: Position, end: Position, inserted: &str) {
+        self.apply_edit_coalesced(start, end, inserted, None);
+    }
+
+    /// Like [`apply_edit`], but hints how the edit may merge with the previous one.
+    fn apply_edit_coalesced(
+        &mut self,
+        start: Position,
+        end: Position,
+        inserted: &str,
+        coalesce: Option<Coalesce>,
+    ) {
         let start = self.buffer.clamp_position(start);
         let end = self.buffer.clamp_position(end);
         let (a, b) = if start <= end {
@@ -98,6 +112,7 @@ impl Document {
             inserted,
             cursor_before: self.cursor,
             cursor_after,
+            coalesce,
         });
         self.cursor = cursor_after;
         self.selection = None;
@@ -112,7 +127,50 @@ impl Document {
     }
 
     pub fn insert_char(&mut self, c: char) {
-        self.insert_text(&c.to_string());
+        let (start, end) = self.selection_range().unwrap_or((self.cursor, self.cursor));
+        self.apply_edit_coalesced(start, end, &c.to_string(), Some(Coalesce::Insert));
+    }
+
+    /// Type a character, applying automatic pairing where it helps.
+    ///
+    /// Typing a closing bracket or double quote that is already under the cursor
+    /// skips over it rather than inserting a duplicate.
+    pub fn type_char(&mut self, c: char) {
+        if (is_close_bracket(c) || c == '"') && self.char_at(self.cursor) == Some(c) {
+            if let Some(next) = self.next_pos(self.cursor) {
+                self.set_cursor(next, false);
+            }
+            return;
+        }
+
+        if let Some(close) = matching_close(c) {
+            // Wrap a selection: `(selected)`.
+            if let Some((start, end)) = self.selection_range() {
+                let selected = self
+                    .buffer
+                    .as_rope()
+                    .slice(self.buffer.position_to_char(start)..self.buffer.position_to_char(end))
+                    .to_string();
+                let text = format!("{c}{selected}{close}");
+                self.apply_edit(start, end, &text);
+                let after = start.advanced_by(&text);
+                self.cursor = Position::new(after.row, after.col.saturating_sub(1));
+                return;
+            }
+
+            // Insert a pair when the cursor sits at a natural boundary.
+            let boundary = self.char_at(self.cursor).is_none_or(|next| {
+                next.is_whitespace() || is_close_bracket(next) || next == ';' || next == ','
+            });
+            if boundary {
+                let text = format!("{c}{close}");
+                self.apply_edit(self.cursor, self.cursor, &text);
+                self.cursor = Position::new(self.cursor.row, self.cursor.col.saturating_sub(1));
+                return;
+            }
+        }
+
+        self.insert_char(c);
     }
 
     pub fn insert_text(&mut self, text: &str) {
@@ -121,9 +179,36 @@ impl Document {
     }
 
     pub fn insert_newline(&mut self) {
-        // Auto-indent: keep the current line's leading whitespace.
         let line = self.buffer.line_text(self.cursor.row);
-        let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+        let leading: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+        let before: String = line.chars().take(self.cursor.col).collect();
+        let after = self.char_at(self.cursor);
+
+        // Expanding an empty pair: `{|}` becomes a three-line indented block.
+        if let Some(open) = before.chars().last().filter(|c| is_open_bracket(*c))
+            && after == matching_close(open)
+        {
+            let outer = leading;
+            let inner = format!("{outer}{}", " ".repeat(INDENT_WIDTH));
+            let text = format!("\n{inner}\n{outer}");
+            self.apply_edit(self.cursor, self.cursor, &text);
+            self.cursor = Position::new(self.cursor.row.saturating_sub(1), inner.chars().count());
+            return;
+        }
+
+        // Otherwise keep the indentation, deepening after an opening bracket.
+        let mut indent = if line.trim().is_empty() && self.cursor.row > 0 {
+            self.buffer
+                .line_text(self.cursor.row - 1)
+                .chars()
+                .take_while(|c| c.is_whitespace())
+                .collect::<String>()
+        } else {
+            leading
+        };
+        if before.trim_end().ends_with(['{', '(', '[']) {
+            indent.push_str(&" ".repeat(INDENT_WIDTH));
+        }
         let text = format!("\n{indent}");
         let (start, end) = self.selection_range().unwrap_or((self.cursor, self.cursor));
         self.apply_edit(start, end, &text);
@@ -134,12 +219,23 @@ impl Document {
             return;
         }
         if self.cursor.col > 0 {
+            let before = self.char_at(Position::new(self.cursor.row, self.cursor.col - 1));
+            let at = self.char_at(self.cursor);
+            // Deleting into an empty pair removes both halves.
+            if let (Some(open), Some(close)) = (before, at)
+                && matching_close(open) == Some(close)
+            {
+                let start = Position::new(self.cursor.row, self.cursor.col - 1);
+                let end = Position::new(self.cursor.row, self.cursor.col + 1);
+                self.apply_edit(start, end, "");
+                return;
+            }
             let start = Position::new(self.cursor.row, self.cursor.col - 1);
-            self.apply_edit(start, self.cursor, "");
+            self.apply_edit_coalesced(start, self.cursor, "", Some(Coalesce::DeleteBackward));
         } else if self.cursor.row > 0 {
             let prev_row = self.cursor.row - 1;
             let start = Position::new(prev_row, self.buffer.line_char_len(prev_row));
-            self.apply_edit(start, self.cursor, "");
+            self.apply_edit_coalesced(start, self.cursor, "", Some(Coalesce::DeleteBackward));
         }
     }
 
@@ -150,10 +246,10 @@ impl Document {
         let line_len = self.buffer.line_char_len(self.cursor.row);
         if self.cursor.col < line_len {
             let end = Position::new(self.cursor.row, self.cursor.col + 1);
-            self.apply_edit(self.cursor, end, "");
+            self.apply_edit_coalesced(self.cursor, end, "", Some(Coalesce::DeleteForward));
         } else if self.cursor.row + 1 < self.buffer.len_lines() {
             let end = Position::new(self.cursor.row + 1, 0);
-            self.apply_edit(self.cursor, end, "");
+            self.apply_edit_coalesced(self.cursor, end, "", Some(Coalesce::DeleteForward));
         }
     }
 
@@ -166,6 +262,160 @@ impl Document {
             }
             None => false,
         }
+    }
+
+    // ----------------------------------------------------------------------
+    // Indentation and line operations
+    // ----------------------------------------------------------------------
+
+    /// Indent the selected lines, or insert one indentation step at the cursor.
+    pub fn indent(&mut self) {
+        match self.selection_range() {
+            Some((start, end)) => self.reindent_lines(start.row, end.row, true),
+            None => self.insert_tab(),
+        }
+    }
+
+    /// Outdent the selected lines, or one step on the current line.
+    pub fn outdent(&mut self) {
+        let (start, end) = self.selection_range().unwrap_or((self.cursor, self.cursor));
+        self.reindent_lines(start.row, end.row, false);
+    }
+
+    fn insert_tab(&mut self) {
+        let spaces = INDENT_WIDTH - (self.cursor.col % INDENT_WIDTH);
+        self.apply_edit(self.cursor, self.cursor, &" ".repeat(spaces));
+    }
+
+    fn reindent_lines(&mut self, from_row: usize, to_row: usize, increase: bool) {
+        let last = self.buffer.len_lines().saturating_sub(1);
+        let from_row = from_row.min(last);
+        let to_row = to_row.min(last).max(from_row);
+        let newline = self.buffer.newline();
+
+        let mut changed = false;
+        let lines: Vec<String> = (from_row..=to_row)
+            .map(|row| {
+                let line = self.buffer.line_text(row);
+                if increase {
+                    if line.trim().is_empty() {
+                        line
+                    } else {
+                        changed = true;
+                        format!("{}{line}", " ".repeat(INDENT_WIDTH))
+                    }
+                } else {
+                    let remove = leading_outdent(&line);
+                    if remove > 0 {
+                        changed = true;
+                        line.chars().skip(remove).collect()
+                    } else {
+                        line
+                    }
+                }
+            })
+            .collect();
+        if !changed {
+            return;
+        }
+
+        let block = lines.join(newline);
+        let start = Position::new(from_row, 0);
+        let end = Position::new(to_row, self.buffer.line_char_len(to_row));
+        self.apply_edit(start, end, &block);
+
+        // Keep the affected lines selected so repeated indent/outdent works.
+        let end_col = self.buffer.line_char_len(to_row);
+        self.selection = Some(Selection::new(Position::new(from_row, 0)));
+        self.cursor = Position::new(to_row, end_col);
+        self.preferred_col = None;
+        self.history.break_coalesce();
+    }
+
+    /// Move the current line (or selected lines) up one row.
+    pub fn move_line_up(&mut self) {
+        self.move_lines(-1);
+    }
+
+    /// Move the current line (or selected lines) down one row.
+    pub fn move_line_down(&mut self) {
+        self.move_lines(1);
+    }
+
+    fn move_lines(&mut self, direction: i32) {
+        let last = self.buffer.len_lines().saturating_sub(1);
+        let (start_row, end_row) = match self.selection_range() {
+            Some((start, end)) => (start.row.min(last), end.row.min(last)),
+            None => {
+                let row = self.cursor.row.min(last);
+                (row, row)
+            }
+        };
+        let newline = self.buffer.newline();
+        let col = self.cursor.col;
+
+        if direction < 0 {
+            if start_row == 0 {
+                return;
+            }
+            let target = start_row - 1;
+            let above = self.buffer.line_text(target);
+            let mut lines: Vec<String> = (start_row..=end_row)
+                .map(|row| self.buffer.line_text(row))
+                .collect();
+            lines.push(above);
+
+            let start = Position::new(target, 0);
+            let end = Position::new(end_row, self.buffer.line_char_len(end_row));
+            self.apply_edit(start, end, &lines.join(newline));
+
+            let first = start_row - 1;
+            let last_row = end_row - 1;
+            self.place_after_line_move(first, last_row, col);
+        } else {
+            let below = end_row + 1;
+            if below > last {
+                return;
+            }
+            let below_text = self.buffer.line_text(below);
+            let lines: Vec<String> = (start_row..=end_row)
+                .map(|row| self.buffer.line_text(row))
+                .collect();
+            let block = format!("{below_text}{newline}{}", lines.join(newline));
+
+            let start = Position::new(start_row, 0);
+            let end = Position::new(below, self.buffer.line_char_len(below));
+            self.apply_edit(start, end, &block);
+
+            self.place_after_line_move(start_row + 1, end_row + 1, col);
+        }
+    }
+
+    fn place_after_line_move(&mut self, first_row: usize, last_row: usize, col: usize) {
+        if self.selection.is_some() {
+            self.selection = Some(Selection::new(Position::new(first_row, 0)));
+            self.cursor = Position::new(last_row, col);
+        } else {
+            self.cursor = Position::new(first_row, col);
+            self.selection = None;
+        }
+        self.preferred_col = None;
+        self.history.break_coalesce();
+    }
+
+    /// Duplicate the current line below itself.
+    pub fn duplicate_line(&mut self) {
+        let last = self.buffer.len_lines().saturating_sub(1);
+        let row = self.cursor.row.min(last);
+        let text = self.buffer.line_text(row);
+        let end = Position::new(row, self.buffer.line_char_len(row));
+        let col = self.cursor.col;
+        self.apply_edit(end, end, &format!("\n{text}"));
+        let new_row = (row + 1).min(self.buffer.len_lines().saturating_sub(1));
+        self.cursor = Position::new(new_row, col.min(self.buffer.line_char_len(new_row)));
+        self.selection = None;
+        self.preferred_col = None;
+        self.history.break_coalesce();
     }
 
     pub fn undo(&mut self) {
@@ -251,6 +501,7 @@ impl Document {
         self.selection = Some(Selection::new(Position::zero()));
         self.cursor = Position::new(last_row, last_col);
         self.preferred_col = None;
+        self.history.break_coalesce();
     }
 
     pub fn clear_selection(&mut self) {
@@ -267,6 +518,7 @@ impl Document {
 
     fn set_cursor_inner(&mut self, pos: Position, shift: bool, reset_preferred: bool) {
         let pos = self.buffer.clamp_position(pos);
+        self.history.break_coalesce();
         if shift {
             if self.selection.is_none() {
                 self.selection = Some(Selection::new(self.cursor));
@@ -611,6 +863,29 @@ fn is_close_bracket(c: char) -> bool {
     matches!(c, ')' | ']' | '}')
 }
 
+fn matching_close(open: char) -> Option<char> {
+    match open {
+        '(' => Some(')'),
+        '[' => Some(']'),
+        '{' => Some('}'),
+        '"' => Some('"'),
+        _ => None,
+    }
+}
+
+/// How many leading characters outdent should remove from a line.
+fn leading_outdent(line: &str) -> usize {
+    match line.chars().next() {
+        Some('\t') => 1,
+        Some(' ') => line
+            .chars()
+            .take_while(|c| *c == ' ')
+            .take(INDENT_WIDTH)
+            .count(),
+        _ => 0,
+    }
+}
+
 fn brackets_match(open: char, close: char) -> bool {
     matches!((open, close), ('(', ')') | ('[', ']') | ('{', '}'))
 }
@@ -713,5 +988,122 @@ mod tests {
         let mut d = doc("fn main() {\n");
         d.move_to(Position::new(0, 11));
         assert_eq!(d.matching_brackets(provider), None);
+    }
+
+    #[test]
+    fn typing_coalesces_into_one_undo_step() {
+        let mut d = doc("");
+        d.type_char('a');
+        d.type_char('b');
+        d.type_char('c');
+        assert_eq!(d.buffer.text(), "abc");
+        d.undo();
+        assert_eq!(d.buffer.text(), "");
+        d.redo();
+        assert_eq!(d.buffer.text(), "abc");
+    }
+
+    #[test]
+    fn movement_breaks_the_undo_group() {
+        let mut d = doc("");
+        d.type_char('a');
+        d.type_char('b');
+        d.move_left(false);
+        d.type_char('c');
+        assert_eq!(d.buffer.text(), "acb");
+        d.undo();
+        assert_eq!(d.buffer.text(), "ab");
+    }
+
+    #[test]
+    fn backspace_coalesces() {
+        let mut d = doc("abcd");
+        d.move_end(false);
+        d.backspace();
+        d.backspace();
+        assert_eq!(d.buffer.text(), "ab");
+        d.undo();
+        assert_eq!(d.buffer.text(), "abcd");
+    }
+
+    #[test]
+    fn auto_pairs_and_skips_closing() {
+        let mut d = doc("");
+        d.type_char('(');
+        assert_eq!(d.buffer.text(), "()");
+        assert_eq!(d.cursor, Position::new(0, 1));
+        d.type_char(')');
+        assert_eq!(d.buffer.text(), "()");
+        assert_eq!(d.cursor, Position::new(0, 2));
+    }
+
+    #[test]
+    fn auto_pair_wraps_a_selection() {
+        let mut d = doc("foo");
+        d.selection = Some(Selection::new(Position::new(0, 0)));
+        d.cursor = Position::new(0, 3);
+        d.type_char('(');
+        assert_eq!(d.buffer.text(), "(foo)");
+        assert_eq!(d.cursor, Position::new(0, 4));
+    }
+
+    #[test]
+    fn backspace_removes_an_empty_pair() {
+        let mut d = doc("");
+        d.type_char('(');
+        d.backspace();
+        assert_eq!(d.buffer.text(), "");
+    }
+
+    #[test]
+    fn smart_newline_expands_braces() {
+        let mut d = doc("");
+        d.type_char('{');
+        d.insert_newline();
+        assert_eq!(d.buffer.text(), "{\n    \n}");
+        assert_eq!(d.cursor, Position::new(1, 4));
+    }
+
+    #[test]
+    fn indent_and_outdent_selection() {
+        let mut d = doc("a\nb\nc");
+        d.selection = Some(Selection::new(Position::new(0, 0)));
+        d.cursor = Position::new(1, 1);
+        d.indent();
+        assert_eq!(d.buffer.text(), "    a\n    b\nc");
+        d.outdent();
+        assert_eq!(d.buffer.text(), "a\nb\nc");
+    }
+
+    #[test]
+    fn tab_inserts_to_the_next_stop() {
+        let mut d = doc("ab");
+        d.move_end(false);
+        d.indent();
+        assert_eq!(d.buffer.text(), "ab  ");
+        let mut d = doc("");
+        d.indent();
+        assert_eq!(d.buffer.text(), "    ");
+    }
+
+    #[test]
+    fn move_line_up_and_down() {
+        let mut d = doc("a\nb\nc");
+        d.move_to(Position::new(1, 0));
+        d.move_line_up();
+        assert_eq!(d.buffer.text(), "b\na\nc");
+        assert_eq!(d.cursor.row, 0);
+        d.move_line_down();
+        assert_eq!(d.buffer.text(), "a\nb\nc");
+        assert_eq!(d.cursor.row, 1);
+    }
+
+    #[test]
+    fn duplicate_line() {
+        let mut d = doc("a\nb");
+        d.move_to(Position::new(0, 0));
+        d.duplicate_line();
+        assert_eq!(d.buffer.text(), "a\na\nb");
+        assert_eq!(d.cursor.row, 1);
     }
 }

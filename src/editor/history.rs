@@ -2,9 +2,22 @@
 //!
 //! Each [`Edit`] records just enough information to invert a single logical change:
 //! the character offset it began at, the text that was removed, the text that was
-//! inserted, and the cursor before/after. This makes undo cheap even for large files.
+//! inserted, and the cursor before/after. Consecutive single-character edits are
+//! *coalesced* into one undo step, so undo feels like other editors rather than
+//! unwinding a word one letter at a time.
 
 use crate::editor::position::Position;
+
+/// How an edit may be merged with the previous one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Coalesce {
+    /// Typing characters forward.
+    Insert,
+    /// Backspacing into previous text.
+    DeleteBackward,
+    /// Deleting forward.
+    DeleteForward,
+}
 
 /// A single reversible change.
 #[derive(Clone, Debug)]
@@ -17,6 +30,8 @@ pub struct Edit {
     pub inserted: String,
     pub cursor_before: Position,
     pub cursor_after: Position,
+    /// Whether this edit may merge with the one before it.
+    pub coalesce: Option<Coalesce>,
 }
 
 /// A bounded undo/redo stack.
@@ -42,18 +57,38 @@ impl History {
         }
     }
 
-    /// Record a new edit. Any pending redo history is discarded.
+    /// Record a new edit, merging it with the previous one when appropriate.
     pub fn push(&mut self, edit: Edit) {
         self.redo.clear();
+        if let Some(kind) = edit.coalesce
+            && let Some(last) = self.undo.last_mut()
+            && last.coalesce == Some(kind)
+            && merge(last, &edit, kind)
+        {
+            return;
+        }
         self.undo.push(edit);
         if self.undo.len() > self.limit {
             self.undo.remove(0);
         }
     }
 
+    /// Prevent the next edit from merging into the current step.
+    ///
+    /// Called when the cursor moves, so typing in two separate places becomes two
+    /// undo steps.
+    pub fn break_coalesce(&mut self) {
+        if let Some(last) = self.undo.last_mut() {
+            last.coalesce = None;
+        }
+    }
+
     /// Take the next edit to undo.
     pub fn undo(&mut self) -> Option<Edit> {
         let edit = self.undo.pop()?;
+        if let Some(last) = self.undo.last_mut() {
+            last.coalesce = None;
+        }
         self.redo.push(edit.clone());
         Some(edit)
     }
@@ -61,6 +96,9 @@ impl History {
     /// Take the next edit to redo.
     pub fn redo(&mut self) -> Option<Edit> {
         let edit = self.redo.pop()?;
+        if let Some(last) = self.undo.last_mut() {
+            last.coalesce = None;
+        }
         self.undo.push(edit.clone());
         Some(edit)
     }
@@ -76,5 +114,44 @@ impl History {
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
+    }
+}
+
+fn merge(last: &mut Edit, edit: &Edit, kind: Coalesce) -> bool {
+    match kind {
+        Coalesce::Insert => {
+            if !last.removed.is_empty() || !edit.removed.is_empty() {
+                return false;
+            }
+            if last.start + last.inserted.chars().count() != edit.start {
+                return false;
+            }
+            last.inserted.push_str(&edit.inserted);
+            last.cursor_after = edit.cursor_after;
+            true
+        }
+        Coalesce::DeleteBackward => {
+            if !last.inserted.is_empty() || !edit.inserted.is_empty() {
+                return false;
+            }
+            if edit.start + edit.removed.chars().count() != last.start {
+                return false;
+            }
+            last.removed = format!("{}{}", edit.removed, last.removed);
+            last.start = edit.start;
+            last.cursor_before = edit.cursor_before;
+            true
+        }
+        Coalesce::DeleteForward => {
+            if !last.inserted.is_empty() || !edit.inserted.is_empty() {
+                return false;
+            }
+            if edit.start != last.start {
+                return false;
+            }
+            last.removed.push_str(&edit.removed);
+            last.cursor_after = edit.cursor_after;
+            true
+        }
     }
 }
