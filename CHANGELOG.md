@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Move Line Up/Down and Duplicate Line.
 - Quick Open lists recently opened files first.
 - Closing a modified tab now asks for confirmation instead of refusing.
+- The tab strip scrolls around the active tab when tabs overflow, shows overflow
+  chevrons, truncates long titles and disambiguates duplicate file names by
+  parent folder.
+- File-tree rows truncate long names with an ellipsis instead of spilling into
+  the editor, and the tree header brightens when the tree has focus.
+- Find searches line by line instead of copying the whole file on every
+  keystroke, and Koda now only repaints when something actually changes.
 
 ### Visual identity (Mellow)
 

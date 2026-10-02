@@ -36,15 +36,20 @@ pub fn render(frame: &mut Frame, area: Rect, tree: &FileTree, git: &GitInfo, foc
         .collect();
     frame.render_widget(Paragraph::new(Text::from(rules)), separator);
 
-    // Header: `✦ files ────────`.
+    // Header: `✦ files ────────`. The star brightens when the tree has focus.
     let title = "✦ files";
     let used = 2 + title.chars().count();
     let rule = "─".repeat((content_width as usize).saturating_sub(used).max(1));
+    let (star_style, title_style) = if focused {
+        (theme::star(), theme::accent_bold())
+    } else {
+        (theme::dim(), theme::muted())
+    };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" ", theme::text()),
-            Span::styled("✦", theme::star()),
-            Span::styled(" files ", theme::accent_bold()),
+            Span::styled("✦", star_style),
+            Span::styled(" files ", title_style),
             Span::styled(rule, theme::dim()),
         ])),
         Rect {
@@ -108,7 +113,14 @@ fn entry_line(selected: bool, entry: &VisibleEntry, width: u16, git: &GitInfo) -
         theme::text()
     };
 
-    let mut spans = vec![
+    let status = git
+        .status_for(&entry.path)
+        .map(|status| Span::styled(status.indicator().to_string(), status_style(status)));
+    let status_len = status
+        .as_ref()
+        .map_or(0, |span| span.content.chars().count());
+
+    let prefix = vec![
         if selected {
             Span::styled("▏ ", theme::accent())
         } else {
@@ -116,21 +128,18 @@ fn entry_line(selected: bool, entry: &VisibleEntry, width: u16, git: &GitInfo) -
         },
         Span::raw("  ".repeat(entry.depth)),
         Span::styled(format!("{glyph} "), glyph_style),
-        Span::styled(entry.name.clone(), name_style),
     ];
+    let prefix_used: usize = prefix.iter().map(|span| span.content.chars().count()).sum();
 
-    let status = git
-        .status_for(&entry.path)
-        .map(|status| Span::styled(status.indicator().to_string(), status_style(status)));
+    // Keep at least one column between the name and the git indicator.
+    let name_budget = (width as usize).saturating_sub(prefix_used + status_len + 1);
+    let name = truncate(&entry.name, name_budget);
 
-    let used: usize = spans
-        .iter()
-        .map(|span| span.content.chars().count())
-        .sum::<usize>()
-        + status
-            .as_ref()
-            .map_or(0, |span| span.content.chars().count());
-    let pad = (width as usize).saturating_sub(used + 1);
+    let mut spans = prefix;
+    let used = prefix_used + name.chars().count();
+    spans.push(Span::styled(name, name_style));
+
+    let pad = (width as usize).saturating_sub(used + status_len);
     spans.push(Span::raw(" ".repeat(pad)));
     if let Some(status) = status {
         spans.push(status);
@@ -141,6 +150,20 @@ fn entry_line(selected: bool, entry: &VisibleEntry, width: u16, git: &GitInfo) -
         line = line.style(Style::default().bg(theme::SIDEBAR_SELECTED_BG));
     }
     line
+}
+
+/// Shorten a name to `max` columns, appending an ellipsis when clipped.
+fn truncate(text: &str, max: usize) -> String {
+    let max = max.max(1);
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    if max == 1 {
+        return "…".to_string();
+    }
+    let mut out: String = text.chars().take(max - 1).collect();
+    out.push('…');
+    out
 }
 
 fn render_empty(frame: &mut Frame, area: Rect) {

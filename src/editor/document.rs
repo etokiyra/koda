@@ -731,27 +731,31 @@ impl Document {
     // ----------------------------------------------------------------------
 
     /// All occurrences of `query` in the buffer, as `(start, end)` positions.
+    ///
+    /// Searches line by line so a keystroke never copies the whole file.
     pub fn find_all(&self, query: &str) -> Vec<(Position, Position)> {
-        if query.is_empty() {
+        let needle: Vec<char> = query.chars().collect();
+        if needle.is_empty() {
             return Vec::new();
         }
-        let haystack = self.buffer.text();
         let mut matches = Vec::new();
-        let mut offset = 0usize;
-        // Search over characters so positions line up with character offsets.
-        let hay: Vec<char> = haystack.chars().collect();
-        let needle: Vec<char> = query.chars().collect();
-        if needle.len() > hay.len() {
-            return matches;
-        }
-        while offset + needle.len() <= hay.len() {
-            if hay[offset..offset + needle.len()] == needle[..] {
-                let start = self.buffer.char_to_position(offset);
-                let end = self.buffer.char_to_position(offset + needle.len());
-                matches.push((start, end));
-                offset += needle.len();
-            } else {
-                offset += 1;
+        for row in 0..self.buffer.len_lines() {
+            let line = self.buffer.line_text(row);
+            let hay: Vec<char> = line.chars().collect();
+            if hay.len() < needle.len() {
+                continue;
+            }
+            let mut offset = 0usize;
+            while offset + needle.len() <= hay.len() {
+                if hay[offset..offset + needle.len()] == needle[..] {
+                    matches.push((
+                        Position::new(row, offset),
+                        Position::new(row, offset + needle.len()),
+                    ));
+                    offset += needle.len();
+                } else {
+                    offset += 1;
+                }
             }
         }
         matches

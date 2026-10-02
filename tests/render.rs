@@ -26,7 +26,11 @@ fn temp_project(name: &str) -> PathBuf {
 }
 
 fn draw(app: &mut App) -> String {
-    let backend = TestBackend::new(120, 30);
+    draw_at(app, 120, 30)
+}
+
+fn draw_at(app: &mut App, width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|frame| koda::ui::render(frame, app)).unwrap();
 
@@ -165,6 +169,53 @@ fn editor_background_stays_transparent() {
         cell.bg,
         Color::Reset,
         "editor background must stay transparent"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn tabs_keep_the_active_tab_visible_when_overflowing() {
+    let dir = temp_project("tabs");
+    let names = [
+        "lib.rs",
+        "engine.rs",
+        "buffer.rs",
+        "widgets.rs",
+        "theme.rs",
+        "art.rs",
+    ];
+    for name in names {
+        fs::write(dir.join("src").join(name), "fn f() {}\n").unwrap();
+    }
+
+    let mut app = App::new(Some(&dir)).unwrap();
+    for name in names {
+        app.open_path(dir.join("src").join(name));
+    }
+
+    let screen = draw_at(&mut app, 56, 16);
+    assert!(
+        screen.contains("art.rs"),
+        "the active tab should stay visible:\n{screen}"
+    );
+    assert!(
+        screen.contains('‹') || screen.contains('›'),
+        "overflow should be signalled:\n{screen}"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn long_file_names_are_truncated_in_the_tree() {
+    let dir = temp_project("longnames");
+    let long = "a_very_long_file_name_that_should_be_truncated.rs";
+    fs::write(dir.join(long), "fn f() {}\n").unwrap();
+
+    let mut app = App::new(Some(&dir)).unwrap();
+    let screen = draw_at(&mut app, 100, 20);
+    assert!(
+        screen.contains('…'),
+        "long names should be clipped with an ellipsis:\n{screen}"
     );
     cleanup(&dir);
 }

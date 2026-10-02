@@ -98,17 +98,28 @@ impl App {
     }
 
     fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
+        let mut needs_redraw = true;
         while !self.should_quit {
-            self.tick_status();
-            terminal.draw(|frame| ui::render(frame, self))?;
+            // Only repaint when something changed: input arrived, a status
+            // message expired, or the terminal was resized. An idle Koda does no
+            // work at all.
+            if needs_redraw || self.tick_status() {
+                terminal.draw(|frame| ui::render(frame, self))?;
+                needs_redraw = false;
+            }
             if event::poll(Duration::from_millis(250))? {
                 match event::read()? {
                     Event::Key(key)
                         if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
                     {
-                        self.handle_key(key)
+                        self.handle_key(key);
+                        needs_redraw = true;
                     }
-                    Event::Paste(text) => self.handle_paste(&text),
+                    Event::Paste(text) => {
+                        self.handle_paste(&text);
+                        needs_redraw = true;
+                    }
+                    Event::Resize(..) => needs_redraw = true,
                     _ => {}
                 }
             }
@@ -1070,14 +1081,18 @@ impl App {
     }
 
     /// Expire stale status messages so the language/git summary returns.
-    fn tick_status(&mut self) {
+    ///
+    /// Returns `true` when a message was cleared, so the caller knows to redraw.
+    fn tick_status(&mut self) -> bool {
         if let Some(expires_at) = self.status.expires_at
             && Instant::now() >= expires_at
         {
             self.status.message.clear();
             self.status.error = false;
             self.status.expires_at = None;
+            return true;
         }
+        false
     }
 
     /// The message shown in the status bar.

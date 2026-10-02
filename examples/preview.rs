@@ -59,6 +59,21 @@ fn main() {
                 .move_to(koda::editor::Position::new(1, 13));
             app
         }
+        "tabs" => {
+            let mut app = App::new(Some(&root.join("src/main.rs"))).expect("app");
+            for file in [
+                "src/app/mod.rs",
+                "src/editor/document.rs",
+                "src/editor/buffer.rs",
+                "src/language/detection/engine.rs",
+                "src/ui/tabs.rs",
+                "src/ui/file_tree.rs",
+                "src/ui/art.rs",
+            ] {
+                app.open_path(root.join(file));
+            }
+            app
+        }
         "empty" => {
             let path = std::env::temp_dir().join("koda-preview-empty.rs");
             std::fs::write(&path, "").unwrap();
