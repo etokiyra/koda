@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pressing `/` in the file tree opens an inline fuzzy filter over the project
   files (scored on paths relative to the project root), with keyboard
   navigation and Enter to open.
+- Find prefills from a single-line selection and starts at the first match at
+  or after the cursor instead of always jumping to the top of the file.
 - Find searches line by line instead of copying the whole file on every
   keystroke, and Koda now only repaints when something actually changes.
 

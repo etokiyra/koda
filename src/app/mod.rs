@@ -221,7 +221,7 @@ impl App {
                 SearchField::Replacement => self.search.replacement.push_str(text),
             }
             self.refresh_search_matches();
-            self.jump_to_match(0);
+            self.jump_to_first_from_cursor();
             return;
         }
         if self.focus == Focus::Editor {
@@ -481,7 +481,7 @@ impl App {
                     }
                 }
                 self.refresh_search_matches();
-                self.jump_to_match(0);
+                self.jump_to_first_from_cursor();
             }
             KeyCode::Char(c) if !ctrl => {
                 match self.search.field {
@@ -489,7 +489,7 @@ impl App {
                     SearchField::Replacement => self.search.replacement.push(c),
                 }
                 self.refresh_search_matches();
-                self.jump_to_match(0);
+                self.jump_to_first_from_cursor();
             }
             _ => {}
         }
@@ -926,8 +926,39 @@ impl App {
         if !replace {
             self.search.replacement.clear();
         }
+        // Prefill from a single-line selection, so Ctrl+F searches the word the
+        // user already highlighted.
+        if let Some(text) = self
+            .editor
+            .active_document()
+            .and_then(|doc| doc.selected_text())
+        {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() && !trimmed.contains('\n') {
+                self.search.query = trimmed.to_string();
+            }
+        }
         self.refresh_search_matches();
-        self.jump_to_match(0);
+        self.jump_to_first_from_cursor();
+    }
+
+    /// Jump to the first match at or after the cursor, wrapping around.
+    fn jump_to_first_from_cursor(&mut self) {
+        if self.search.matches.is_empty() {
+            return;
+        }
+        let cursor = self
+            .editor
+            .active_document()
+            .map(|doc| doc.clamped_cursor())
+            .unwrap_or_default();
+        let index = self
+            .search
+            .matches
+            .iter()
+            .position(|(start, _)| *start >= cursor)
+            .unwrap_or(0);
+        self.jump_to_match(index);
     }
 
     fn refresh_search_matches(&mut self) {
@@ -1417,6 +1448,23 @@ mod tests {
         assert!(!app.workspace.tree.show_hidden);
         app.execute_command(ids::TOGGLE_HIDDEN);
         assert!(app.workspace.tree.show_hidden);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_prefills_from_the_selection() {
+        let dir = temp_project("find-prefill");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+        {
+            let doc = app.editor.active_document_mut().unwrap();
+            doc.selection = Some(Selection::new(Position::new(0, 0)));
+            doc.cursor = Position::new(0, 2);
+        }
+
+        app.execute_command(ids::FIND);
+        assert_eq!(app.search.query, "fn");
+        assert!(!app.search.matches.is_empty());
         fs::remove_dir_all(&dir).ok();
     }
 }
