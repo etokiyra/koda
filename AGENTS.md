@@ -55,7 +55,17 @@ src/
 │   ├── mod.rs            # Project detection + Workspace
 │   └── file_tree.rs      # lazily loaded tree
 ├── terminal/mod.rs       # init/restore, OSC 52 clipboard
-└── ui/                   # header, tabs, editor, file_tree, status_bar, overlay
+└── ui/
+    ├── theme.rs          # Mellow palette + semantic roles (single source of truth)
+    ├── art.rs            # original ASCII art: mascot, wordmark, frames
+    ├── header.rs         # identity bar / breadcrumb
+    ├── tabs.rs           # tab pills
+    ├── editor.rs         # gutter, syntax, cursorline, indent guides
+    ├── file_tree.rs      # project sidebar
+    ├── status_bar.rs     # the Mellow statusline
+    ├── overlay.rs        # palette, quick open, prompts, search bar
+    ├── welcome.rs        # adaptive welcome scene
+    └── mod.rs            # layout + entry point
 ```
 
 ### Dependency direction
@@ -67,6 +77,30 @@ src/
 - `app` is the conductor and may use everything.
 
 The editor core must remain language-agnostic.
+
+### Visual identity
+
+Koda's look is a first-class concern, not an afterthought.
+
+- **Mellow is the colour source of truth.** The palette and semantic mappings
+  come from Helix's Mellow default theme. `src/ui/theme.rs` is the single point
+  of truth: the raw palette in `palette`, semantic roles (`ACCENT`, `TEXT`,
+  `PANEL_BG`, …) and `token_style(kind)` for syntax. Do not hard-code colours in
+  widgets.
+- **Koda's design is its own.** Mellow is the colour language; the layout,
+  header, tabs, sidebar, statusline, popups and welcome scene are Koda's. Never
+  copy Helix's or VS Code's UI.
+- **Transparency is mandatory.** Never paint a full-screen background. Plain
+  surfaces leave the background `Color::Reset` so the terminal's own background
+  shows through. Only the statusline and popups use a `PANEL_BG`.
+- **Art has a vocabulary.** Recurring motifs: `✦` (star), `☾` (moon), `❯`
+  (pointer), `·` (separator), and the Koda familiar, a little star-cat. Reuse
+  them consistently so the interface reads as one piece.
+- **Art with restraint.** ASCII art belongs in the welcome scene and empty
+  states, never behind code. When code is open, the editor must dominate.
+- **Keep `ui/art.rs` clean.** Compositions are original, symmetric and padded to
+  equal width so per-line centering keeps them aligned. The welcome screens are
+  budget-aware and must never clip or overflow.
 
 ### Language detection vs. language support
 
@@ -141,6 +175,9 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
 - **Overlays are centered and cleared** with `Clear` before drawing so they are
   readable over the editor.
 - **Transient status messages** expire so the language/git summary returns.
+- **Centralised Mellow theme + art.** All colour flows through `ui/theme.rs`;
+  all ASCII personality through `ui/art.rs`. Widgets render semantic roles, not
+  literal colours. This keeps Koda recognisable and easy to evolve.
 
 ---
 

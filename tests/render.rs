@@ -7,8 +7,10 @@ use std::path::{Path, PathBuf};
 
 use koda::app::App;
 use koda::commands::ids;
+use koda::ui::theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::style::Color;
 
 fn temp_project(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("koda-render-{name}-{}", std::process::id()));
@@ -52,7 +54,7 @@ fn renders_project_tree_and_rust_file() {
 
     let screen = draw(&mut app);
     assert!(screen.contains("koda"), "header missing:\n{screen}");
-    assert!(screen.contains("PROJECT"), "sidebar missing:\n{screen}");
+    assert!(screen.contains("files"), "sidebar missing:\n{screen}");
     assert!(screen.contains("main.rs"), "file name missing:\n{screen}");
     assert!(screen.contains("fn main"), "code missing:\n{screen}");
     assert!(screen.contains("Rust"), "language missing:\n{screen}");
@@ -66,9 +68,9 @@ fn renders_welcome_when_no_file_open() {
     let mut app = App::new(Some(&dir)).unwrap();
 
     let screen = draw(&mut app);
-    assert!(screen.contains("k o d a"), "welcome missing:\n{screen}");
+    assert!(screen.contains("K O D A"), "welcome missing:\n{screen}");
     assert!(
-        screen.contains("Quick open"),
+        screen.contains("quick open"),
         "shortcuts missing:\n{screen}"
     );
 
@@ -89,5 +91,51 @@ fn command_palette_renders_overlay() {
     );
     assert!(screen.contains("Save"), "commands missing:\n{screen}");
 
+    cleanup(&dir);
+}
+
+#[test]
+fn statusline_uses_mellow_panel_background() {
+    let dir = temp_project("statusbg");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| koda::ui::render(frame, &mut app))
+        .unwrap();
+
+    let buffer = terminal.backend().buffer();
+    let y = buffer.area.height - 1;
+    let has_panel = (0..buffer.area.width).any(|x| {
+        buffer
+            .cell((x, y))
+            .is_some_and(|cell| cell.bg == theme::PANEL_BG)
+    });
+    assert!(
+        has_panel,
+        "statusline should use the Mellow panel background"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn editor_background_stays_transparent() {
+    let dir = temp_project("transparent");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| koda::ui::render(frame, &mut app))
+        .unwrap();
+
+    let buffer = terminal.backend().buffer();
+    let cell = buffer.cell((buffer.area.width - 1, 8)).unwrap();
+    assert_eq!(
+        cell.bg,
+        Color::Reset,
+        "editor background must stay transparent"
+    );
     cleanup(&dir);
 }

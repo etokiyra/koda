@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Visual identity (Mellow)
+
+- Replaced the placeholder palette with the **Mellow** colour language (the
+  default Helix theme), mapped semantically: keywords almond, types and
+  functions white, strings silver, numbers chamois, comments sirocco, with lilac
+  and lavender for operators, punctuation and structure.
+- Added `src/ui/theme.rs` as the single source of truth for palette and semantic
+  roles, and `src/ui/art.rs` for original ASCII art.
+- Introduced the **Koda familiar** — a little star-cat — with sleeping, awake and
+  celebrating poses, plus a four-pointed star `✦`, crescent moon `☾`, `❯` pointer
+  and `·` separator as a recurring visual vocabulary.
+- A new adaptive, vertically-centred **welcome scene**: starfield, a tiny code
+  window, the mascot, the `K O D A` wordmark, shortcuts and project context. It
+  budgets space and degrades gracefully on small or narrow terminals.
+- Redesigned every surface: a breadcrumb header, tab pills, a hairline sidebar
+  rule with right-aligned git state, a bossanova cursorline, comet indent
+  guides, a revolver statusline with a language pill, and Mellow-styled popups.
+- Transparency preserved: the editor and all plain surfaces keep the terminal's
+  own background; only the statusline and popups use a Mellow panel background.
+  A render test guards this.
+- Added `examples/preview.rs`, a `TestBackend` harness for inspecting rendered
+  screens as text.
+
 ### Added
 
 - Initial editor foundation:

@@ -35,6 +35,8 @@ then expand
 - [x] Rust and Go syntax highlighting.
 - [x] Command palette, quick open, find/replace, go-to-line.
 - [x] Terminal-native, transparency-friendly UI.
+- [x] A strong visual identity: Mellow colours, original ASCII welcome scene,
+      the Koda familiar and personality-rich empty states.
 
 ---
 

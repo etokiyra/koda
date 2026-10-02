@@ -9,17 +9,16 @@ happens to live in your terminal: fast, minimal, keyboard-first and — above al
 Install Koda, open a project, start coding.
 
 ```
-╭──────────────────────────────────────────────────────────────╮
-│ koda  Rust                                          main.rs │
-├────────────┬─────────────────────────────────────────────────┤
-│ PROJECT    │                                                 │
-│ ▾ src/     │  fn main() {                                    │
-│     main.rs│      println!("Hello, world!");                 │
-│   Cargo.toml│  }                                             │
-├────────────┴─────────────────────────────────────────────────┤
-│ ● Rust  │  ⎇ main 1±                    Ln 3, Col 5          │
-╰──────────────────────────────────────────────────────────────╯
+ ✦ koda  ·  Rust  ·  src/main.rs
+ ✦ files ────────────│ ▏ main.rs
+▏ ▸ src             ? │ 1 fn main() {
+  ·  main.rs         │ 2     println!("hi");
+  ·  Cargo.toml      │ 3 }
+ Rust  ☾ main 1±  ·  saved                Ln 1, Col 1  ☾ 5%
 ```
+
+Koda is a tiny place to live while you code: Mellow colours, a little star-cat
+mascot, and a lot of care — with the editor still first.
 
 ## Philosophy
 
@@ -33,6 +32,31 @@ Install Koda, open a project, start coding.
   else.
 - **Performance is a feature.** A rope-backed editor, lazy file tree and a
   responsive event loop.
+
+## Design & personality
+
+Koda's colour language is **Mellow** — the default Helix theme — used with the
+same semantic mappings Helix gives it: keywords are almond, types and functions
+white, strings silver, numbers chamois, comments sirocco, with lilac and
+lavender carrying operators, punctuation and structure. Koda is its own design,
+though: its own header, tabs, sidebar, statusline and welcome scene.
+
+Colour and personality live in one place — `src/ui/theme.rs` for the palette and
+`src/ui/art.rs` for the ASCII art — so the whole environment stays coherent and
+easy to evolve.
+
+A few principles:
+
+- **Transparency first.** Koda never paints a full-screen background. Plain
+  surfaces use the terminal's own background, so transparency, blur and
+  wallpapers show through. Only small, deliberate surfaces (the statusline and
+  popups) get a Mellow panel background.
+- **Art with restraint.** The Koda familiar, a little star-cat, appears where
+  there is room for personality — the welcome scene and empty states — never
+  behind your code.
+- **One vocabulary.** A four-pointed star `✦`, a crescent moon `☾`, a `❯`
+  pointer and `·` separators recur everywhere, so the interface feels like one
+  piece.
 
 ## Status
 
@@ -48,6 +72,9 @@ Implemented:
   project markers, extensions, file names, shebangs and content signals.
 - A command palette, quick open, find/replace, go-to-line and file open.
 - Lightweight git integration (branch + per-file status, via the `git` binary).
+- A distinctive Mellow-based visual identity: a semantic theme layer, an
+  adaptive ASCII welcome scene, the Koda familiar and personality-rich empty
+  states — all transparency-friendly.
 - A clean provider/registry abstraction that makes adding a language
   straightforward.
 

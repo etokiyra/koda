@@ -1,4 +1,7 @@
-//! The tab strip above the editor.
+//! The tab strip: a quiet row of pills.
+//!
+//! The active tab is a solid bossanova pill with a lilac bar; inactive tabs
+//! fade into sirocco. Unsaved work is a small honey star.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -9,27 +12,37 @@ use crate::editor::Editor;
 use crate::ui::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, editor: &Editor) {
-    if editor.documents.is_empty() {
+    if editor.documents.is_empty() || area.height == 0 {
         return;
     }
     let active = editor.active_index();
-    let mut spans: Vec<Span> = Vec::new();
+    let mut spans: Vec<Span> = vec![Span::raw(" ")];
+
     for (index, doc) in editor.documents.iter().enumerate() {
         let is_active = index == active;
-        let style = if is_active {
-            theme::accent_bold()
+        let name = doc.file_name();
+
+        if is_active {
+            spans.push(Span::styled("▏", theme::accent()));
+            spans.push(Span::styled(
+                format!(" {name} "),
+                theme::pill(theme::CURSORLINE_BG, theme::TEXT_BRIGHT),
+            ));
+            if doc.is_dirty() {
+                spans.push(Span::styled("●", theme::star().bg(theme::CURSORLINE_BG)));
+            }
         } else {
-            theme::dim()
-        };
-        spans.push(Span::styled(" ", style));
-        spans.push(Span::styled(doc.file_name(), style));
-        if doc.is_dirty() {
-            spans.push(Span::styled(" ●", theme::accent()));
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(format!(" {name} "), theme::muted()));
+            if doc.is_dirty() {
+                spans.push(Span::styled("●", theme::star()));
+            }
         }
-        spans.push(Span::styled(" ", style));
+
         if index + 1 < editor.documents.len() {
-            spans.push(Span::styled("│", theme::dim()));
+            spans.push(Span::styled(" │ ", theme::dim()));
         }
     }
+
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }

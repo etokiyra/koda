@@ -1,5 +1,6 @@
 //! Rendering for every Koda surface.
 
+pub mod art;
 pub mod editor;
 pub mod file_tree;
 pub mod header;
