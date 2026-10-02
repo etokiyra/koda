@@ -49,6 +49,16 @@ fn main() {
             std::fs::create_dir_all(&dir).unwrap();
             App::new(Some(&dir)).expect("app")
         }
+        "bracket" => {
+            let path = std::env::temp_dir().join("koda-preview-bracket.rs");
+            std::fs::write(&path, "fn main() {\n    let x = (1 + 2);\n}\n").unwrap();
+            let mut app = App::new(Some(&path)).expect("app");
+            app.editor
+                .active_document_mut()
+                .unwrap()
+                .move_to(koda::editor::Position::new(1, 13));
+            app
+        }
         "empty" => {
             let path = std::env::temp_dir().join("koda-preview-empty.rs");
             std::fs::write(&path, "").unwrap();

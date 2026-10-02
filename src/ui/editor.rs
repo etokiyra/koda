@@ -6,12 +6,12 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 
 use crate::app::overlay::Search;
-use crate::editor::Document;
+use crate::editor::{Document, Position};
 use crate::language::provider::{LanguageProvider, TokenKind};
 use crate::ui::{art, theme};
 
@@ -64,9 +64,10 @@ pub fn render(
     }
 
     let mut lines: Vec<Line> = Vec::with_capacity(view_height);
+    let brackets = doc.matching_brackets(provider);
     for row in doc.scroll_top..(doc.scroll_top + view_height).min(total_lines) {
         lines.push(render_line(
-            doc, provider, search, row, gutter, text_width, area.width,
+            doc, provider, search, row, gutter, text_width, area.width, brackets,
         ));
     }
 
@@ -111,6 +112,7 @@ fn render_line(
     gutter: u16,
     text_width: usize,
     line_width: u16,
+    brackets: Option<(Position, Position)>,
 ) -> Line<'static> {
     let text = doc.buffer.line_text(row);
     let char_count = text.chars().count();
@@ -187,6 +189,12 @@ fn render_line(
             style = theme::dim();
         }
         style = with_bg(style, base_bg);
+        if let Some((open, close)) = brackets
+            && ((open.row == row && open.col == original)
+                || (close.row == row && close.col == original))
+        {
+            style = style.bg(theme::BRACKET_BG).add_modifier(Modifier::BOLD);
+        }
         if selected.get(original).copied().unwrap_or(false) {
             style = style.bg(theme::SELECTION_BG);
         }

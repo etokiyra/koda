@@ -120,6 +120,35 @@ fn statusline_uses_mellow_panel_background() {
 }
 
 #[test]
+fn bracket_match_is_highlighted() {
+    let dir = temp_project("bracket");
+    let file = dir.join("src/main.rs");
+    fs::write(&file, "fn main() {\n    let x = (1 + 2);\n}\n").unwrap();
+    let mut app = App::new(Some(&file)).unwrap();
+    app.editor
+        .active_document_mut()
+        .unwrap()
+        .move_to(koda::editor::Position::new(1, 13));
+
+    let backend = TestBackend::new(100, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| koda::ui::render(frame, &mut app))
+        .unwrap();
+
+    let buffer = terminal.backend().buffer();
+    let highlighted = (0..buffer.area.height).any(|y| {
+        (0..buffer.area.width).any(|x| {
+            buffer
+                .cell((x, y))
+                .is_some_and(|cell| cell.bg == theme::BRACKET_BG)
+        })
+    });
+    assert!(highlighted, "matching brackets should be highlighted");
+    cleanup(&dir);
+}
+
+#[test]
 fn editor_background_stays_transparent() {
     let dir = temp_project("transparent");
     let file = dir.join("src/main.rs");

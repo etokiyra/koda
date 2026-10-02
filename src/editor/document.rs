@@ -1,12 +1,13 @@
 //! A document: a buffer plus cursor, selection, scroll and undo state.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::editor::buffer::{Buffer, LineEnding};
 use crate::editor::history::{Edit, History};
 use crate::editor::position::{Position, Selection};
 use crate::language::id::LanguageId;
-use crate::language::provider::{HighlightSpan, HighlightState, LanguageProvider};
+use crate::language::provider::{HighlightSpan, HighlightState, LanguageProvider, TokenKind};
 
 /// One open file.
 pub struct Document {
@@ -503,6 +504,115 @@ impl Document {
         }
         matches
     }
+
+    // ----------------------------------------------------------------------
+    // Brackets
+    // ----------------------------------------------------------------------
+
+    /// The bracket pair surrounding the cursor, if any.
+    ///
+    /// Looks at the character under the cursor first, then the one before it.
+    /// Matching is nesting- and type-aware, and skips brackets inside comments
+    /// and strings using the provider's highlighting.
+    pub fn matching_brackets(
+        &mut self,
+        provider: &dyn LanguageProvider,
+    ) -> Option<(Position, Position)> {
+        let cursor = self.clamped_cursor();
+        let at = self.char_at(cursor);
+        let before = if cursor.col > 0 {
+            self.char_at(Position::new(cursor.row, cursor.col - 1))
+        } else {
+            None
+        };
+
+        let (position, bracket) =
+            at.filter(|c| is_bracket(*c))
+                .map(|c| (cursor, c))
+                .or_else(|| {
+                    before
+                        .filter(|c| is_bracket(*c))
+                        .map(|c| (Position::new(cursor.row, cursor.col.saturating_sub(1)), c))
+                })?;
+
+        let forward = is_open_bracket(bracket);
+        let mut stack = vec![bracket];
+        let mut cache: HashMap<usize, Vec<(usize, usize)>> = HashMap::new();
+        let mut current = position;
+        let mut steps = 0usize;
+
+        loop {
+            steps += 1;
+            if steps > 100_000 {
+                return None;
+            }
+            current = if forward {
+                self.next_pos(current)?
+            } else {
+                self.prev_pos(current)?
+            };
+
+            cache.entry(current.row).or_insert_with(|| {
+                self.highlight_spans(provider, current.row)
+                    .into_iter()
+                    .filter(|span| matches!(span.kind, TokenKind::Comment | TokenKind::String))
+                    .map(|span| (span.range.start, span.range.end))
+                    .collect()
+            });
+            if cache[&current.row]
+                .iter()
+                .any(|(start, end)| current.col >= *start && current.col < *end)
+            {
+                continue;
+            }
+
+            let Some(c) = self.char_at(current) else {
+                continue;
+            };
+
+            if forward {
+                if is_open_bracket(c) {
+                    stack.push(c);
+                } else if is_close_bracket(c) {
+                    if stack.last().is_some_and(|open| brackets_match(*open, c)) {
+                        stack.pop();
+                        if stack.is_empty() {
+                            return Some((position, current));
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+            } else if is_close_bracket(c) {
+                stack.push(c);
+            } else if is_open_bracket(c) {
+                if stack.last().is_some_and(|close| brackets_match(c, *close)) {
+                    stack.pop();
+                    if stack.is_empty() {
+                        return Some((position, current));
+                    }
+                } else {
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+fn is_bracket(c: char) -> bool {
+    is_open_bracket(c) || is_close_bracket(c)
+}
+
+fn is_open_bracket(c: char) -> bool {
+    matches!(c, '(' | '[' | '{')
+}
+
+fn is_close_bracket(c: char) -> bool {
+    matches!(c, ')' | ']' | '}')
+}
+
+fn brackets_match(open: char, close: char) -> bool {
+    matches!((open, close), ('(', ')') | ('[', ']') | ('{', '}'))
 }
 
 fn is_word_char(c: char) -> bool {
@@ -570,5 +680,38 @@ mod tests {
         assert_eq!(d.cursor, Position::new(0, 3));
         d.move_word_right(false);
         assert_eq!(d.cursor, Position::new(0, 9));
+    }
+
+    #[test]
+    fn matches_brackets_on_current_line() {
+        let service = crate::language::LanguageService::builtin();
+        let provider = service.provider(LanguageId::Rust);
+        let mut d = doc("fn main() {\n    let x = (1 + 2);\n}\n");
+        d.move_to(Position::new(1, 13));
+        assert_eq!(
+            d.matching_brackets(provider),
+            Some((Position::new(1, 12), Position::new(1, 18)))
+        );
+    }
+
+    #[test]
+    fn matches_brackets_across_lines() {
+        let service = crate::language::LanguageService::builtin();
+        let provider = service.provider(LanguageId::Rust);
+        let mut d = doc("fn main() {\n}\n");
+        d.move_to(Position::new(0, 11));
+        assert_eq!(
+            d.matching_brackets(provider),
+            Some((Position::new(0, 10), Position::new(1, 0)))
+        );
+    }
+
+    #[test]
+    fn unmatched_bracket_returns_none() {
+        let service = crate::language::LanguageService::builtin();
+        let provider = service.provider(LanguageId::Rust);
+        let mut d = doc("fn main() {\n");
+        d.move_to(Position::new(0, 11));
+        assert_eq!(d.matching_brackets(provider), None);
     }
 }

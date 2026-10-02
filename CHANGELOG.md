@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Insertion, deletion, backspace/delete, auto-indent on newline, and
     "typing replaces selection".
   - Operation-based undo/redo.
+- Matching-bracket highlighting (Mellow `ui.cursor.match`): nesting- and
+  type-aware, and skips brackets inside comments and strings.
 - Multi-document tabs with dirty indicators; next/previous/close tab.
 - Project and workspace abstraction with intelligent root detection
   (`Cargo.toml`, `go.mod`, `.git`).

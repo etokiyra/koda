@@ -80,8 +80,10 @@ pub const BORDER: Color = palette::BOSSANOVA;
 /// Border that indicates focus.
 pub const BORDER_FOCUS: Color = palette::COMET;
 
-pub const SEARCH_BG: Color = palette::CURSOR_MATCH;
+pub const SEARCH_BG: Color = palette::MIDNIGHT;
 pub const SEARCH_CURRENT_BG: Color = palette::LIGHTNING;
+/// Matching-bracket highlight (Mellow `ui.cursor.match`).
+pub const BRACKET_BG: Color = palette::CURSOR_MATCH;
 pub const SIDEBAR_SELECTED_BG: Color = palette::BOSSANOVA;
 
 // ---------------------------------------------------------------------------
