@@ -130,14 +130,20 @@ See [`AGENTS.md`](AGENTS.md) for the full architecture and conventions.
 
 ## Language detection
 
-Extensions are only one signal. Detection combines:
+Extensions are only one signal. File-level signals decide *what a file is*;
+project context corroborates them:
 
-1. **Project metadata** — `Cargo.toml`, `go.mod`, … (strongest signal)
-2. **Project context** — a file living inside a known project
+1. **File name** — special names like `Makefile`, `Dockerfile`
+2. **Shebang** — `#!/usr/bin/env …`
 3. **File extension** — `.rs`, `.go`, …
-4. **Special file names** — `Makefile`, `Dockerfile`, … (extensible)
-5. **Shebangs** — `#!/usr/bin/env python`
-6. **Content analysis** — distinctive syntax, kept lightweight
+4. **Content analysis** — distinctive syntax, kept lightweight
+5. **Project context** — `Cargo.toml`, `go.mod`, … (a confidence boost when it
+   agrees with the file's own signals)
+
+A project marker never overrides a file's own nature: `README.md` inside a Rust
+project stays plain text, while `main.rs` inside that project becomes *high*
+confidence Rust. The workspace separately tracks the project kind, so Koda still
+understands that the file lives inside a Rust project.
 
 Signals are scored and turned into a [`Confidence`](src/language/detection/confidence.rs).
 The architecture allows Koda to eventually ask the user when detection is

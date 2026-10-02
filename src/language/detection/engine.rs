@@ -60,11 +60,15 @@ impl DetectionResult {
     }
 }
 
-// Signal weights. Project metadata is deliberately the strongest signal, matching
-// Koda's philosophy that files live inside projects.
-const W_PROJECT_MARKER: u32 = 70;
+// Signal weights.
+//
+// File-level signals decide *what a file is*. Project context is a
+// corroborating bonus: a `Cargo.toml` elsewhere in the tree makes a `.rs` file
+// *more* confidently Rust, but it must never turn `README.md` into Rust. This is
+// why a project marker alone does not assign a file's language.
 const W_FILE_NAME: u32 = 55;
 const W_SHEBANG: u32 = 50;
+const W_PROJECT_CONTEXT_BONUS: u32 = 40;
 const W_EXTENSION: u32 = 35;
 const W_CONTENT_HINT: u32 = 20;
 const MAX_CONTENT_HINTS: u32 = 3;
@@ -114,24 +118,9 @@ impl DetectionEngine {
             })
             .map(|e| e.to_ascii_lowercase());
 
+        // ---- Phase 1: file-level signals decide what this file is ----
         for descriptor in &self.descriptors {
-            // 1. Project markers: the strongest signal.
-            for marker in input.project_markers {
-                if descriptor
-                    .project_markers
-                    .iter()
-                    .any(|m| m.eq_ignore_ascii_case(marker))
-                {
-                    evidence.push(Evidence {
-                        language: descriptor.id,
-                        kind: SignalKind::ProjectMarker,
-                        weight: W_PROJECT_MARKER,
-                        reason: format!("`{marker}` in project root"),
-                    });
-                }
-            }
-
-            // 2. Special file names.
+            // 1. Special file names.
             if let Some(name) = &file_name
                 && descriptor
                     .file_names
@@ -146,7 +135,7 @@ impl DetectionEngine {
                 });
             }
 
-            // 3. File extension.
+            // 2. File extension.
             if let Some(ext) = &extension
                 && descriptor
                     .extensions
@@ -161,7 +150,7 @@ impl DetectionEngine {
                 });
             }
 
-            // 4. Shebang and 5. content hints both inspect the sample.
+            // 3. Shebang and content hints both inspect the sample.
             if let Some(sample) = input.content_sample {
                 if let Some(first_line) = sample.lines().next()
                     && first_line.starts_with("#!")
@@ -201,11 +190,13 @@ impl DetectionEngine {
             }
         }
 
+        // A project marker alone says what the *project* is, not what this file
+        // is. Without any file-level signal, stay honest and return unknown.
         if evidence.is_empty() {
             return DetectionResult::unknown();
         }
 
-        // Tally scores per language.
+        // Tally file-level scores per language.
         let mut scores: Vec<(LanguageId, u32)> = Vec::new();
         for ev in &evidence {
             match scores.iter_mut().find(|(id, _)| *id == ev.language) {
@@ -213,6 +204,20 @@ impl DetectionEngine {
                 None => scores.push((ev.language, ev.weight)),
             }
         }
+
+        // ---- Phase 2: project context corroborates the file's own signals ----
+        if let Some((project_language, project_reason)) = self.project_language(input)
+            && let Some((_, score)) = scores.iter_mut().find(|(id, _)| *id == project_language)
+        {
+            *score += W_PROJECT_CONTEXT_BONUS;
+            evidence.push(Evidence {
+                language: project_language,
+                kind: SignalKind::ProjectContext,
+                weight: W_PROJECT_CONTEXT_BONUS,
+                reason: project_reason,
+            });
+        }
+
         scores.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
 
         let (best_language, best_score) = scores[0];
@@ -234,6 +239,22 @@ impl DetectionEngine {
             evidence,
             scores,
         }
+    }
+
+    /// The language implied by the project markers, if any.
+    fn project_language(&self, input: &DetectionInput<'_>) -> Option<(LanguageId, String)> {
+        for descriptor in &self.descriptors {
+            for marker in input.project_markers {
+                if descriptor
+                    .project_markers
+                    .iter()
+                    .any(|m| m.eq_ignore_ascii_case(marker))
+                {
+                    return Some((descriptor.id, format!("`{marker}` project context")));
+                }
+            }
+        }
+        None
     }
 }
 

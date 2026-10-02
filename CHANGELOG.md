@@ -22,7 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lazy, git-aware file tree sidebar.
 - Language subsystem:
   - Confidence-based detection engine combining project markers, extensions,
-    file names, shebangs and content signals.
+    file names, shebangs and content signals. Project markers corroborate a
+    file's own signals rather than overriding them, so `README.md` in a Rust
+    project stays plain text.
   - `LanguageProvider` trait and provider registry.
   - Rust and Go providers with syntax highlighting.
 - User interface:

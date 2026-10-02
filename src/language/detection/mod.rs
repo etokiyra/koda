@@ -110,4 +110,28 @@ mod tests {
         // does not panic and returns a stable answer.
         assert!(result.reasons.is_empty() || result.language == LanguageId::Unknown);
     }
+
+    #[test]
+    fn markdown_in_rust_project_is_not_claimed_as_rust() {
+        let result = engine().detect(&DetectionInput {
+            path: None,
+            file_name: Some("README.md"),
+            extension: Some("md"),
+            project_markers: &["Cargo.toml".to_string()],
+            content_sample: Some("# Koda\n"),
+        });
+        assert_eq!(result.language, LanguageId::Unknown);
+    }
+
+    #[test]
+    fn go_file_in_rust_project_is_still_go() {
+        let result = engine().detect(&DetectionInput {
+            path: None,
+            file_name: Some("main.go"),
+            extension: Some("go"),
+            project_markers: &["Cargo.toml".to_string()],
+            content_sample: Some("package main\n"),
+        });
+        assert_eq!(result.language, LanguageId::Go);
+    }
 }

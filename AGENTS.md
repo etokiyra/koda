@@ -91,11 +91,17 @@ Adding a language must never require touching `editor` or `ui`.
 
 | Signal | Weight | Notes |
 | --- | --- | --- |
-| Project marker (`Cargo.toml`, `go.mod`) | 70 | strongest |
 | Special file name | 55 | e.g. `Dockerfile` |
 | Shebang | 50 | `#!/usr/bin/env …` |
+| Project context | +40 | corroboration only, not a standalone decision |
 | File extension | 35 | one signal among many |
 | Content hints | 20 each (max 3) | lightweight, no big parser |
+
+File-level signals (name, shebang, extension, content) decide the language.
+Project markers provide a **corroborating bonus**: `Cargo.toml` plus a `.rs`
+extension yields *high* confidence Rust, but `Cargo.toml` alone never turns
+`README.md` into Rust. A project marker says what the project is, not what a
+given file is; the workspace tracks project kind separately.
 
 Confidence is derived from the winning score and the margin to the runner-up.
 If two languages are nearly tied, confidence is downgraded rather than guessed.
