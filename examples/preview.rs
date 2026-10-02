@@ -74,6 +74,16 @@ fn main() {
             }
             app
         }
+        "filter" => {
+            let mut app = App::new(Some(&root)).expect("app");
+            app.execute_command(ids::FILTER_TREE);
+            if let Some(filter) = app.tree_filter.as_mut() {
+                for c in "doc".chars() {
+                    filter.push_char(c);
+                }
+            }
+            app
+        }
         "empty" => {
             let path = std::env::temp_dir().join("koda-preview-empty.rs");
             std::fs::write(&path, "").unwrap();

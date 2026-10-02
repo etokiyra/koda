@@ -1,6 +1,6 @@
 //! Transient UI state: pickers, prompts and the search bar.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::editor::Position;
 
@@ -247,4 +247,89 @@ pub fn fuzzy_score(query: &str, text: &str) -> Option<i32> {
         cursor = i + 1;
     }
     Some(score)
+}
+
+/// Inline file-tree filter state.
+///
+/// The project file list is collected once when the filter opens, then filtered
+/// in memory on each keystroke, so typing stays fast even in large projects.
+pub struct TreeFilter {
+    pub root: PathBuf,
+    all: Vec<PathBuf>,
+    pub query: String,
+    pub matches: Vec<PathBuf>,
+    pub selected: usize,
+}
+
+impl TreeFilter {
+    pub fn new(root: &Path) -> Self {
+        let all = crate::filesystem::collect_files(root, 8000);
+        let mut filter = TreeFilter {
+            root: root.to_path_buf(),
+            all,
+            query: String::new(),
+            matches: Vec::new(),
+            selected: 0,
+        };
+        filter.refilter();
+        filter
+    }
+
+    pub fn refilter(&mut self) {
+        if self.query.is_empty() {
+            self.matches = self.all.iter().take(500).cloned().collect();
+        } else {
+            let query = self.query.to_lowercase();
+            let root = self.root.clone();
+            let mut scored: Vec<(i32, PathBuf)> = self
+                .all
+                .iter()
+                .filter_map(|path| {
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    // Score the path relative to the project root: the absolute
+                    // prefix ("/home/you/project") would otherwise match almost
+                    // any query.
+                    let relative = path.strip_prefix(&root).unwrap_or(path);
+                    let full = relative.to_string_lossy();
+                    let name_score = fuzzy_score(&query, name);
+                    let path_score = fuzzy_score(&query, &full).map(|score| score + 200);
+                    match (name_score, path_score) {
+                        (Some(a), Some(b)) => Some((a.min(b), path.clone())),
+                        (Some(a), None) => Some((a, path.clone())),
+                        (None, Some(b)) => Some((b, path.clone())),
+                        (None, None) => None,
+                    }
+                })
+                .collect();
+            scored.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            self.matches = scored.into_iter().map(|(_, path)| path).collect();
+        }
+        self.selected = 0;
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if self.selected + 1 < self.matches.len() {
+            self.selected += 1;
+        }
+    }
+
+    pub fn selected_path(&self) -> Option<&Path> {
+        self.matches.get(self.selected).map(PathBuf::as_path)
+    }
+
+    pub fn push_char(&mut self, c: char) {
+        self.query.push(c);
+        self.refilter();
+    }
+
+    pub fn backspace(&mut self) {
+        self.query.pop();
+        self.refilter();
+    }
 }

@@ -219,3 +219,24 @@ fn long_file_names_are_truncated_in_the_tree() {
     );
     cleanup(&dir);
 }
+
+#[test]
+fn tree_filter_lists_matching_files() {
+    let dir = temp_project("filter");
+    fs::write(dir.join("src/engine.rs"), "fn f() {}\n").unwrap();
+
+    let mut app = App::new(Some(&dir)).unwrap();
+    app.execute_command(ids::FILTER_TREE);
+    assert!(app.tree_filter.is_some());
+
+    let filter = app.tree_filter.as_mut().unwrap();
+    filter.push_char('e');
+    filter.push_char('n');
+
+    let screen = draw_at(&mut app, 100, 20);
+    assert!(
+        screen.contains("engine.rs"),
+        "the filter should list matching files:\n{screen}"
+    );
+    cleanup(&dir);
+}

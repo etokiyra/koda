@@ -56,13 +56,17 @@ fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(30), Constraint::Min(1)])
             .split(area);
-        file_tree::render(
-            frame,
-            chunks[0],
-            &app.workspace.tree,
-            &app.workspace.git,
-            app.focus == Focus::FileTree,
-        );
+        if let Some(filter) = &app.tree_filter {
+            file_tree::render_filter(frame, chunks[0], filter, app.focus == Focus::FileTree);
+        } else {
+            file_tree::render(
+                frame,
+                chunks[0],
+                &app.workspace.tree,
+                &app.workspace.git,
+                app.focus == Focus::FileTree,
+            );
+        }
         render_editor_area(frame, chunks[1], app);
     } else {
         render_editor_area(frame, area, app);

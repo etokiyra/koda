@@ -21,7 +21,9 @@ use crate::language::{Capability, LanguageId, LanguageService};
 use crate::project::Workspace;
 use crate::terminal;
 use crate::ui;
-use overlay::{Overlay, Picker, PickerAction, PickerItem, Prompt, PromptKind, Search, SearchField};
+use overlay::{
+    Overlay, Picker, PickerAction, PickerItem, Prompt, PromptKind, Search, SearchField, TreeFilter,
+};
 
 /// Which surface receives keyboard input when no overlay is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +51,8 @@ pub struct App {
     pub search: Search,
     pub clipboard: String,
     pub recent_files: Vec<PathBuf>,
+    /// Inline file-tree filter, when active.
+    pub tree_filter: Option<TreeFilter>,
     pub tree_visible: bool,
     pub focus: Focus,
     pub status: Status,
@@ -86,6 +90,7 @@ impl App {
             search: Search::default(),
             clipboard: String::new(),
             recent_files: Vec::new(),
+            tree_filter: None,
             tree_visible: true,
             focus: Focus::Editor,
             status: Status::default(),
@@ -313,6 +318,10 @@ impl App {
     }
 
     fn handle_tree_key(&mut self, key: KeyEvent) {
+        if self.tree_filter.is_some() {
+            self.handle_tree_filter_key(key);
+            return;
+        }
         match key.code {
             KeyCode::Up => self.workspace.tree.select_up(),
             KeyCode::Down => self.workspace.tree.select_down(),
@@ -322,8 +331,47 @@ impl App {
                 }
             }
             KeyCode::Left => self.workspace.tree.collapse_selected(),
+            KeyCode::Char('/') => self.open_tree_filter(),
             KeyCode::Char('.') => self.toggle_hidden(),
             KeyCode::Esc => self.focus = Focus::Editor,
+            _ => {}
+        }
+    }
+
+    fn handle_tree_filter_key(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Esc => self.tree_filter = None,
+            KeyCode::Up => {
+                if let Some(filter) = self.tree_filter.as_mut() {
+                    filter.move_up();
+                }
+            }
+            KeyCode::Down => {
+                if let Some(filter) = self.tree_filter.as_mut() {
+                    filter.move_down();
+                }
+            }
+            KeyCode::Enter => {
+                let path = self
+                    .tree_filter
+                    .as_ref()
+                    .and_then(|filter| filter.selected_path().map(Path::to_path_buf));
+                self.tree_filter = None;
+                if let Some(path) = path {
+                    self.open_path(path);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(filter) = self.tree_filter.as_mut() {
+                    filter.backspace();
+                }
+            }
+            KeyCode::Char(c) if !ctrl => {
+                if let Some(filter) = self.tree_filter.as_mut() {
+                    filter.push_char(c);
+                }
+            }
             _ => {}
         }
     }
@@ -479,6 +527,7 @@ impl App {
             ids::TOGGLE_TREE => self.toggle_tree(),
             ids::FOCUS_TREE => self.focus_tree(),
             ids::TOGGLE_HIDDEN => self.toggle_hidden(),
+            ids::FILTER_TREE => self.open_tree_filter(),
             ids::NEXT_TAB => self.editor.next_tab(),
             ids::PREV_TAB => self.editor.previous_tab(),
             ids::PALETTE => self.open_command_palette(),
@@ -790,6 +839,14 @@ impl App {
             "hidden"
         };
         self.set_status(format!("Dotfiles {state}"));
+    }
+
+    fn open_tree_filter(&mut self) {
+        if !self.tree_visible {
+            self.tree_visible = true;
+        }
+        self.focus = Focus::FileTree;
+        self.tree_filter = Some(TreeFilter::new(self.workspace.root()));
     }
 
     /// Ask the background worker to detect the active file's language.

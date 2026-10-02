@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parent folder.
 - File-tree rows truncate long names with an ellipsis instead of spilling into
   the editor, and the tree header brightens when the tree has focus.
+- Pressing `/` in the file tree opens an inline fuzzy filter over the project
+  files (scored on paths relative to the project root), with keyboard
+  navigation and Enter to open.
 - Find searches line by line instead of copying the whole file on every
   keystroke, and Koda now only repaints when something actually changes.
 
