@@ -21,9 +21,10 @@ fn main() {
         Some("elixir") => koda::language::tools::Tool::ElixirLs,
         Some("swift") => koda::language::tools::Tool::SwiftLs,
         Some("perl") => koda::language::tools::Tool::PerlLs,
+        Some("pls") => koda::language::tools::Tool::Pls,
         other => {
             eprintln!(
-                "usage: install_check <omnisharp|jdtls|html|css|lua|kotlin|sql|asm|dart|elixir|swift|perl> (got {other:?})"
+                "usage: install_check <omnisharp|jdtls|html|css|lua|kotlin|sql|asm|dart|elixir|swift|perl|pls> (got {other:?})"
             );
             std::process::exit(2);
         }

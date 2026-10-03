@@ -103,6 +103,7 @@ pub enum Tool {
     RubyLs,
     AsmLsp,
     PerlLs,
+    Pls,
     DartAnalyzer,
     ElixirLs,
     SwiftLs,
@@ -140,6 +141,9 @@ impl Tool {
         Tool::Sqls,
         Tool::RubyLs,
         Tool::AsmLsp,
+        // PLS is preferred over Perl::LanguageServer: it has no `Coro`
+        // dependency, so it builds on current Perls.
+        Tool::Pls,
         Tool::PerlLs,
         Tool::DartAnalyzer,
         Tool::ElixirLs,
@@ -170,8 +174,10 @@ impl Tool {
             Tool::Sqls => "sqls",
             Tool::RubyLs => "solargraph",
             Tool::AsmLsp => "asm-lsp",
-            // The module has no installed script; it is launched through `perl`.
+            // `Perl::LanguageServer` has no installed script; it is launched
+            // through `perl`. PLS is a normal executable.
             Tool::PerlLs => "perl",
+            Tool::Pls => "pls",
             Tool::DartAnalyzer => "dart",
             Tool::ElixirLs => "elixir-ls",
             Tool::SwiftLs => "sourcekit-lsp",
@@ -216,6 +222,7 @@ impl Tool {
             Tool::RubyLs => "solargraph",
             Tool::AsmLsp => "asm-lsp",
             Tool::PerlLs => "perl-language-server",
+            Tool::Pls => "pls",
             Tool::DartAnalyzer => "dart",
             Tool::ElixirLs => "elixir-ls",
             Tool::SwiftLs => "sourcekit-lsp",
@@ -247,6 +254,7 @@ impl Tool {
             Tool::RubyLs => LanguageId::Ruby,
             Tool::AsmLsp => LanguageId::Assembly,
             Tool::PerlLs => LanguageId::Perl,
+            Tool::Pls => LanguageId::Perl,
             Tool::DartAnalyzer => LanguageId::Dart,
             Tool::ElixirLs => LanguageId::Elixir,
             Tool::SwiftLs => LanguageId::Swift,
@@ -296,6 +304,7 @@ impl Tool {
             | Tool::RubyLs
             | Tool::AsmLsp
             | Tool::PerlLs
+            | Tool::Pls
             | Tool::DartAnalyzer
             | Tool::ElixirLs
             | Tool::SwiftLs
@@ -327,6 +336,7 @@ impl Tool {
             | Tool::RubyLs
             | Tool::AsmLsp
             | Tool::PerlLs
+            | Tool::Pls
             | Tool::DartAnalyzer
             | Tool::ElixirLs
             | Tool::SwiftLs
@@ -382,6 +392,7 @@ impl Tool {
                 | Tool::KotlinLs
                 | Tool::Sqls
                 | Tool::PerlLs
+                | Tool::Pls
                 | Tool::ElixirLs
                 | Tool::SwiftLs
                 | Tool::AsmLsp
@@ -410,6 +421,7 @@ impl Tool {
             Tool::PerlLs => {
                 "Koda bootstraps cpanm and installs Perl::LanguageServer into an isolated local::lib"
             }
+            Tool::Pls => "Koda bootstraps cpanm and installs PLS into an isolated local::lib",
             Tool::DartAnalyzer => "Koda can install a managed Dart SDK for the analysis server",
             Tool::ElixirLs => "Koda can install Erlang/OTP, Elixir and ElixirLS",
             Tool::SwiftLs => {
@@ -431,7 +443,7 @@ impl Tool {
     /// not a promise: the archive a distribution serves can change.
     pub fn estimated_download_bytes(self) -> Option<u64> {
         match self {
-            Tool::SwiftLs if swift_asset().is_some() => Some(1_150_000_000),
+            Tool::SwiftLs if swift_toolchain().is_some() => Some(1_150_000_000),
             Tool::DartAnalyzer if dart_sdk_asset().is_some() => Some(240_000_000),
             Tool::ElixirLs if bob_platform().is_some() => Some(90_000_000),
             Tool::KotlinLs => Some(260_000_000),
@@ -456,18 +468,33 @@ impl Tool {
             return reason;
         }
         match self {
+            Tool::SwiftLs if swift_toolchain().is_none() => "no Swift toolchain is published for \
+                 this platform (musl or a non-Linux host); install the Swift toolchain manually \
+                 and Koda will use it"
+                .to_string(),
             Tool::SwiftLs if locate("gpg").is_none() => {
                 "install `gnupg` so Koda can verify the Swift toolchain signature".to_string()
             }
-            Tool::SwiftLs => "swift.org publishes toolchains only for Ubuntu, Debian, Fedora, \
-                 Amazon Linux and RHEL; install the Swift toolchain for your distribution and \
-                 Koda will use it"
-                .to_string(),
+            Tool::SwiftLs => {
+                // `can_install` was false for another reason: a library the
+                // toolchain needs is missing.
+                let missing = swift_missing_libs();
+                let hint = if distro_is_arch() {
+                    " (on Arch: `libxml2-legacy`)"
+                } else {
+                    ""
+                };
+                format!(
+                    "the Swift toolchain needs {}{hint} from your distribution; install it and \
+                     Koda can install Swift",
+                    missing.join(", ")
+                )
+            }
             Tool::ElixirLs => "no Erlang/Elixir build is published for this platform; install \
                  Erlang and Elixir and Koda will use ElixirLS"
                 .to_string(),
-            Tool::PerlLs if locate("perl").is_none() => {
-                "install Perl and Koda can set up Perl::LanguageServer automatically".to_string()
+            Tool::PerlLs | Tool::Pls if locate("perl").is_none() => {
+                "install Perl and Koda can set up its language server automatically".to_string()
             }
             _ => {
                 let missing = self.missing_prerequisites();
@@ -486,6 +513,29 @@ impl Tool {
             .iter()
             .copied()
             .find(|tool| tool.serves(language) && tool.purpose() == purpose)
+    }
+
+    /// The first language server for `language` that is installed and usable.
+    ///
+    /// A language may have more than one candidate server — Perl has PLS and
+    /// `Perl::LanguageServer` — so Koda picks the first *available* one in
+    /// preference order rather than committing to a single tool.
+    pub fn available_server(language: LanguageId, tools: &ToolRegistry) -> Option<Tool> {
+        Tool::ALL.iter().copied().find(|tool| {
+            tool.serves(language)
+                && tool.purpose() == ToolPurpose::LanguageServer
+                && tools.available(*tool)
+        })
+    }
+
+    /// The first language server for `language` that Koda could install.
+    pub fn installable_server(language: LanguageId, tools: &ToolRegistry) -> Option<Tool> {
+        Tool::ALL.iter().copied().find(|tool| {
+            tool.serves(language)
+                && tool.purpose() == ToolPurpose::LanguageServer
+                && !tools.available(*tool)
+                && can_install(*tool)
+        })
     }
 
     /// The preferred install command, when one exists.
@@ -521,7 +571,7 @@ impl Tool {
             Tool::AsmLsp => Some(("cargo", &["install", "asm-lsp"])),
             // Perl, Dart, Elixir and Swift servers are installed by Koda's own
             // plans rather than a single package-manager command.
-            Tool::PerlLs | Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => None,
+            Tool::PerlLs | Tool::Pls | Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => None,
             // `jdtls` and `OmniSharp` are installed by Koda's own managed
             // download plan rather than a single package-manager command.
             Tool::Jdtls | Tool::OmniSharp => None,
@@ -560,7 +610,7 @@ impl Tool {
             Tool::Sqls => &["go"],
             Tool::RubyLs => &["gem"],
             Tool::AsmLsp => &["cargo"],
-            Tool::PerlLs => &["perl"],
+            Tool::PerlLs | Tool::Pls => &["perl"],
             // Dart, Erlang/Elixir and the Swift toolchain are provided by
             // Koda's managed download plans.
             Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => &[],
@@ -628,6 +678,8 @@ impl Tool {
             // `Perl::LanguageServer` bootstraps cpanm and installs into an
             // isolated local::lib.
             Tool::PerlLs => perl_attempts(),
+            // PLS has no `Coro` dependency, so it is the preferred server.
+            Tool::Pls => pls_attempts(),
             // Erlang/OTP, Elixir and ElixirLS are installed as one toolchain.
             Tool::ElixirLs => elixir_ls_attempts(),
             // The Swift toolchain is GPG-verified and only offered where
@@ -739,6 +791,10 @@ pub enum InstallStep {
         asset: String,
         dest: PathBuf,
     },
+    /// Create Koda's Swift compatibility directory: a `libncurses.so.6` alias to
+    /// the system's wide library and a link to the system's `libxml2.so.2`,
+    /// without modifying the system.
+    SwiftCompat { dest: PathBuf },
     /// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`, optionally
     /// dropping `strip` leading path components.
     Extract {
@@ -1132,6 +1188,7 @@ fn run_step(step: &InstallStep) -> Result<(), String> {
             asset,
             dest,
         } => github_release(repo, tag, asset, dest),
+        InstallStep::SwiftCompat { dest } => swift_compat(dest),
         InstallStep::Extract {
             archive,
             dest,
@@ -1256,6 +1313,14 @@ fn download(url: &str, dest: &Path, sha256: Option<&str>) -> Result<(), String> 
         "--compressed",
         "--connect-timeout",
         "30",
+        // Retry transient failures (a reset connection, a 5xx) a few times
+        // before giving up, so a large managed download survives a blip.
+        "--retry",
+        "4",
+        "--retry-delay",
+        "2",
+        "--retry-max-time",
+        "180",
         "--max-time",
         "3600",
         // Abort a genuinely stalled transfer (under 1 KiB/s for a minute) rather
@@ -1560,6 +1625,14 @@ fn download_gpg(url: &str, dest: &Path, signature_url: &str, keys_url: &str) -> 
     // never leaves a large unverified file on disk.
     download(keys_url, &keys, None)?;
     download(signature_url, &signature, None)?;
+    // Reuse an archive that already verifies, so re-running an install (or
+    // recovering from a network failure) does not re-download a large toolchain.
+    if dest.is_file() && verify_signature(&home, &keys, &signature, dest).is_ok() {
+        let _ = std::fs::remove_file(&signature);
+        return Ok(());
+    }
+    // A stale or partial file cannot be trusted; start the download fresh.
+    let _ = std::fs::remove_file(dest);
     download(url, dest, None)?;
 
     let result = verify_signature(&home, &keys, &signature, dest);
@@ -1646,6 +1719,61 @@ fn github_release(repo: &str, tag: &str, asset: &str, dest: &Path) -> Result<(),
     download(&url, dest, Some(&checksum))
 }
 
+/// Create Koda's Swift compatibility directory.
+///
+/// The official toolchain's only mismatches with a non-native distribution are
+/// the ncurses soname (Koda's build expects `libncurses.so.6`, the system ships
+/// `libncursesw.so.6`, the same library) and `libxml2.so.2`, which some rolling
+/// distributions provide through a compatibility package. Nothing in the system
+/// is copied or modified: the directory holds links that a scoped
+/// `LD_LIBRARY_PATH` uses to launch `sourcekit-lsp`.
+fn swift_compat(dest: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dest)
+        .map_err(|err| format!("could not create {}: {err}", dest.display()))?;
+    // Alias the narrow ncurses-family sonames to the wide libraries the system
+    // actually ships.
+    for narrow in ["libncurses.so.6", "libpanel.so.6", "libform.so.6"] {
+        if system_library(&[narrow]).is_some() {
+            continue;
+        }
+        let wide = narrow.replace(".so.6", "w.so.6");
+        let Some(target) = system_library(&[&wide]) else {
+            return Err(format!(
+                "{narrow} is required by the Swift toolchain but neither it nor {wide} exists"
+            ));
+        };
+        link_into(dest, narrow, &target)?;
+    }
+    let Some(xml) = system_library(&["libxml2.so.2"]) else {
+        return Err(
+            "libxml2.so.2 is required by the Swift toolchain; install your distribution's \
+             libxml2 compatibility package (on Arch: libxml2-legacy)"
+                .to_string(),
+        );
+    };
+    link_into(dest, "libxml2.so.2", &xml)?;
+    Ok(())
+}
+
+/// Create (or refresh) `dir/name` as a symlink to `target`.
+#[cfg(unix)]
+fn link_into(dir: &Path, name: &str, target: &Path) -> Result<(), String> {
+    let link = dir.join(name);
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(target, &link).map_err(|err| {
+        format!(
+            "could not link {} → {}: {err}",
+            link.display(),
+            target.display()
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn link_into(_dir: &Path, _name: &str, _target: &Path) -> Result<(), String> {
+    Err("the Swift compatibility layer is only used on Linux".to_string())
+}
+
 /// A sibling path with an extra extension appended (`a.tar.gz` → `a.tar.gz.sig`).
 fn append_extension(path: &Path, extension: &str) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
@@ -1715,13 +1843,108 @@ fn swift_platform(
     None
 }
 
-/// The swift.org platform tag for this host, if swift.org builds for it.
-fn swift_asset() -> Option<(&'static str, &'static str)> {
+/// The swift.org platform tag for a distribution it builds for directly.
+fn swift_native_asset() -> Option<(&'static str, &'static str)> {
     if std::env::consts::OS != "linux" {
         return None;
     }
     let (id, id_like, version) = os_release()?;
     swift_platform(&id, &id_like, &version, std::env::consts::ARCH)
+}
+
+/// The Swift toolchain Koda should provision on this host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SwiftToolchain {
+    /// The swift.org release directory (`ubuntu2404`, `ubi10`, …).
+    tag: &'static str,
+    /// The artifact suffix (`ubuntu24.04`, `ubi10`, …).
+    suffix: &'static str,
+    /// Whether this is the build for the running distribution (no compat needed
+    /// beyond what the distribution provides).
+    native: bool,
+}
+
+/// Resolve the Swift toolchain for this host.
+///
+/// A distribution swift.org builds for directly gets its own artifact. Any
+/// other glibc Linux system gets the portable UBI10 build plus Koda's
+/// compatibility layer (a ncurses soname alias and the distribution's
+/// `libxml2.so.2`), which is how the maintained Arch package makes the same
+/// toolchain run. musl systems and non-Linux hosts get nothing.
+fn swift_toolchain() -> Option<SwiftToolchain> {
+    if let Some((tag, suffix)) = swift_native_asset() {
+        return Some(SwiftToolchain {
+            tag,
+            suffix,
+            native: true,
+        });
+    }
+    if std::env::consts::OS != "linux" || libc_is_musl() {
+        return None;
+    }
+    let (tag, suffix) = match std::env::consts::ARCH {
+        "x86_64" => ("ubi10", "ubi10"),
+        "aarch64" => ("ubi10-aarch64", "ubi10-aarch64"),
+        _ => return None,
+    };
+    Some(SwiftToolchain {
+        tag,
+        suffix,
+        native: false,
+    })
+}
+
+/// Libraries the Swift toolchain needs that this system does not provide.
+///
+/// `libncurses.so.6` is satisfied by the wide `libncursesw.so.6` (the same
+/// library; the soname differs because Koda's build is not the system's).
+/// `libxml2.so.2` is a genuine ABI version some rolling distributions moved past
+/// and provide through a compatibility package.
+fn swift_missing_libs() -> Vec<&'static str> {
+    let mut missing = Vec::new();
+    if system_library(&["libncurses.so.6", "libncursesw.so.6"]).is_none() {
+        missing.push("libncurses.so.6");
+    }
+    if system_library(&["libxml2.so.2"]).is_none() {
+        missing.push("libxml2.so.2");
+    }
+    missing
+}
+
+/// Whether the running distribution is Arch or an Arch derivative.
+fn distro_is_arch() -> bool {
+    match os_release() {
+        Some((id, id_like, _)) => {
+            id == "arch" || id_like.split_whitespace().any(|like| like == "arch")
+        }
+        None => false,
+    }
+}
+
+/// Find a system shared library by soname in the usual library directories.
+fn system_library(names: &[&str]) -> Option<PathBuf> {
+    let mut dirs: Vec<PathBuf> = vec![
+        PathBuf::from("/usr/lib"),
+        PathBuf::from("/usr/lib64"),
+        PathBuf::from("/lib"),
+        PathBuf::from("/lib64"),
+        PathBuf::from("/usr/local/lib"),
+        PathBuf::from("/usr/local/lib64"),
+        PathBuf::from("/usr/lib/x86_64-linux-gnu"),
+        PathBuf::from("/usr/lib/aarch64-linux-gnu"),
+    ];
+    // A user-writable location lets a rootless user supply a compatibility
+    // library it cannot install system-wide.
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(PathBuf::from(&home).join(".local/lib"));
+        dirs.push(PathBuf::from(home).join(".local/lib64"));
+    }
+    dirs.iter().find_map(|dir| {
+        names
+            .iter()
+            .map(|name| dir.join(name))
+            .find(|candidate| candidate.is_file())
+    })
 }
 
 /// The `builds.hex.pm` platform directory for this host, if `bob` publishes one.
@@ -1744,7 +1967,7 @@ fn bob_platform() -> Option<&'static str> {
 /// success. musl systems (Alpine) are excluded because the glibc build cannot
 /// run there at all.
 fn bob_fallback_platform() -> Option<&'static str> {
-    if Path::new("/etc/alpine-release").exists() {
+    if libc_is_musl() {
         return None;
     }
     Some("ubuntu-24.04")
@@ -2040,6 +2263,9 @@ fn step_available(step: &InstallStep) -> bool {
         | InstallStep::GithubRelease { .. } => locate("curl").is_some(),
         // A `bob` build also needs a supported platform directory.
         InstallStep::BobBuild { .. } => locate("curl").is_some() && bob_platform().is_some(),
+        // The compatibility layer can only be built when every library it needs
+        // is available on the system.
+        InstallStep::SwiftCompat { .. } => swift_missing_libs().is_empty(),
         // A signature-verified download also needs `gpg`.
         InstallStep::DownloadGpg { .. } => locate("curl").is_some() && locate("gpg").is_some(),
         InstallStep::Extract { archive, .. } => {
@@ -2512,6 +2738,13 @@ pub fn swift_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("swift"))
 }
 
+/// Koda's Swift compatibility directory: links to the system libraries the
+/// official toolchain needs but does not ship, used through a scoped
+/// `LD_LIBRARY_PATH` without modifying the system.
+pub fn swift_compat_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("swift-compat"))
+}
+
 /// Koda's managed Erlang/OTP installation directory.
 pub fn otp_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("otp"))
@@ -2587,7 +2820,7 @@ pub fn launch_env(tool: Tool) -> Vec<(String, String)> {
         }
         // A server installed into Koda's isolated Perl local::lib needs that
         // library and its bin directory, and nothing from the system Perl.
-        Tool::PerlLs => {
+        Tool::PerlLs | Tool::Pls => {
             if let Some(lib) = perl_local_lib_dir() {
                 let lib = lib.to_string_lossy().into_owned();
                 env.push(("PERL5LIB".to_string(), format!("{lib}/lib/perl5")));
@@ -2600,33 +2833,34 @@ pub fn launch_env(tool: Tool) -> Vec<(String, String)> {
         // system-provided ElixirLS is left on the user's own environment.
         Tool::ElixirLs => {
             if elixir_ls_dir().is_some_and(|dir| dir.is_dir()) {
-                let mut bins: Vec<String> = Vec::new();
                 if let Some(dir) = elixir_ls_dir() {
-                    bins.push(dir.to_string_lossy().into_owned());
+                    env.push(("PATH".to_string(), prepend_path(&dir.to_string_lossy())));
                 }
-                if let Some(dir) = elixir_dir() {
-                    bins.push(dir.join("bin").to_string_lossy().into_owned());
-                }
-                if let Some(dir) = otp_dir() {
-                    bins.push(dir.join("bin").to_string_lossy().into_owned());
-                }
-                if !bins.is_empty() {
-                    env.push(("PATH".to_string(), prepend_colon(&bins.join(":"))));
-                }
-                if let Some(home) = mix_home() {
-                    let home = home.to_string_lossy().into_owned();
-                    env.push(("MIX_HOME".to_string(), home.clone()));
-                    env.push(("HEX_HOME".to_string(), home));
-                }
+                env.extend(elixir_env());
             }
         }
         // The managed Swift toolchain's `sourcekit-lsp` finds its sibling
-        // libraries through the toolchain's own `usr/bin` directory.
+        // binaries through `usr/bin`, and its libraries through the toolchain's
+        // own lib directory plus Koda's compatibility directory (which aliases
+        // the sonames a non-native distribution does not provide).
         Tool::SwiftLs => {
             if let Some(dir) = swift_dir() {
                 env.push((
                     "PATH".to_string(),
                     prepend_path(&dir.join("usr/bin").to_string_lossy()),
+                ));
+                let mut libs: Vec<String> = Vec::new();
+                if let Some(compat) = swift_compat_dir() {
+                    libs.push(compat.to_string_lossy().into_owned());
+                }
+                libs.push(
+                    dir.join("usr/lib/swift/linux")
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+                env.push((
+                    "LD_LIBRARY_PATH".to_string(),
+                    prepend_colon(&libs.join(":")),
                 ));
             }
         }
@@ -2648,6 +2882,45 @@ fn prepend_colon(dirs: &str) -> String {
         Some(existing) => format!("{dirs}:{}", existing.to_string_lossy()),
         None => dirs.to_string(),
     }
+}
+
+/// The environment the managed Erlang/Elixir runtime needs: its `bin`
+/// directories on `PATH` and a private Mix/Hex home.
+///
+/// Only the directories Koda actually installed are used, so a system Elixir is
+/// left on the user's own configuration.
+pub fn elixir_env() -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    let mut bins: Vec<String> = Vec::new();
+    if let Some(dir) = elixir_dir().filter(|dir| dir.is_dir()) {
+        bins.push(dir.join("bin").to_string_lossy().into_owned());
+    }
+    if let Some(dir) = otp_dir().filter(|dir| dir.is_dir()) {
+        bins.push(dir.join("bin").to_string_lossy().into_owned());
+    }
+    if !bins.is_empty() {
+        env.push(("PATH".to_string(), prepend_colon(&bins.join(":"))));
+    }
+    if let Some(home) = mix_home().filter(|dir| dir.is_dir()) {
+        let home = home.to_string_lossy().into_owned();
+        env.push(("MIX_HOME".to_string(), home.clone()));
+        env.push(("HEX_HOME".to_string(), home));
+    }
+    env
+}
+
+/// Whether this host uses musl rather than glibc.
+///
+/// musl systems (Alpine) cannot run the glibc-targeted precompiled runtimes, so
+/// Koda reports them as unsupported instead of downloading a build that fails.
+pub fn libc_is_musl() -> bool {
+    if std::path::Path::new("/etc/alpine-release").exists() {
+        return true;
+    }
+    // The musl dynamic loader is installed under its own soname.
+    ["/lib/ld-musl-x86_64.so.1", "/lib/ld-musl-aarch64.so.1"]
+        .iter()
+        .any(|loader| std::path::Path::new(loader).exists())
 }
 
 /// The OmniSharp release asset for this platform, if one exists.
@@ -2798,12 +3071,25 @@ fn kotlin_ls_attempts() -> Vec<InstallAttempt> {
 }
 
 /// Install `Perl::LanguageServer` into an isolated `local::lib`.
+fn perl_attempts() -> Vec<InstallAttempt> {
+    perl_module_attempts("Perl::LanguageServer")
+}
+
+/// Install `PLS` into an isolated `local::lib`.
+///
+/// PLS is preferred over `Perl::LanguageServer` because it has no `Coro`
+/// dependency, so it builds and runs on current Perls.
+fn pls_attempts() -> Vec<InstallAttempt> {
+    perl_module_attempts("PLS")
+}
+
+/// Bootstrap `cpanm` and install `package` into an isolated `local::lib`.
 ///
 /// Koda bootstraps `cpanm` from a checksum-verified `App::cpanminus` archive —
 /// so an interactive, unconfigured `cpan` is never run — and uses it with
 /// `--local-lib`, which never touches the system Perl. A system `perl` is still
 /// required to run `cpanm`; Koda does not build a Perl runtime.
-fn perl_attempts() -> Vec<InstallAttempt> {
+fn perl_module_attempts(package: &str) -> Vec<InstallAttempt> {
     if locate("perl").is_none() {
         return Vec::new();
     }
@@ -2838,7 +3124,7 @@ fn perl_attempts() -> Vec<InstallAttempt> {
                         "--local-lib".to_string(),
                         lib.to_string_lossy().into_owned(),
                         "--notest".to_string(),
-                        "Perl::LanguageServer".to_string(),
+                        package.to_string(),
                     ],
                 )
                 // Some Makefile.PLs prompt; take the default answer instead of
@@ -2861,34 +3147,47 @@ fn swift_toolchain_urls(tag: &str, suffix: &str) -> (String, String) {
 /// A GPG-verified Swift toolchain from swift.org.
 ///
 /// swift.org publishes one toolchain per distribution release and signs it with
-/// a detached signature, so Koda resolves the artifact from `/etc/os-release`,
-/// verifies the signature against swift.org's published keys, and extracts the
-/// `usr/` tree. On a distribution swift.org does not build for, the attempt is
-/// empty and Koda explains why instead of downloading something that cannot run.
+/// a detached signature, so Koda verifies the signature against swift.org's
+/// published keys and extracts the `usr/` tree. A distribution swift.org does
+/// not build for gets the portable UBI10 build plus a managed compatibility
+/// layer, so the same verified artifact runs without touching the system. When
+/// even that cannot run (a missing compatibility library, musl, a non-Linux
+/// host) the attempt is empty and Koda explains exactly why.
 fn swift_attempts() -> Vec<InstallAttempt> {
-    let Some((tag, suffix)) = swift_asset() else {
+    let Some(toolchain) = swift_toolchain() else {
         return Vec::new();
     };
-    let (Some(downloads), Some(dest)) = (downloads_dir(), swift_dir()) else {
+    let (Some(downloads), Some(dest), Some(compat)) =
+        (downloads_dir(), swift_dir(), swift_compat_dir())
+    else {
         return Vec::new();
     };
-    let (url, signature_url) = swift_toolchain_urls(tag, suffix);
-    let archive = downloads.join(format!("swift-{SWIFT_VERSION}-RELEASE-{suffix}.tar.gz"));
+    let (url, signature_url) = swift_toolchain_urls(toolchain.tag, toolchain.suffix);
+    let archive = downloads.join(format!(
+        "swift-{SWIFT_VERSION}-RELEASE-{}.tar.gz",
+        toolchain.suffix
+    ));
+    let mut steps = vec![
+        InstallStep::DownloadGpg {
+            url,
+            signature_url,
+            keys_url: "https://www.swift.org/keys/all-keys.asc".to_string(),
+            dest: archive.clone(),
+        },
+        InstallStep::Extract {
+            archive,
+            dest,
+            strip: 1,
+        },
+    ];
+    // A build for another distribution needs the compatibility layer; a native
+    // build already links against this distribution's libraries.
+    if !toolchain.native {
+        steps.push(InstallStep::SwiftCompat { dest: compat });
+    }
     vec![InstallAttempt::managed(
         "a GPG-verified Swift toolchain",
-        vec![
-            InstallStep::DownloadGpg {
-                url,
-                signature_url,
-                keys_url: "https://www.swift.org/keys/all-keys.asc".to_string(),
-                dest: archive.clone(),
-            },
-            InstallStep::Extract {
-                archive,
-                dest,
-                strip: 1,
-            },
-        ],
+        steps,
     )]
 }
 
@@ -3232,15 +3531,19 @@ mod tests {
             can_install(Tool::DartAnalyzer),
             dart_sdk_asset().is_some() && locate("curl").is_some() && locate("unzip").is_some()
         );
-        // Swift is managed only where swift.org publishes a signed toolchain,
-        // and only when its signature can actually be verified.
-        assert_eq!(
-            can_install(Tool::SwiftLs),
-            swift_asset().is_some()
-                && locate("curl").is_some()
-                && locate("gpg").is_some()
-                && locate("tar").is_some()
-        );
+        // Swift is managed where swift.org publishes a signed toolchain (native
+        // or the portable UBI10 build with its compatibility layer), and only
+        // when the signature can be verified and every library is available.
+        let swift_expected = match swift_toolchain() {
+            None => false,
+            Some(toolchain) => {
+                locate("curl").is_some()
+                    && locate("gpg").is_some()
+                    && locate("tar").is_some()
+                    && (toolchain.native || swift_missing_libs().is_empty())
+            }
+        };
+        assert_eq!(can_install(Tool::SwiftLs), swift_expected);
         assert_eq!(
             Tool::for_language(LanguageId::Dart, ToolPurpose::LanguageServer),
             Some(Tool::DartAnalyzer)
@@ -3419,9 +3722,122 @@ mod tests {
     }
 
     #[test]
+    fn perl_prefers_pls_and_installs_it_with_cpanm() {
+        let position = |tool: Tool| Tool::ALL.iter().position(|t| *t == tool).unwrap();
+        assert!(
+            position(Tool::Pls) < position(Tool::PerlLs),
+            "PLS must be the preferred Perl server"
+        );
+        assert_eq!(Tool::Pls.program(), "pls");
+        assert!(Tool::Pls.server_args().is_empty());
+        assert!(Tool::Pls.probe_as_server());
+
+        let attempts = Tool::Pls.install_attempts();
+        if locate("perl").is_none() || tools_dir().is_none() {
+            assert!(attempts.is_empty());
+            return;
+        }
+        let steps = &attempts.first().expect("a PLS plan").steps;
+        assert!(
+            steps
+                .iter()
+                .any(|step| matches!(step, InstallStep::Run(command)
+                if command.program == "perl" && command.args.iter().any(|arg| arg == "PLS"))),
+            "the PLS plan must install PLS: {steps:?}"
+        );
+        // Both Perl servers share the isolated local::lib.
+        if let Some(lib) = perl_local_lib_dir() {
+            let env = launch_env(Tool::Pls);
+            assert_eq!(
+                env.iter()
+                    .find(|(key, _)| key == "PERL5LIB")
+                    .map(|(_, value)| value.clone()),
+                Some(format!("{}/lib/perl5", lib.display()))
+            );
+        }
+    }
+
+    #[test]
+    fn a_later_server_candidate_is_used_when_the_first_is_missing() {
+        // Only `Perl::LanguageServer` is installed; PLS is not.
+        let registry = ToolRegistry {
+            statuses: vec![
+                ToolStatus {
+                    tool: Tool::Pls,
+                    available: false,
+                    version: None,
+                    path: None,
+                    error: None,
+                },
+                ToolStatus {
+                    tool: Tool::PerlLs,
+                    available: true,
+                    version: None,
+                    path: None,
+                    error: None,
+                },
+            ],
+        };
+        assert_eq!(
+            Tool::available_server(LanguageId::Perl, &registry),
+            Some(Tool::PerlLs),
+            "Koda must fall back to another installed Perl server"
+        );
+    }
+
+    #[test]
+    fn elixir_formatting_uses_mix() {
+        use crate::language::provider::{Capability, LanguageProvider};
+        let provider = crate::language::elixir::ElixirProvider;
+        assert!(
+            provider.capabilities().contains(&Capability::Formatting),
+            "Elixir exposes Formatting"
+        );
+        assert_eq!(provider.formatter(), Some("mix"));
+    }
+
+    #[test]
+    fn swift_toolchain_resolves_or_is_explained() {
+        match swift_toolchain() {
+            Some(toolchain) => {
+                assert!(!toolchain.tag.is_empty() && !toolchain.suffix.is_empty());
+                assert_eq!(toolchain.native, swift_native_asset().is_some());
+            }
+            None => assert!(
+                libc_is_musl()
+                    || std::env::consts::OS != "linux"
+                    || !matches!(std::env::consts::ARCH, "x86_64" | "aarch64")
+            ),
+        }
+    }
+
+    #[test]
+    fn swift_compat_needs_system_libraries() {
+        let dir = std::env::temp_dir().join(format!("koda-swift-compat-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        match swift_compat(&dir) {
+            Ok(()) => {
+                // Every required library was present and linked.
+                assert!(dir.join("libxml2.so.2").exists());
+            }
+            Err(message) => {
+                assert!(
+                    message.contains("libxml2") || message.contains("ncurses"),
+                    "unexpected error: {message}"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn swift_plan_is_gpg_verified() {
         let attempts = Tool::SwiftLs.install_attempts();
-        if swift_asset().is_none() || tools_dir().is_none() {
+        let Some(toolchain) = swift_toolchain() else {
+            assert!(attempts.is_empty());
+            return;
+        };
+        if tools_dir().is_none() {
             assert!(attempts.is_empty());
             return;
         }
@@ -3443,6 +3859,13 @@ mod tests {
         assert!(
             keys_url.contains("swift.org"),
             "unexpected key URL: {keys_url}"
+        );
+        // A non-native distribution needs the compatibility layer.
+        assert_eq!(
+            steps
+                .iter()
+                .any(|step| matches!(step, InstallStep::SwiftCompat { .. })),
+            !toolchain.native
         );
         assert!(
             steps

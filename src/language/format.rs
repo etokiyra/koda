@@ -150,7 +150,43 @@ pub fn dart_format(path: &Path, text: &str) -> FormatOutcome {
     outcome
 }
 
+/// Format Elixir with `mix format -`.
+///
+/// `mix format -` reads a snapshot from stdin and writes the formatted source to
+/// stdout, so it fits the shared contract directly. It runs from the enclosing
+/// Mix project (found by walking up to `mix.exs`) so the project's
+/// `.formatter.exs` applies, and with Koda's managed Erlang/Elixir when present.
+pub fn mix_format(path: &Path, text: &str) -> FormatOutcome {
+    let root = path
+        .ancestors()
+        .find(|dir| dir.join("mix.exs").is_file())
+        .map(|dir| dir.to_path_buf());
+    let env = crate::language::tools::elixir_env();
+    run_full(
+        "mix",
+        &["format", "-"],
+        text,
+        "mix format",
+        "install Erlang/Elixir from Language Setup",
+        root.as_deref(),
+        &env,
+    )
+}
+
 fn run(program: &str, args: &[&str], text: &str, tool: &str, hint: &str) -> FormatOutcome {
+    run_full(program, args, text, tool, hint, None, &[])
+}
+
+/// Run a formatter, optionally from a directory and with extra environment.
+fn run_full(
+    program: &str,
+    args: &[&str],
+    text: &str,
+    tool: &str,
+    hint: &str,
+    cwd: Option<&Path>,
+    extra_env: &[(String, String)],
+) -> FormatOutcome {
     // Prefer a located executable: the process PATH may be minimal when Koda is
     // launched from a GUI or a non-login shell.
     let program_path = crate::language::tools::locate(program)
@@ -161,8 +197,12 @@ fn run(program: &str, args: &[&str], text: &str, tool: &str, hint: &str) -> Form
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
     // npm-installed formatters (Prettier) are `#!/usr/bin/env node` scripts, so
-    // a Koda-managed Node.js must be on PATH when the user has none.
+    // a Koda-managed Node.js must be on PATH when the user has none. Apply this
+    // before the caller's environment so a managed runtime's PATH wins.
     if let Some(node) = crate::language::tools::node_dir() {
         let bin = if cfg!(windows) {
             node
@@ -173,6 +213,9 @@ fn run(program: &str, args: &[&str], text: &str, tool: &str, hint: &str) -> Form
             .map(|value| value.to_string_lossy().into_owned())
             .unwrap_or_default();
         command.env("PATH", format!("{}:{existing}", bin.to_string_lossy()));
+    }
+    for (key, value) in extra_env {
+        command.env(key, value);
     }
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -282,6 +325,25 @@ mod tests {
                 assert!(formatted.contains("    let x = 1;"));
             }
             other => panic!("expected rustfmt to format, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mix_format_formats_when_installed() {
+        // Skip silently when Erlang/Elixir is not available (offline/CI).
+        if crate::language::tools::locate("mix").is_none() {
+            return;
+        }
+        let outcome = mix_format(
+            Path::new("example.ex"),
+            "defmodule  X do\n\n\n  def a( ),do: 1\nend\n",
+        );
+        match outcome {
+            FormatOutcome::Formatted(text) => {
+                assert!(text.contains("defmodule X do"), "formatted: {text:?}");
+                assert!(text.contains("def a(), do: 1"), "formatted: {text:?}");
+            }
+            other => panic!("expected mix format to format, got {other:?}"),
         }
     }
 

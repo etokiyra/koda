@@ -93,3 +93,9 @@ fn swift_handshake() {
 fn perl_handshake() {
     handshake(Tool::PerlLs, LanguageId::Perl);
 }
+
+#[test]
+#[ignore = "requires PLS"]
+fn pls_handshake() {
+    handshake(Tool::Pls, LanguageId::Perl);
+}

@@ -3828,12 +3828,9 @@ impl App {
         let Some(tools) = &self.tools else {
             return;
         };
-        let Some(tool) = Tool::for_language(language, ToolPurpose::LanguageServer) else {
+        let Some(_tool) = Tool::available_server(language, tools) else {
             return;
         };
-        if !tools.available(tool) {
-            return;
-        }
         self.lsp.insert(
             language,
             LspJob {
@@ -3866,10 +3863,7 @@ impl App {
     /// The program, arguments and environment for `language`'s server.
     fn lsp_launch(&self, language: LanguageId) -> Option<LspLaunch> {
         let tools = self.tools.as_ref()?;
-        let tool = Tool::for_language(language, ToolPurpose::LanguageServer)?;
-        if !tools.available(tool) {
-            return None;
-        }
+        let tool = Tool::available_server(language, tools)?;
         // Prefer the executable Koda discovered, which may live in a user bin
         // directory outside the process PATH.
         let program = tools
@@ -3969,12 +3963,9 @@ impl App {
             let Some(tools) = &self.tools else {
                 return;
             };
-            let Some(tool) = Tool::for_language(language, ToolPurpose::LanguageServer) else {
+            let Some(tool) = Tool::available_server(language, tools) else {
                 return;
             };
-            if !tools.available(tool) {
-                return;
-            }
             let Some(job) = self.lsp.get_mut(&language) else {
                 return;
             };
@@ -3995,21 +3986,22 @@ impl App {
             .active_document()
             .map(|doc| doc.buffer.language)
             .unwrap_or(LanguageId::Unknown);
-        let Some(tool) = Tool::for_language(language, ToolPurpose::LanguageServer) else {
-            self.set_status(format!("No language server for {}", language.name()));
-            return;
-        };
-        let available = self
+        let Some(tool) = self
             .tools
             .as_ref()
-            .is_some_and(|tools| tools.available(tool));
-        if !available {
-            self.set_status(format!(
-                "{} is not installed — see Language Setup…",
-                tool.label()
-            ));
+            .and_then(|tools| Tool::available_server(language, tools))
+        else {
+            // Name the preferred server (or the language) so the message is
+            // actionable when nothing is installed.
+            match Tool::for_language(language, ToolPurpose::LanguageServer) {
+                Some(tool) => self.set_status(format!(
+                    "{} is not installed — see Language Setup…",
+                    tool.label()
+                )),
+                None => self.set_status(format!("No language server for {}", language.name())),
+            }
             return;
-        }
+        };
 
         // Drop this language's connection and schedule a fresh one now. The
         // restart budget resets because the user asked explicitly.
@@ -5433,12 +5425,14 @@ impl App {
         if language == LanguageId::Unknown {
             return false;
         }
-        let Some(tool) = Tool::for_language(language, ToolPurpose::LanguageServer) else {
-            return false;
-        };
-        if tools.available(tool) || !crate::language::tools::can_install(tool) {
+        // An available server means there is nothing to offer; otherwise offer
+        // the first installable candidate.
+        if Tool::available_server(language, tools).is_some() {
             return false;
         }
+        let Some(tool) = Tool::installable_server(language, tools) else {
+            return false;
+        };
         if !self.setup_offered.insert(language) {
             return false;
         }

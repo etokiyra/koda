@@ -108,7 +108,16 @@ impl LanguageProvider for ElixirProvider {
             Capability::GotoReference,
             Capability::Completion,
             Capability::Hover,
+            Capability::Formatting,
         ]
+    }
+
+    fn format(&self, path: &std::path::Path, text: &str) -> crate::language::format::FormatOutcome {
+        crate::language::format::mix_format(path, text)
+    }
+
+    fn formatter(&self) -> Option<&'static str> {
+        Some("mix")
     }
 
     fn diagnostics(&self, text: &str) -> Vec<crate::language::diagnostics::Diagnostic> {
