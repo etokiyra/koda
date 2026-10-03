@@ -48,6 +48,7 @@ mod tests {
                 LanguageId::Cpp => &["cpp", "hpp"],
                 LanguageId::Java => &["java"],
                 LanguageId::CSharp => &["cs"],
+                LanguageId::Php => &["php", "phtml"],
                 LanguageId::Html => &["html", "htm"],
                 LanguageId::Css => &["css"],
                 LanguageId::Unknown => &[],

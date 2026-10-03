@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### PHP support
+
+- Added **PHP** as a built-in, offline language. A focused scanner highlights
+  `<?php … ?>` tags, `//`, `#` and `/* */` comments (carried across lines),
+  single- and double-quoted strings, backtick shell strings, `$variables`,
+  keywords, constants, builtins, numbers and operators. Structural diagnostics
+  reuse the shared delimiter checker, and functions, classes, interfaces,
+  traits, enums, constants and namespaces appear in the symbol outline, with
+  within-file completion, hover, go-to-definition and find-references.
+- Detection understands `.php`, `.phtml` and friends, a `php` shebang, PHP
+  content hints and a `composer.json` project marker (which also gives PHP its
+  own workspace kind). New projects can be scaffolded with `composer.json` +
+  `index.php`.
+- `phpactor` is discovered and driven over LSP when it is installed. There is no
+  portable user-local installer, so Koda does not provision it; it reports the
+  tool honestly and the built-in provider keeps PHP useful without it.
+
 ### Multiple cursors
 
 - **Multi-cursor editing.** `Ctrl+D` now adds a cursor at the next whole-word

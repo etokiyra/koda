@@ -56,6 +56,7 @@ src/
 │   ├── c/mod.rs          # C/C++ provider
 │   ├── java/mod.rs       # Java provider
 │   ├── csharp/mod.rs     # C# provider
+│   ├── php/mod.rs        # PHP provider
 │   ├── html/mod.rs       # HTML provider
 │   ├── css/mod.rs        # CSS provider
 │   ├── markdown/mod.rs   # Markdown provider
@@ -129,7 +130,7 @@ These are separate concerns and must stay separate:
   `LanguageDescriptor`s and combines signals into a `DetectionResult`
   (`language`, `confidence`, `reasons`). It never imports provider
   implementations.
-- **Providers** (`language/provider` + `language/{rust,go,python,shell,web,c,java,csharp,html,css,markdown,json,toml,yaml}`)
+- **Providers** (`language/provider` + `language/{rust,go,python,shell,web,c,java,csharp,php,html,css,markdown,json,toml,yaml}`)
   implement the `LanguageProvider` trait and *produce* those descriptors via
   `descriptor()`.
 

@@ -27,6 +27,7 @@ TypeScript / JavaScript → built-in, offline
 C / C++ → built-in, offline (clangd when present)
 Java → built-in, offline (managed Eclipse JDT)
 C# → built-in, offline (managed OmniSharp)
+PHP → built-in, offline (phpactor when present)
 HTML / CSS → built-in, offline (npm servers)
 then expand
 ```
@@ -212,6 +213,10 @@ command palette already reports which are available. Filling them in is additive
       (including C# verbatim/raw strings and Java text blocks), structural
       diagnostics, symbols (types, methods, fields, records, interfaces) and
       offline completion/hover/navigation.
+- [x] PHP support: `<?php … ?>` tags, comments, strings, variables, keywords,
+      builtins and operators; structural diagnostics, symbols (functions,
+      classes, interfaces, traits, enums, constants, namespaces) and offline
+      completion/hover/navigation, with `phpactor` driven over LSP when present.
 - [x] HTML and CSS built-in support: tag/attribute and selector/property
       highlighting, tag- and brace-balance diagnostics, id/selector symbols,
       completion and hover, with `vscode-langservers-extracted` provisioned for

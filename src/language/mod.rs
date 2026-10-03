@@ -25,6 +25,7 @@ pub mod java;
 pub mod json;
 pub mod lsp;
 pub mod markdown;
+pub mod php;
 pub mod provider;
 pub mod python;
 pub mod rust;

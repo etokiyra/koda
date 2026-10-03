@@ -35,6 +35,8 @@ pub enum LanguageId {
     Java,
     /// C# sources.
     CSharp,
+    /// PHP sources and templates.
+    Php,
     /// HTML documents.
     Html,
     /// CSS stylesheets.
@@ -46,7 +48,7 @@ pub enum LanguageId {
 
 impl LanguageId {
     /// Every language Koda understands today. Keep this in sync with [`crate::language::provider`].
-    pub const ALL: [LanguageId; 16] = [
+    pub const ALL: [LanguageId; 17] = [
         LanguageId::Rust,
         LanguageId::Go,
         LanguageId::Python,
@@ -61,6 +63,7 @@ impl LanguageId {
         LanguageId::Cpp,
         LanguageId::Java,
         LanguageId::CSharp,
+        LanguageId::Php,
         LanguageId::Html,
         LanguageId::Css,
     ];
@@ -82,6 +85,7 @@ impl LanguageId {
             LanguageId::Cpp => "C++",
             LanguageId::Java => "Java",
             LanguageId::CSharp => "C#",
+            LanguageId::Php => "PHP",
             LanguageId::Html => "HTML",
             LanguageId::Css => "CSS",
             LanguageId::Unknown => "Plain Text",
@@ -105,6 +109,7 @@ impl LanguageId {
             LanguageId::Cpp => "cpp",
             LanguageId::Java => "java",
             LanguageId::CSharp => "csharp",
+            LanguageId::Php => "php",
             LanguageId::Html => "html",
             LanguageId::Css => "css",
             LanguageId::Unknown => "text",

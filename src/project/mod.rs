@@ -21,6 +21,7 @@ pub enum ProjectKind {
     Python,
     Java,
     CSharp,
+    Php,
     Generic,
 }
 
@@ -40,6 +41,7 @@ pub const KNOWN_MARKERS: &[(&str, ProjectKind)] = &[
     ("settings.gradle", ProjectKind::Java),
     ("settings.gradle.kts", ProjectKind::Java),
     ("global.json", ProjectKind::CSharp),
+    ("composer.json", ProjectKind::Php),
 ];
 
 /// Markers identified by a file-name suffix rather than an exact name, which
@@ -57,6 +59,7 @@ impl ProjectKind {
             ProjectKind::Python => "Python",
             ProjectKind::Java => "Java",
             ProjectKind::CSharp => "C#",
+            ProjectKind::Php => "PHP",
             ProjectKind::Generic => "Workspace",
         }
     }
@@ -68,6 +71,7 @@ impl ProjectKind {
             ProjectKind::Python => LanguageId::Python,
             ProjectKind::Java => LanguageId::Java,
             ProjectKind::CSharp => LanguageId::CSharp,
+            ProjectKind::Php => LanguageId::Php,
             ProjectKind::Generic => LanguageId::Unknown,
         }
     }
@@ -283,6 +287,19 @@ mod tests {
         fs::write(dir.join("MyApp.csproj"), "<Project/>").unwrap();
         assert_eq!(Project::detect(&dir).kind, ProjectKind::CSharp);
         assert_eq!(ProjectKind::CSharp.language(), LanguageId::CSharp);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn detects_php_project_from_composer_json() {
+        let dir = std::env::temp_dir().join(format!("koda-proj-php-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("composer.json"), "{}").unwrap();
+
+        assert_eq!(Project::detect(&dir).kind, ProjectKind::Php);
+        assert_eq!(ProjectKind::Php.language(), LanguageId::Php);
 
         fs::remove_dir_all(&dir).ok();
     }

@@ -23,6 +23,7 @@ pub const CREATABLE: &[LanguageId] = &[
     LanguageId::JavaScript,
     LanguageId::Java,
     LanguageId::CSharp,
+    LanguageId::Php,
     LanguageId::Html,
     LanguageId::Shell,
     LanguageId::C,
@@ -44,6 +45,7 @@ pub fn describe(language: LanguageId) -> &'static str {
         LanguageId::JavaScript => "package.json + src/index.js",
         LanguageId::Java => "pom.xml + src/main/java/<package>",
         LanguageId::CSharp => "a .csproj + Program.cs",
+        LanguageId::Php => "composer.json + index.php",
         LanguageId::Html => "index.html + style.css",
         LanguageId::Shell => "an executable <name>.sh",
         LanguageId::C => "CMakeLists.txt + src/main.c",
@@ -149,6 +151,7 @@ pub fn create(parent: &Path, name: &str, language: LanguageId) -> CreateOutcome 
         LanguageId::JavaScript => javascript(&root, name),
         LanguageId::Java => java(&root, name),
         LanguageId::CSharp => csharp(&root, name),
+        LanguageId::Php => php(&root, name),
         LanguageId::Html => html(&root, name),
         LanguageId::Shell => shell(&root, name),
         LanguageId::C => c(&root, name),
@@ -325,6 +328,21 @@ fn csharp(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         write(root, &format!("{project}.csproj"), csproj)?,
         write(root, "Program.cs", &program)?,
         write(root, ".gitignore", "bin/\nobj/\n")?,
+    ])
+}
+
+fn php(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let package = crate_name(name);
+    let composer = format!(
+        "{{\n  \"name\": \"koda/{package}\",\n  \"description\": \"A new project created with Koda\",\n  \"type\": \"project\",\n  \"require\": {{}}\n}}\n"
+    );
+    let index = format!(
+        "<?php\n\ndeclare(strict_types=1);\n\nfunction main(): void\n{{\n    echo \"Hello from {name}!\\n\";\n}}\n\nmain();\n"
+    );
+    Ok(vec![
+        write(root, "composer.json", &composer)?,
+        write(root, "index.php", &index)?,
+        write(root, ".gitignore", "/vendor/\n")?,
     ])
 }
 
@@ -624,6 +642,27 @@ mod tests {
         assert!(root.join("style.css").is_file());
         let page = std::fs::read_to_string(root.join("index.html")).unwrap();
         assert!(page.contains("<link rel=\"stylesheet\" href=\"style.css\""));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scaffolds_php() {
+        let dir = scratch("php");
+        let parent = dir.join("parent");
+        std::fs::create_dir_all(&parent).unwrap();
+        let CreateOutcome::Created { root, .. } = create(&parent, "My Service", LanguageId::Php)
+        else {
+            panic!("expected PHP success");
+        };
+        assert!(root.join("composer.json").is_file());
+        assert!(root.join("index.php").is_file());
+        let index = std::fs::read_to_string(root.join("index.php")).unwrap();
+        assert!(index.starts_with("<?php"));
+        assert!(index.contains("Hello from My Service!"));
+        let composer = std::fs::read_to_string(root.join("composer.json")).unwrap();
+        assert!(composer.contains("\"name\": \"koda/my-service\""));
+        // The generated project is recognised as a PHP project by its marker.
+        assert_eq!(crate::project::ProjectKind::Php.language(), LanguageId::Php);
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -60,6 +60,7 @@ pub enum Tool {
     Clangd,
     Jdtls,
     OmniSharp,
+    Phpactor,
     HtmlLs,
     CssLs,
     Rustfmt,
@@ -84,6 +85,7 @@ impl Tool {
         Tool::Clangd,
         Tool::Jdtls,
         Tool::OmniSharp,
+        Tool::Phpactor,
         Tool::HtmlLs,
         Tool::CssLs,
         Tool::Rustfmt,
@@ -100,6 +102,7 @@ impl Tool {
             Tool::Clangd => "clangd",
             Tool::Jdtls => "jdtls",
             Tool::OmniSharp => "OmniSharp",
+            Tool::Phpactor => "phpactor",
             Tool::HtmlLs => "vscode-html-language-server",
             Tool::CssLs => "vscode-css-language-server",
             Tool::Rustfmt => "rustfmt",
@@ -117,6 +120,7 @@ impl Tool {
             Tool::Clangd => "clangd",
             Tool::Jdtls => "jdtls",
             Tool::OmniSharp => "omnisharp",
+            Tool::Phpactor => "phpactor",
             Tool::HtmlLs => "vscode-html-language-server",
             Tool::CssLs => "vscode-css-language-server",
             Tool::Rustfmt => "rustfmt",
@@ -134,6 +138,7 @@ impl Tool {
             Tool::Clangd => LanguageId::C,
             Tool::Jdtls => LanguageId::Java,
             Tool::OmniSharp => LanguageId::CSharp,
+            Tool::Phpactor => LanguageId::Php,
             Tool::HtmlLs => LanguageId::Html,
             Tool::CssLs => LanguageId::Css,
         }
@@ -157,6 +162,7 @@ impl Tool {
             | Tool::Clangd
             | Tool::Jdtls
             | Tool::OmniSharp
+            | Tool::Phpactor
             | Tool::HtmlLs
             | Tool::CssLs => ToolPurpose::LanguageServer,
             Tool::Rustfmt | Tool::Gofmt => ToolPurpose::Formatter,
@@ -173,6 +179,7 @@ impl Tool {
             | Tool::BashLs
             | Tool::TypeScriptLs
             | Tool::Clangd
+            | Tool::Phpactor
             | Tool::HtmlLs
             | Tool::CssLs => &["--version"],
             Tool::Gopls => &["version"],
@@ -192,6 +199,8 @@ impl Tool {
             Tool::TypeScriptLs => &["--stdio"],
             // `OmniSharp` needs LSP mode and zero-based (LSP) positions.
             Tool::OmniSharp => &["-z", "--languageserver"],
+            // `phpactor` speaks LSP through its `language-server` subcommand.
+            Tool::Phpactor => &["language-server"],
             // The extracted VS Code servers speak stdio.
             Tool::HtmlLs | Tool::CssLs => &["--stdio"],
             _ => &[],
@@ -221,6 +230,7 @@ impl Tool {
             }
             Tool::Jdtls => "Koda can install a managed JDK and Eclipse JDT",
             Tool::OmniSharp => "Koda can install the .NET SDK and OmniSharp",
+            Tool::Phpactor => "install phpactor with `composer global require phpactor/phpactor`",
             Tool::HtmlLs | Tool::CssLs => "install with npm — Koda provisions Node.js if missing",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
@@ -254,6 +264,9 @@ impl Tool {
             // `clangd` has no portable user-local installer; it ships with the
             // C/C++ toolchain and is used when it is already present.
             Tool::Clangd => None,
+            // `phpactor` is a Composer package; Koda uses it when present
+            // rather than installing Composer and modifying the user's setup.
+            Tool::Phpactor => None,
             // `jdtls` and `OmniSharp` are installed by Koda's own managed
             // download plan rather than a single package-manager command.
             Tool::Jdtls | Tool::OmniSharp => None,
@@ -278,7 +291,7 @@ impl Tool {
             Tool::HtmlLs | Tool::CssLs => &[],
             // `jdtls` is a Python launcher script.
             Tool::Jdtls => &["python3"],
-            Tool::Clangd | Tool::OmniSharp => &[],
+            Tool::Clangd | Tool::OmniSharp | Tool::Phpactor => &[],
         }
     }
 
@@ -313,6 +326,9 @@ impl Tool {
             // `clangd` ships with the C/C++ toolchain; there is no user-local
             // installer to run, so Koda uses it when it is already present.
             Tool::Clangd => Vec::new(),
+            // `phpactor` is discovered when installed; Koda does not install
+            // Composer or modify the user's global setup.
+            Tool::Phpactor => Vec::new(),
             Tool::Jdtls => jdtls_attempts(),
             Tool::OmniSharp => omnisharp_attempts(),
             Tool::HtmlLs | Tool::CssLs => npm_attempts(&["vscode-langservers-extracted"]),
@@ -1612,6 +1628,7 @@ mod tests {
                     | LanguageId::C
                     | LanguageId::Java
                     | LanguageId::CSharp
+                    | LanguageId::Php
                     | LanguageId::Html
                     | LanguageId::Css
             ));
