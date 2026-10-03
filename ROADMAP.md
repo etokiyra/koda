@@ -61,10 +61,10 @@ The highest-value work. These turn Koda from an editor into an IDE.
 - [x] **Hover information.** `Ctrl+Shift+H` opens a dismissible popup with the
       symbol's kind, its definition line and its usage count. Heuristic today;
       language-server hover can replace the content.
-- [x] **Go-to-definition and references (within file).** `F12` resolves the word
-      under the cursor to its definition in the active file and `Shift+F12`
-      lists every occurrence. Providers own the resolution; cross-file
-      resolution arrives with the language-server backends.
+- [x] **Go-to-definition and references.** `F12` resolves the word under the
+      cursor to its definition and `Shift+F12` lists every occurrence; without
+      a language server, `F12` falls back to a project-wide symbol search so it
+      still reaches definitions in other files.
 - [x] **Document symbols and symbol navigation** (`Ctrl+Shift+O`). Rust and Go
       providers scan the active file for definitions and offer a filterable
       outline; the chosen symbol is revealed. Heuristic today, LSP symbols later.

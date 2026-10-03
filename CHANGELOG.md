@@ -139,6 +139,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Language intelligence
 
+- **Go to definition now works across files without a language server.** When
+  the word under the cursor is not defined in the current file, `F12` searches
+  the project for a same-named symbol and opens the workspace-symbol picker
+  prefilled with that word, so offline navigation no longer stops at the file
+  boundary.
 - Added provider-driven diagnostics. Rust and Go now perform a lexical
   structural check (unbalanced brackets, ignoring strings and comments) and
   declare the `Diagnostics` capability.

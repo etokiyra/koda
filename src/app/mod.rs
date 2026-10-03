@@ -179,6 +179,8 @@ pub struct App {
     workspace_symbols_seq: u64,
     /// The workspace symbol scan awaiting a result, if any.
     pending_workspace_symbols: Option<u64>,
+    /// A query to apply when the next workspace-symbol picker opens.
+    pending_workspace_symbols_query: Option<String>,
     /// Whether a language server workspace-symbol request is in flight.
     ws_lsp_pending: bool,
     /// Monotonic id for project text searches.
@@ -276,6 +278,7 @@ impl App {
             pending_format: None,
             workspace_symbols_seq: 0,
             pending_workspace_symbols: None,
+            pending_workspace_symbols_query: None,
             ws_lsp_pending: false,
             project_search_seq: 0,
             pending_project_search: None,
@@ -2332,10 +2335,19 @@ impl App {
     /// Ask for project-wide symbols: the language server when attached, plus the
     /// built-in scan as an immediate, always-available fallback.
     fn open_workspace_symbols(&mut self) {
+        self.open_workspace_symbols_with(None);
+    }
+
+    /// Ask for project-wide symbols, optionally with a pre-applied query.
+    ///
+    /// `F12` uses a query so a definition that is not in the current file can
+    /// still be found across the project without a language server.
+    fn open_workspace_symbols_with(&mut self, query: Option<String>) {
+        self.pending_workspace_symbols_query = query.clone();
         if self.lsp.as_ref().is_some_and(|server| server.is_ready()) {
             self.ws_lsp_pending = true;
             if let Some(server) = self.lsp.as_mut() {
-                server.workspace_symbols("");
+                server.workspace_symbols(query.as_deref().unwrap_or(""));
             }
         }
         self.workspace_symbols_seq += 1;
@@ -2393,6 +2405,9 @@ impl App {
             return;
         }
         let mut picker = Picker::new("Workspace Symbols", "Filter symbols…", items);
+        if let Some(query) = self.pending_workspace_symbols_query.take() {
+            picker.query = query;
+        }
         picker.refilter();
         self.overlay = Overlay::Picker(picker);
     }
@@ -3191,7 +3206,14 @@ impl App {
             .provider(language)
             .definition(&text, cursor.row, cursor.col)
         else {
-            self.set_status("No definition found in this file");
+            // Not defined in this file: search the project for a same-named
+            // symbol, so F12 still works across files without a server.
+            if let Some(word) = crate::language::symbols::word_at(&text, cursor.row, cursor.col) {
+                self.open_workspace_symbols_with(Some(word));
+                self.set_status("Searching the project…");
+            } else {
+                self.set_status("Nothing to look up here");
+            }
             return;
         };
         let target = Position::new(symbol.line, symbol.col);
@@ -4770,6 +4792,43 @@ mod tests {
         app.execute_command(ids::GOTO_DEFINITION);
         let cursor = app.editor.active_document().unwrap().clamped_cursor();
         assert_eq!(cursor, Position::new(4, 3));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn go_to_definition_falls_back_to_the_project() {
+        let dir = temp_project("definition-project");
+        let a = dir.join("src/main.rs");
+        let b = dir.join("src/lib.rs");
+        fs::write(&a, "fn main() {\n    helper();\n}\n").unwrap();
+        fs::write(&b, "pub fn helper() {}\n").unwrap();
+        let mut app = App::new(Some(&a)).unwrap();
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .move_to(Position::new(1, 4));
+
+        app.execute_command(ids::GOTO_DEFINITION);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            app.apply_background_events();
+            if matches!(app.overlay, Overlay::Picker(_)) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let Overlay::Picker(picker) = &app.overlay else {
+            panic!("expected the workspace symbol picker");
+        };
+        let labels: Vec<String> = (0..picker.filtered.len())
+            .filter_map(|index| picker.item(index))
+            .map(|item| item.label.clone())
+            .collect();
+        assert!(
+            labels.iter().any(|label| label == "helper"),
+            "labels: {labels:?}"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
