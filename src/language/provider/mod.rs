@@ -228,6 +228,7 @@ impl ProviderRegistry {
         registry.register(Box::new(crate::language::html::HtmlProvider));
         registry.register(Box::new(crate::language::css::CssProvider));
         registry.register(Box::new(crate::language::lua::LuaProvider));
+        registry.register(Box::new(crate::language::kotlin::KotlinProvider));
         registry
     }
 

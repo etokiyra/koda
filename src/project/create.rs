@@ -25,6 +25,7 @@ pub const CREATABLE: &[LanguageId] = &[
     LanguageId::CSharp,
     LanguageId::Php,
     LanguageId::Lua,
+    LanguageId::Kotlin,
     LanguageId::Html,
     LanguageId::Shell,
     LanguageId::C,
@@ -48,6 +49,7 @@ pub fn describe(language: LanguageId) -> &'static str {
         LanguageId::CSharp => "a .csproj + Program.cs",
         LanguageId::Php => "composer.json + index.php",
         LanguageId::Lua => "init.lua + .luarc.json",
+        LanguageId::Kotlin => "Gradle Kotlin DSL + src/main/kotlin",
         LanguageId::Html => "index.html + style.css",
         LanguageId::Shell => "an executable <name>.sh",
         LanguageId::C => "CMakeLists.txt + src/main.c",
@@ -155,6 +157,7 @@ pub fn create(parent: &Path, name: &str, language: LanguageId) -> CreateOutcome 
         LanguageId::CSharp => csharp(&root, name),
         LanguageId::Php => php(&root, name),
         LanguageId::Lua => lua(&root, name),
+        LanguageId::Kotlin => kotlin(&root, name),
         LanguageId::Html => html(&root, name),
         LanguageId::Shell => shell(&root, name),
         LanguageId::C => c(&root, name),
@@ -358,6 +361,18 @@ fn lua(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         write(root, "init.lua", &script)?,
         write(root, ".luarc.json", config)?,
         write(root, ".gitignore", "*.luac\n")?,
+    ])
+}
+
+fn kotlin(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let settings = format!("rootProject.name = \"{name}\"\n");
+    let build = "plugins {\n    kotlin(\"jvm\") version \"2.1.0\"\n    application\n}\n\nrepositories {\n    mavenCentral()\n}\n\napplication {\n    mainClass.set(\"MainKt\")\n}\n\nkotlin {\n    jvmToolchain(21)\n}\n";
+    let main = format!("fun main() {{\n    println(\"Hello from {name}!\")\n}}\n");
+    Ok(vec![
+        write(root, "settings.gradle.kts", &settings)?,
+        write(root, "build.gradle.kts", build)?,
+        write(root, "src/main/kotlin/Main.kt", &main)?,
+        write(root, ".gitignore", ".gradle/\nbuild/\n")?,
     ])
 }
 
@@ -694,6 +709,27 @@ mod tests {
         let script = std::fs::read_to_string(root.join("init.lua")).unwrap();
         assert!(script.contains("Hello from my mod!"));
         assert_eq!(crate::project::ProjectKind::Lua.language(), LanguageId::Lua);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scaffolds_kotlin() {
+        let dir = scratch("kotlin");
+        let parent = dir.join("parent");
+        std::fs::create_dir_all(&parent).unwrap();
+        let CreateOutcome::Created { root, .. } = create(&parent, "My App", LanguageId::Kotlin)
+        else {
+            panic!("expected Kotlin success");
+        };
+        assert!(root.join("settings.gradle.kts").is_file());
+        assert!(root.join("build.gradle.kts").is_file());
+        assert!(root.join("src/main/kotlin/Main.kt").is_file());
+        let main = std::fs::read_to_string(root.join("src/main/kotlin/Main.kt")).unwrap();
+        assert!(main.contains("Hello from My App!"));
+        assert_eq!(
+            crate::project::ProjectKind::Kotlin.language(),
+            LanguageId::Kotlin
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

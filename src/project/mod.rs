@@ -23,6 +23,7 @@ pub enum ProjectKind {
     CSharp,
     Php,
     Lua,
+    Kotlin,
     Generic,
 }
 
@@ -38,9 +39,9 @@ pub const KNOWN_MARKERS: &[(&str, ProjectKind)] = &[
     ("Pipfile", ProjectKind::Python),
     ("pom.xml", ProjectKind::Java),
     ("build.gradle", ProjectKind::Java),
-    ("build.gradle.kts", ProjectKind::Java),
+    ("build.gradle.kts", ProjectKind::Kotlin),
     ("settings.gradle", ProjectKind::Java),
-    ("settings.gradle.kts", ProjectKind::Java),
+    ("settings.gradle.kts", ProjectKind::Kotlin),
     ("global.json", ProjectKind::CSharp),
     ("composer.json", ProjectKind::Php),
     (".luarc.json", ProjectKind::Lua),
@@ -63,6 +64,7 @@ impl ProjectKind {
             ProjectKind::CSharp => "C#",
             ProjectKind::Php => "PHP",
             ProjectKind::Lua => "Lua",
+            ProjectKind::Kotlin => "Kotlin",
             ProjectKind::Generic => "Workspace",
         }
     }
@@ -76,6 +78,7 @@ impl ProjectKind {
             ProjectKind::CSharp => LanguageId::CSharp,
             ProjectKind::Php => LanguageId::Php,
             ProjectKind::Lua => LanguageId::Lua,
+            ProjectKind::Kotlin => LanguageId::Kotlin,
             ProjectKind::Generic => LanguageId::Unknown,
         }
     }
@@ -304,6 +307,24 @@ mod tests {
 
         assert_eq!(Project::detect(&dir).kind, ProjectKind::Php);
         assert_eq!(ProjectKind::Php.language(), LanguageId::Php);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn detects_kotlin_project_from_gradle_kts() {
+        let dir = std::env::temp_dir().join(format!("koda-proj-kt-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("build.gradle.kts"), "plugins {}\n").unwrap();
+
+        assert_eq!(Project::detect(&dir).kind, ProjectKind::Kotlin);
+        assert_eq!(ProjectKind::Kotlin.language(), LanguageId::Kotlin);
+
+        // A Groovy-DSL Gradle build stays a Java project.
+        fs::remove_file(dir.join("build.gradle.kts")).unwrap();
+        fs::write(dir.join("build.gradle"), "plugins {}\n").unwrap();
+        assert_eq!(Project::detect(&dir).kind, ProjectKind::Java);
 
         fs::remove_dir_all(&dir).ok();
     }

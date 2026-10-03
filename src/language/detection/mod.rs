@@ -52,6 +52,7 @@ mod tests {
                 LanguageId::Html => &["html", "htm"],
                 LanguageId::Css => &["css"],
                 LanguageId::Lua => &["lua"],
+                LanguageId::Kotlin => &["kt", "kts"],
                 LanguageId::Unknown => &[],
             },
             project_markers: match id {

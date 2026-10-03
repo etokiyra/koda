@@ -23,6 +23,7 @@ pub mod html;
 pub mod id;
 pub mod java;
 pub mod json;
+pub mod kotlin;
 pub mod lsp;
 pub mod lua;
 pub mod markdown;

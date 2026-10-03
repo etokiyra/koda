@@ -41,6 +41,10 @@ const NODE_VERSION: &str = "24.21.0";
 /// stable download URL.
 const LUA_LS_VERSION: &str = "3.19.1";
 
+/// The `kotlin-language-server` release Koda provisions. Pinned because its
+/// bundled Kotlin compiler must run on the dedicated JDK 21 Koda installs.
+const KOTLIN_LS_VERSION: &str = "1.3.13";
+
 /// The longest a single install command may run before it is killed. Package
 /// managers can legitimately take a while on a slow link, but a hung process
 /// must never wedge the background worker forever.
@@ -65,6 +69,7 @@ pub enum Tool {
     Clangd,
     Jdtls,
     OmniSharp,
+    KotlinLs,
     Phpactor,
     LuaLs,
     HtmlLs,
@@ -91,6 +96,7 @@ impl Tool {
         Tool::Clangd,
         Tool::Jdtls,
         Tool::OmniSharp,
+        Tool::KotlinLs,
         Tool::Phpactor,
         Tool::LuaLs,
         Tool::HtmlLs,
@@ -109,6 +115,7 @@ impl Tool {
             Tool::Clangd => "clangd",
             Tool::Jdtls => "jdtls",
             Tool::OmniSharp => "OmniSharp",
+            Tool::KotlinLs => "kotlin-language-server",
             Tool::Phpactor => "phpactor",
             Tool::LuaLs => "lua-language-server",
             Tool::HtmlLs => "vscode-html-language-server",
@@ -128,6 +135,7 @@ impl Tool {
             Tool::Clangd => "clangd",
             Tool::Jdtls => "jdtls",
             Tool::OmniSharp => "omnisharp",
+            Tool::KotlinLs => "kotlin-language-server",
             Tool::Phpactor => "phpactor",
             Tool::LuaLs => "lua-language-server",
             Tool::HtmlLs => "vscode-html-language-server",
@@ -147,6 +155,7 @@ impl Tool {
             Tool::Clangd => LanguageId::C,
             Tool::Jdtls => LanguageId::Java,
             Tool::OmniSharp => LanguageId::CSharp,
+            Tool::KotlinLs => LanguageId::Kotlin,
             Tool::Phpactor => LanguageId::Php,
             Tool::LuaLs => LanguageId::Lua,
             Tool::HtmlLs => LanguageId::Html,
@@ -172,6 +181,7 @@ impl Tool {
             | Tool::Clangd
             | Tool::Jdtls
             | Tool::OmniSharp
+            | Tool::KotlinLs
             | Tool::Phpactor
             | Tool::LuaLs
             | Tool::HtmlLs
@@ -190,6 +200,7 @@ impl Tool {
             | Tool::BashLs
             | Tool::TypeScriptLs
             | Tool::Clangd
+            | Tool::KotlinLs
             | Tool::Phpactor
             | Tool::LuaLs
             | Tool::HtmlLs
@@ -226,7 +237,7 @@ impl Tool {
     /// install as missing. They are verified by starting the server and
     /// confirming it stays up instead.
     fn probe_as_server(self) -> bool {
-        matches!(self, Tool::HtmlLs | Tool::CssLs)
+        matches!(self, Tool::HtmlLs | Tool::CssLs | Tool::KotlinLs)
     }
 
     /// A short, actionable message for when the tool is missing.
@@ -242,6 +253,7 @@ impl Tool {
             }
             Tool::Jdtls => "Koda can install a managed JDK and Eclipse JDT",
             Tool::OmniSharp => "Koda can install the .NET SDK and OmniSharp",
+            Tool::KotlinLs => "Koda can install a managed JDK 21 and kotlin-language-server",
             Tool::Phpactor => "install phpactor with `composer global require phpactor/phpactor`",
             Tool::LuaLs => "Koda can install a self-contained lua-language-server",
             Tool::HtmlLs | Tool::CssLs => "install with npm — Koda provisions Node.js if missing",
@@ -283,6 +295,9 @@ impl Tool {
             // `lua-language-server` is installed by Koda's own managed download
             // plan rather than a package-manager command.
             Tool::LuaLs => None,
+            // `kotlin-language-server` plus a dedicated JDK 21 are installed by
+            // Koda's own managed download plan.
+            Tool::KotlinLs => None,
             // `jdtls` and `OmniSharp` are installed by Koda's own managed
             // download plan rather than a single package-manager command.
             Tool::Jdtls | Tool::OmniSharp => None,
@@ -309,6 +324,9 @@ impl Tool {
             Tool::Jdtls => &["python3"],
             Tool::Clangd | Tool::OmniSharp | Tool::Phpactor => &[],
             Tool::LuaLs => &[],
+            // The dedicated JDK 21 is provided by Koda's managed download plan,
+            // so no system Java is required.
+            Tool::KotlinLs => &[],
         }
     }
 
@@ -349,6 +367,9 @@ impl Tool {
             // `lua-language-server` ships a self-contained, runtime-free archive
             // per platform, so Koda manages it like the JDK and OmniSharp.
             Tool::LuaLs => lua_ls_attempts(),
+            // `kotlin-language-server` needs a JDK whose version its bundled
+            // compiler understands, so Koda installs a dedicated JDK 21.
+            Tool::KotlinLs => kotlin_ls_attempts(),
             Tool::Jdtls => jdtls_attempts(),
             Tool::OmniSharp => omnisharp_attempts(),
             Tool::HtmlLs | Tool::CssLs => npm_attempts(&["vscode-langservers-extracted"]),
@@ -1025,31 +1046,126 @@ fn checksum_for(sums: &str, asset: &str) -> Option<String> {
 }
 
 /// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`.
+///
+/// `tar` supports `--strip-components`; `unzip` does not, so a stripped zip is
+/// unpacked into a scratch directory and the leading path components are moved
+/// up by hand.
 fn extract(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
     std::fs::create_dir_all(dest)
         .map_err(|err| format!("could not create {}: {err}", dest.display()))?;
     let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
-    let mut command = if zip {
-        let mut command = install_command("unzip");
-        command.arg("-q").arg("-o").arg(archive).arg("-d").arg(dest);
-        command
-    } else {
+
+    if !zip {
         let mut command = install_command("tar");
         command.arg("-xf").arg(archive).arg("-C").arg(dest);
         if strip > 0 {
             command.arg(format!("--strip-components={strip}"));
         }
-        command
-    };
-    match command.output() {
-        Ok(output) if output.status.success() => Ok(()),
-        Ok(output) => Err(format!(
-            "could not extract {}: {}",
-            archive.display(),
-            first_stderr_line(&output.stderr)
-        )),
-        Err(err) => Err(format!("could not run the archive tool: {err}")),
+        return match command.output() {
+            Ok(output) if output.status.success() => Ok(()),
+            Ok(output) => Err(format!(
+                "could not extract {}: {}",
+                archive.display(),
+                first_stderr_line(&output.stderr)
+            )),
+            Err(err) => Err(format!("could not run the archive tool: {err}")),
+        };
     }
+
+    if strip == 0 {
+        let output = install_command("unzip")
+            .arg("-q")
+            .arg("-o")
+            .arg(archive)
+            .arg("-d")
+            .arg(dest)
+            .output();
+        return match output {
+            Ok(output) if output.status.success() => Ok(()),
+            Ok(output) => Err(format!(
+                "could not extract {}: {}",
+                archive.display(),
+                first_stderr_line(&output.stderr)
+            )),
+            Err(err) => Err(format!("could not run the archive tool: {err}")),
+        };
+    }
+
+    let scratch = dest.with_extension("koda-extract");
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch)
+        .map_err(|err| format!("could not create {}: {err}", scratch.display()))?;
+
+    let result = (|| {
+        let output = install_command("unzip")
+            .arg("-q")
+            .arg("-o")
+            .arg(archive)
+            .arg("-d")
+            .arg(&scratch)
+            .output()
+            .map_err(|err| format!("could not run the archive tool: {err}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "could not extract {}: {}",
+                archive.display(),
+                first_stderr_line(&output.stderr)
+            ));
+        }
+        // Descend the `strip` wrapping directories.
+        let mut root = scratch.clone();
+        for _ in 0..strip {
+            root = single_child_directory(&root).ok_or_else(|| {
+                format!(
+                    "archive {} does not have {strip} leading directory level(s)",
+                    archive.display()
+                )
+            })?;
+        }
+        move_directory_contents(&root, dest)
+    })();
+
+    let _ = std::fs::remove_dir_all(&scratch);
+    result
+}
+
+/// The only child of `dir` when it is a directory, else `None`.
+fn single_child_directory(dir: &Path) -> Option<PathBuf> {
+    let mut entries = std::fs::read_dir(dir).ok()?.flatten();
+    let first = entries.next()?;
+    if entries.next().is_some() {
+        return None;
+    }
+    let path = first.path();
+    path.is_dir().then_some(path)
+}
+
+/// Move every entry of `from` into `to`, replacing same-named entries.
+fn move_directory_contents(from: &Path, to: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(to)
+        .map_err(|err| format!("could not create {}: {err}", to.display()))?;
+    let entries = std::fs::read_dir(from)
+        .map_err(|err| format!("could not read {}: {err}", from.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("could not read {}: {err}", from.display()))?;
+        let target = to.join(entry.file_name());
+        if target.exists() {
+            if target.is_dir() {
+                std::fs::remove_dir_all(&target)
+            } else {
+                std::fs::remove_file(&target)
+            }
+            .map_err(|err| format!("could not replace {}: {err}", target.display()))?;
+        }
+        std::fs::rename(entry.path(), &target).map_err(|err| {
+            format!(
+                "could not move {} into {}: {err}",
+                entry.path().display(),
+                to.display()
+            )
+        })?;
+    }
+    Ok(())
 }
 
 /// SHA-256 of a file, using whichever tool the platform provides.
@@ -1382,6 +1498,7 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         dirs.push(tools.join("omnisharp"));
         dirs.push(tools.join("jdtls/bin"));
         dirs.push(tools.join("lua-language-server/bin"));
+        dirs.push(tools.join("kotlin-language-server/bin"));
         dirs.push(tools.join("jdk/bin"));
         dirs.push(tools.join("dotnet"));
         dirs.push(tools.join("bin"));
@@ -1474,6 +1591,18 @@ pub fn lua_ls_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("lua-language-server"))
 }
 
+/// Koda's dedicated JDK 21, used only to run `kotlin-language-server`. It is
+/// kept separate from the JDK 25 that `jdtls` requires, because the Kotlin
+/// compiler bundled with the server rejects the newer version string.
+pub fn kotlin_jdk_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("kotlin-jdk"))
+}
+
+/// Koda's managed `kotlin-language-server` directory.
+pub fn kotlin_ls_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("kotlin-language-server"))
+}
+
 /// Scratch space for downloaded archives.
 fn downloads_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("downloads"))
@@ -1494,6 +1623,15 @@ pub fn launch_env(tool: Tool) -> Vec<(String, String)> {
         }
         Tool::Jdtls => {
             if let Some(jdk) = jdk_dir() {
+                let jdk = jdk.to_string_lossy().into_owned();
+                env.push(("JAVA_HOME".to_string(), jdk.clone()));
+                env.push(("PATH".to_string(), prepend_path(&format!("{jdk}/bin"))));
+            }
+        }
+        // The Kotlin compiler bundled with the server cannot parse JDK 25's
+        // four-part version, so the server runs on Koda's dedicated JDK 21.
+        Tool::KotlinLs => {
+            if let Some(jdk) = kotlin_jdk_dir() {
                 let jdk = jdk.to_string_lossy().into_owned();
                 env.push(("JAVA_HOME".to_string(), jdk.clone()));
                 env.push(("PATH".to_string(), prepend_path(&format!("{jdk}/bin"))));
@@ -1621,6 +1759,50 @@ fn lua_ls_attempts() -> Vec<InstallAttempt> {
     )]
 }
 
+/// A dedicated JDK 21 and `kotlin-language-server`, both managed by Koda.
+///
+/// The server's bundled Kotlin compiler rejects the four-part version string of
+/// the JDK 25 that `jdtls` uses, so Koda provisions its own JDK 21 in an
+/// isolated directory instead of downgrading anything the user has.
+fn kotlin_ls_attempts() -> Vec<InstallAttempt> {
+    let (Some(downloads), Some(dest)) = (downloads_dir(), kotlin_ls_dir()) else {
+        return Vec::new();
+    };
+    let Some(jdk) = kotlin_jdk_dir() else {
+        return Vec::new();
+    };
+    let jdk_archive = downloads.join("temurin21.tar.gz");
+    let ls_archive = downloads.join("kotlin-language-server.zip");
+    let url = format!(
+        "https://github.com/fwcd/kotlin-language-server/releases/download/{KOTLIN_LS_VERSION}/server.zip"
+    );
+    vec![InstallAttempt::managed(
+        "a managed JDK 21 and kotlin-language-server",
+        vec![
+            InstallStep::AdoptiumJdk {
+                feature: 21,
+                dest: jdk_archive.clone(),
+            },
+            InstallStep::Extract {
+                archive: jdk_archive,
+                dest: jdk,
+                strip: 1,
+            },
+            InstallStep::Download {
+                url,
+                dest: ls_archive.clone(),
+                sha256: None,
+            },
+            // The distribution's archive root is `server/`.
+            InstallStep::Extract {
+                archive: ls_archive,
+                dest,
+                strip: 1,
+            },
+        ],
+    )]
+}
+
 /// OmniSharp plus the .NET SDK it runs on, both managed by Koda.
 fn omnisharp_attempts() -> Vec<InstallAttempt> {
     let Some(asset) = omnisharp_asset() else {
@@ -1705,6 +1887,7 @@ mod tests {
                     | LanguageId::CSharp
                     | LanguageId::Php
                     | LanguageId::Lua
+                    | LanguageId::Kotlin
                     | LanguageId::Html
                     | LanguageId::Css
             ));
@@ -1786,6 +1969,33 @@ mod tests {
     #[test]
     fn unknown_program_is_not_located() {
         assert!(locate("koda-definitely-not-a-real-tool").is_none());
+    }
+
+    #[test]
+    fn strip_move_relocates_a_single_root_directory() {
+        // `unzip` has no `--strip-components`, so a stripped zip is unpacked to
+        // a scratch directory and its single root is moved up. Regression: the
+        // Kotlin server once landed under `server/` because the strip was
+        // silently ignored.
+        let dir = std::env::temp_dir().join(format!("koda-strip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let scratch = dir.join("scratch");
+        std::fs::create_dir_all(scratch.join("pkg/bin")).unwrap();
+        std::fs::write(scratch.join("pkg/bin/tool"), "#!/bin/sh\n").unwrap();
+        std::fs::write(scratch.join("pkg/data.txt"), "data").unwrap();
+
+        let root = single_child_directory(&scratch).expect("a single root");
+        assert!(root.ends_with("pkg"));
+        let dest = dir.join("dest");
+        move_directory_contents(&root, &dest).unwrap();
+        assert!(dest.join("bin/tool").is_file());
+        assert!(dest.join("data.txt").is_file());
+
+        // Two top-level entries cannot be stripped by descending.
+        std::fs::create_dir_all(scratch.join("other")).unwrap();
+        assert!(single_child_directory(&scratch).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
