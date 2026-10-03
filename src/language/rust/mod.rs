@@ -121,6 +121,10 @@ impl LanguageProvider for RustProvider {
         rustfmt(path, text)
     }
 
+    fn formatter(&self) -> Option<&'static str> {
+        Some("rustfmt")
+    }
+
     fn hover(&self, text: &str, line: usize, col: usize) -> Option<crate::language::hover::Hover> {
         let symbols = crate::language::symbols::rust_symbols(text);
         crate::language::hover::describe(text, line, col, &symbols)

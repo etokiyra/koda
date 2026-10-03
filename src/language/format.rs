@@ -25,6 +25,18 @@ pub enum FormatOutcome {
     Failed(String),
 }
 
+/// Whether an executable named `tool` can be found on `PATH`.
+///
+/// Used to tell the user up front that a formatter is missing instead of
+/// failing only when they ask for it.
+pub fn is_available(tool: &str) -> bool {
+    let Ok(path) = std::env::var("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path)
+        .any(|dir| dir.join(tool).is_file() || dir.join(format!("{tool}.exe")).is_file())
+}
+
 /// Format Rust source with `rustfmt`, matching the project's edition when a
 /// `Cargo.toml` can be found above `path`.
 pub fn rustfmt(path: &Path, text: &str) -> FormatOutcome {
@@ -135,6 +147,11 @@ mod tests {
         let cargo = "[package]\nname = \"x\"\nedition = \"2024\"\n";
         assert_eq!(parse_edition(cargo).as_deref(), Some("2024"));
         assert_eq!(parse_edition("[package]\nname = \"x\"\n"), None);
+    }
+
+    #[test]
+    fn missing_program_is_not_available() {
+        assert!(!is_available("koda-definitely-not-a-real-tool"));
     }
 
     #[test]

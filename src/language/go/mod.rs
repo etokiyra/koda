@@ -170,6 +170,10 @@ impl LanguageProvider for GoProvider {
         gofmt(text)
     }
 
+    fn formatter(&self) -> Option<&'static str> {
+        Some("gofmt")
+    }
+
     fn hover(&self, text: &str, line: usize, col: usize) -> Option<crate::language::hover::Hover> {
         let symbols = crate::language::symbols::go_symbols(text);
         crate::language::hover::describe(text, line, col, &symbols)

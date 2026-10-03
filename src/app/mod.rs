@@ -19,6 +19,7 @@ use crate::editor::{Document, Editor, Position, Selection};
 use crate::filesystem;
 use crate::language::completion::{Completion, CompletionKind};
 use crate::language::diagnostics::Severity;
+use crate::language::format;
 use crate::language::format::FormatOutcome;
 use crate::language::symbols::is_ident_char as is_word_char;
 use crate::language::{Capability, LanguageId, LanguageService, WorkspaceSymbol};
@@ -1898,6 +1899,20 @@ impl App {
             {
                 (false, Some("no diagnostics".to_string()))
             }
+            ids::FORMAT => self.format_availability(document),
+            _ => (true, None),
+        }
+    }
+
+    /// Whether formatting can run, and why not when it cannot.
+    fn format_availability(&self, document: Option<&Document>) -> (bool, Option<String>) {
+        let language = document
+            .map(|doc| doc.buffer.language)
+            .unwrap_or(LanguageId::Unknown);
+        match self.language.provider(language).formatter() {
+            Some(tool) if !format::is_available(tool) => {
+                (false, Some(format!("{tool} is not installed")))
+            }
             _ => (true, None),
         }
     }
@@ -2201,7 +2216,11 @@ mod tests {
         };
 
         assert!(find("File: Save").expect("save").enabled);
-        assert!(find("Format Document").expect("format").enabled);
+        // Formatting availability tracks whether the tool is actually installed.
+        assert_eq!(
+            find("Format Document").expect("format").enabled,
+            crate::language::format::is_available("rustfmt")
+        );
         assert!(
             !find("Rename Symbol").expect("rename").enabled,
             "rename is not available for Rust yet"

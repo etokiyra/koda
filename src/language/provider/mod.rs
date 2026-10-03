@@ -145,6 +145,11 @@ pub trait LanguageProvider: Send + Sync {
         FormatOutcome::Unsupported
     }
 
+    /// The external formatter executable this language prefers, if any.
+    fn formatter(&self) -> Option<&'static str> {
+        None
+    }
+
     /// Information about the symbol at `(line, col)`, for the hover popup.
     fn hover(&self, _text: &str, _line: usize, _col: usize) -> Option<Hover> {
         None

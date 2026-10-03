@@ -62,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scans the project on the background worker and lists every Rust/Go definition
   in a filterable picker; choosing one opens its file and jumps to it. Files are
   mapped by extension (no content reads) and oversized files are skipped.
+- Koda now checks whether a language's formatter is installed and marks
+  **Format Document** unavailable in the palette with the reason
+  ("rustfmt is not installed") before you try, rather than only failing on
+  invocation.
 
 ### Performance
 

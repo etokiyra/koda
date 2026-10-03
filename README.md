@@ -87,7 +87,7 @@ Implemented:
   find-references (`Shift+F12`).
 - Completion (`Ctrl+Space`) merging provider keywords with buffer identifiers.
 - Formatting (`Ctrl+Shift+I`) through the language's own tool (`rustfmt`,
-  `gofmt`), run off the UI thread.
+  `gofmt`), run off the UI thread, with missing tools reported up front.
 - Hover (`Ctrl+Shift+H`) showing a symbol's kind, definition line and usage
   count.
 - Project-wide symbol search (`Ctrl+T`), scanned off the UI thread.

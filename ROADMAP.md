@@ -72,8 +72,9 @@ The highest-value work. These turn Koda from an editor into an IDE.
       Extension-based and heuristic; LSP workspace symbols can replace it.
 - [x] **Formatting.** `Ctrl+Shift+I` runs the language's trusted formatter
       (`rustfmt`, `gofmt`) on a snapshot through the background worker and
-      replaces the buffer as one undoable edit. Reuses system tools and explains
-      what is missing; automatic provisioning is still to come.
+      replaces the buffer as one undoable edit. Reuses system tools, detects
+      whether they are installed and says so in the palette; automatic
+      provisioning is still to come.
 - [ ] **Rename and code actions.**
 - [ ] **Tool provisioning and lifecycle.** Detect the language tooling Koda
       needs, reuse what is already installed, and fetch compatible tools from
