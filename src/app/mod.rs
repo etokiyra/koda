@@ -4374,8 +4374,16 @@ impl App {
                 PickerItem::new(label, hint.to_string(), PickerAction::InstallTool(tool))
                     .shortcut("Enter")
             } else {
-                let hint = tool.install_hint();
-                PickerItem::new(label, hint, PickerAction::Info(hint.to_string())).disabled(hint)
+                // No package manager for this tool is present: say exactly what
+                // is missing instead of only how to install the tool itself.
+                let missing = tool.missing_prerequisites();
+                let reason = if missing.is_empty() {
+                    tool.install_hint().to_string()
+                } else {
+                    format!("needs {} — {}", missing.join(" or "), tool.install_hint())
+                };
+                PickerItem::new(label, reason.clone(), PickerAction::Info(reason.clone()))
+                    .disabled(reason)
             };
             items.push(item);
         }

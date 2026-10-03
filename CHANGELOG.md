@@ -54,12 +54,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manages under the user's data directory (with a matching user-writable cache)
   instead of the system-wide prefix that `npm install -g` uses by default, and
   only falls back to the user's own global prefix (nvm, fnm, volta, …)
-  afterwards. pip tooling already used `--user`/`pipx`.
+  afterwards.
+- Python provisioning no longer assumes `pip` exists. Koda's Python strategy
+  installs `python-lsp-server` into a **virtualenv it manages** under its data
+  directory first; creating the virtualenv seeds its own `pip`, so a Python
+  without the `pip` module — or one marked externally managed (PEP 668) —
+  installs cleanly without touching the system environment. `pipx` and `uv` are
+  preferred when present, and `ensurepip`/`pip --user` are kept as fallbacks.
+- A Rust toolchain with no `rustup` can be bootstrapped from the official
+  `https://sh.rustup.rs` installer (`--no-modify-path`, so the user's shell
+  profile is left alone), after which the component is added.
 - Koda only offers to install a tool when one of its package managers is
   actually present, so it never promises an install it cannot perform. It also
-  searches more user bin directories (`~/go/bin`, pnpm, and its own managed npm
-  prefix), so a `go install` or a user-local npm install is found even when
-  those directories are not on `PATH`.
+  searches more user bin directories (`~/go/bin`, pnpm, its managed npm prefix
+  and Python virtualenv), so a user-local install is found even when those
+  directories are not on `PATH`.
 - Tool discovery now searches `PATH` and then a handful of well-known user bin
   directories (`~/.cargo/bin`, `~/.local/bin`, `~/bin`, …). Koda is often
   launched from a GUI or a non-login shell whose `PATH` omits exactly the
@@ -68,11 +77,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolved path is used to launch servers and formatters, not just to probe.
 - **Language Setup…** can now install a missing tool with one action, using
   only official acquisition paths: `rustup component add …` for Rust tooling,
-  `go install …@latest` for `gopls`, `pipx`/`pip` for Python's
-  `python-lsp-server` and `npm install -g` for `bash-language-server`.
-  Installation tries each candidate package manager in turn, so a machine
-  without `pipx` still succeeds through `pip`. Koda runs no bespoke downloader,
-  so provenance and integrity remain the package managers' responsibility.
+  `go install …@latest` for `gopls`, `pipx`/`uv`/a managed virtualenv for
+  Python's `python-lsp-server` and `npm` for `bash-language-server`.
+  Installation tries each candidate strategy in turn — a machine without
+  `pipx`, or with a Python that has no `pip`, still succeeds through the
+  managed virtualenv. Koda runs no bespoke package downloader, so provenance
+  and integrity remain the package managers' responsibility.
+- Every install strategy is verified by **re-probing the tool**, not by
+  trusting a package manager's exit code. A tool whose whole toolchain is
+  missing (for example no `go` or `npm`) is shown with the missing prerequisite
+  instead of a dead install action.
+
 - Installation runs on the background worker with a busy indicator; Koda
   re-probes when it finishes and, if a server is now available, starts it.
   Failures (for example, offline) are reported verbatim and editing continues.

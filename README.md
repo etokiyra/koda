@@ -126,8 +126,8 @@ channel, so provenance and integrity stay with the package manager:
 | --- | --- | --- |
 | `rust-analyzer` | Rust language server | `rustup component add rust-analyzer` |
 | `gopls` | Go language server | `go install golang.org/x/tools/gopls@latest` |
-| `pylsp` | Python language server | `pipx install python-lsp-server` (or `pip`) |
-| `bash-language-server` | Shell language server | `npm install -g bash-language-server` |
+| `pylsp` | Python language server | a Koda-managed virtualenv (or `pipx`/`uv`/`pip --user`) |
+| `bash-language-server` | Shell language server | `npm`, with a prefix Koda manages |
 | `rustfmt` | Rust formatting | `rustup component add rustfmt` |
 | `gofmt` | Go formatting | ships with the Go toolchain |
 
@@ -136,9 +136,11 @@ built-in providers whenever one is unavailable, so editing never depends on
 them.
 
 Every install targets a directory you can write to — `rustup` under
-`~/.cargo`, `go install` under `~/go`, `pip --user`/`pipx` under `~/.local`, and
-an npm prefix Koda manages under its own data directory — so Koda never needs
-`sudo` and a system-owned prefix can never make provisioning fail.
+`~/.cargo`, `go install` under `~/go`, a Python virtualenv and npm prefix Koda
+manages under its own data directory, and `pip --user`/`pipx` under `~/.local`
+— so Koda never needs `sudo` and a system-owned prefix can never make
+provisioning fail. The Python virtualenv seeds its own `pip`, so a Python
+without the `pip` module (or one that is externally managed) still works.
 
 ### Supported languages
 

@@ -108,7 +108,7 @@ impl Tool {
         match self {
             Tool::RustAnalyzer => "install with `rustup component add rust-analyzer`",
             Tool::Gopls => "install with `go install golang.org/x/tools/gopls@latest`",
-            Tool::Pylsp => "install with `pipx install python-lsp-server`",
+            Tool::Pylsp => "install `python-lsp-server` into a Koda-managed environment",
             Tool::BashLs => "install with `npm` — Koda uses a user-local prefix",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
@@ -125,9 +125,9 @@ impl Tool {
 
     /// The preferred install command, when one exists.
     ///
-    /// This is the human-facing headline command — used to decide whether a
-    /// tool is installable and to describe it — while the actual attempt uses
-    /// [`Tool::install_plan`], which may choose a user-local target.
+    /// This is the human-facing headline command, used to describe the tool;
+    /// the actual install uses [`Tool::install_attempts`], which picks a
+    /// self-contained, user-local strategy.
     pub fn install_command(self) -> Option<(&'static str, &'static [&'static str])> {
         match self {
             Tool::RustAnalyzer => Some(("rustup", &["component", "add", "rust-analyzer"])),
@@ -139,97 +139,254 @@ impl Tool {
         }
     }
 
-    /// The ordered commands Koda will actually run to install this tool.
-    ///
-    /// Koda runs only official acquisition paths — `rustup`, `go install`,
-    /// `pipx`/`pip`, `npm` — so provenance stays with those tools. Every
-    /// strategy targets a location the user can write to, never a system-owned
-    /// prefix, so a missing permission can never block the install. The first
-    /// command that succeeds wins.
-    pub fn install_plan(self) -> Vec<InstallStep> {
+    /// Programs this tool needs before it can be installed, so Koda can explain
+    /// when a whole toolchain is missing.
+    pub fn prerequisites(self) -> &'static [&'static str] {
         match self {
-            Tool::RustAnalyzer => {
-                vec![InstallStep::new(
-                    "rustup",
-                    &["component", "add", "rust-analyzer"],
-                )]
-            }
-            Tool::Rustfmt => vec![InstallStep::new("rustup", &["component", "add", "rustfmt"])],
-            Tool::Gopls => vec![InstallStep::new(
-                "go",
-                &["install", "golang.org/x/tools/gopls@latest"],
+            Tool::RustAnalyzer | Tool::Rustfmt => &["rustup"],
+            Tool::Gopls | Tool::Gofmt => &["go"],
+            Tool::Pylsp => &["python3"],
+            Tool::BashLs => &["npm"],
+        }
+    }
+
+    /// The prerequisites that are not present.
+    pub fn missing_prerequisites(self) -> Vec<&'static str> {
+        self.prerequisites()
+            .iter()
+            .copied()
+            .filter(|program| locate(program).is_none())
+            .collect()
+    }
+
+    /// The ordered strategies Koda will try to install this tool.
+    ///
+    /// Each attempt is a short command sequence; Koda re-probes the tool after
+    /// every attempt and stops at the first that yields a working binary. Every
+    /// strategy is self-contained and targets a location the user can write to
+    /// — a Koda-managed Python virtualenv or npm prefix, `--user` installs, or
+    /// the official `rustup` installer — so a missing permission or a Python
+    /// without `pip` never blocks provisioning.
+    pub fn install_attempts(self) -> Vec<InstallAttempt> {
+        match self {
+            Tool::RustAnalyzer => component_attempts("rust-analyzer"),
+            Tool::Rustfmt => component_attempts("rustfmt"),
+            Tool::Gopls => vec![InstallAttempt::one(
+                "go install",
+                InstallCommand::new("go", &["install", "golang.org/x/tools/gopls@latest"]),
             )],
-            Tool::Pylsp => vec![
-                InstallStep::new("pipx", &["install", "python-lsp-server"]),
-                InstallStep::new(
-                    "python3",
-                    &["-m", "pip", "install", "--user", "python-lsp-server"],
-                ),
-                InstallStep::new("pip3", &["install", "--user", "python-lsp-server"]),
-                InstallStep::new(
-                    "python",
-                    &["-m", "pip", "install", "--user", "python-lsp-server"],
-                ),
-            ],
-            Tool::BashLs => {
-                // A user-local npm prefix always works; `npm install -g` into a
-                // root-owned prefix fails with EACCES on many systems. Try the
-                // user-local target first, then fall back to whatever global
-                // prefix the user's npm (nvm, fnm, volta, …) already uses.
-                let mut steps = Vec::new();
-                if let Some(prefix) = npm_prefix() {
-                    // A user-writable cache too: a `~/.npm` left root-owned by a
-                    // past `sudo npm` would otherwise fail with EACCES.
-                    let cache = prefix.with_file_name("npm-cache");
-                    steps.push(InstallStep {
-                        program: "npm".to_string(),
-                        args: vec![
-                            "install".to_string(),
-                            "-g".to_string(),
-                            "--prefix".to_string(),
-                            prefix.to_string_lossy().into_owned(),
-                            "--cache".to_string(),
-                            cache.to_string_lossy().into_owned(),
-                            "bash-language-server".to_string(),
-                        ],
-                    });
-                }
-                steps.push(InstallStep::new(
-                    "npm",
-                    &["install", "-g", "bash-language-server"],
-                ));
-                steps
-            }
+            Tool::Pylsp => python_attempts(),
+            Tool::BashLs => bash_ls_attempts(),
             // `gofmt` ships with the Go toolchain; there is nothing to install.
             Tool::Gofmt => Vec::new(),
         }
     }
 }
 
-/// One command in an install plan.
+/// One command in an install attempt.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InstallStep {
+pub struct InstallCommand {
     pub program: String,
     pub args: Vec<String>,
 }
 
-impl InstallStep {
+impl InstallCommand {
     fn new(program: &str, args: &[&str]) -> Self {
-        InstallStep {
+        InstallCommand {
             program: program.to_string(),
             args: args.iter().map(|arg| (*arg).to_string()).collect(),
         }
     }
+
+    fn with_args(program: impl Into<String>, args: Vec<String>) -> Self {
+        InstallCommand {
+            program: program.into(),
+            args,
+        }
+    }
 }
 
-/// Install a tool through its trusted package managers.
+/// A strategy for installing a tool: a short command sequence that Koda runs
+/// and then verifies by re-probing the tool.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InstallAttempt {
+    /// A short description of the strategy.
+    pub via: &'static str,
+    pub commands: Vec<InstallCommand>,
+}
+
+impl InstallAttempt {
+    fn one(via: &'static str, command: InstallCommand) -> Self {
+        InstallAttempt {
+            via,
+            commands: vec![command],
+        }
+    }
+
+    fn sequence(via: &'static str, commands: Vec<InstallCommand>) -> Self {
+        InstallAttempt { via, commands }
+    }
+}
+
+/// Install a `rustup` component, bootstrapping `rustup` itself when absent.
+fn component_attempts(component: &'static str) -> Vec<InstallAttempt> {
+    let mut attempts = vec![InstallAttempt::one(
+        "rustup",
+        InstallCommand::new("rustup", &["component", "add", component]),
+    )];
+    if let Some(bootstrap) = rustup_bootstrap(component) {
+        attempts.push(bootstrap);
+    }
+    attempts
+}
+
+/// Bootstrap the Rust toolchain with the official `rustup` installer, then add
+/// the component. Skipped on Windows, where the installer is a binary.
+fn rustup_bootstrap(component: &'static str) -> Option<InstallAttempt> {
+    if cfg!(windows) {
+        return None;
+    }
+    let tools = tools_dir()?;
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let script = tools.join("rustup-init.sh");
+    let rustup = home.join(".cargo/bin/rustup");
+    Some(InstallAttempt::sequence(
+        "the official rustup installer",
+        vec![
+            InstallCommand::with_args(
+                "curl",
+                vec![
+                    "--proto".into(),
+                    "=https".into(),
+                    "--tlsv1.2".into(),
+                    "-sSf".into(),
+                    "https://sh.rustup.rs".into(),
+                    "-o".into(),
+                    script.to_string_lossy().into_owned(),
+                ],
+            ),
+            InstallCommand::with_args(
+                "sh",
+                vec![
+                    script.to_string_lossy().into_owned(),
+                    "-y".into(),
+                    "--no-modify-path".into(),
+                ],
+            ),
+            InstallCommand::with_args(
+                rustup.to_string_lossy().into_owned(),
+                vec!["component".into(), "add".into(), component.into()],
+            ),
+        ],
+    ))
+}
+
+/// Strategies for installing the Python language server, from most isolated to
+/// least. The virtualenv attempt bootstraps its own `pip`, so it works even
+/// when the system Python has no `pip` module or is externally managed.
+fn python_attempts() -> Vec<InstallAttempt> {
+    let mut attempts = vec![
+        InstallAttempt::one(
+            "pipx",
+            InstallCommand::new("pipx", &["install", "python-lsp-server"]),
+        ),
+        InstallAttempt::one(
+            "uv",
+            InstallCommand::new("uv", &["tool", "install", "python-lsp-server"]),
+        ),
+    ];
+
+    if let Some(venv) = venv_dir() {
+        let dir = venv.to_string_lossy().into_owned();
+        let pip = venv_program(&venv, "pip").to_string_lossy().into_owned();
+        for python in ["python3", "python"] {
+            attempts.push(InstallAttempt::sequence(
+                "a Koda-managed virtualenv",
+                vec![
+                    InstallCommand::with_args(
+                        python,
+                        vec!["-m".into(), "venv".into(), dir.clone()],
+                    ),
+                    InstallCommand::with_args(
+                        pip.clone(),
+                        vec!["install".into(), "python-lsp-server".into()],
+                    ),
+                ],
+            ));
+        }
+    }
+
+    for python in ["python3", "python"] {
+        // `ensurepip` seeds pip when the interpreter has none.
+        attempts.push(InstallAttempt::sequence(
+            "ensurepip",
+            vec![
+                InstallCommand::new(python, &["-m", "ensurepip", "--user"]),
+                InstallCommand::new(
+                    python,
+                    &["-m", "pip", "install", "--user", "python-lsp-server"],
+                ),
+            ],
+        ));
+        attempts.push(InstallAttempt::one(
+            "pip --user",
+            InstallCommand::new(
+                python,
+                &["-m", "pip", "install", "--user", "python-lsp-server"],
+            ),
+        ));
+    }
+    attempts.push(InstallAttempt::one(
+        "pip3 --user",
+        InstallCommand::new("pip3", &["install", "--user", "python-lsp-server"]),
+    ));
+
+    attempts
+}
+
+/// Strategies for installing the Shell language server with npm.
+fn bash_ls_attempts() -> Vec<InstallAttempt> {
+    let mut attempts = Vec::new();
+    if let Some(prefix) = npm_prefix() {
+        // A user-local prefix and cache: `npm install -g` into a root-owned
+        // prefix, or a `~/.npm` left root-owned by a past `sudo npm`, would
+        // otherwise fail with EACCES.
+        let cache = prefix.with_file_name("npm-cache");
+        attempts.push(InstallAttempt::one(
+            "npm (user-local prefix)",
+            InstallCommand::with_args(
+                "npm",
+                vec![
+                    "install".into(),
+                    "-g".into(),
+                    "--prefix".into(),
+                    prefix.to_string_lossy().into_owned(),
+                    "--cache".into(),
+                    cache.to_string_lossy().into_owned(),
+                    "bash-language-server".into(),
+                ],
+            ),
+        ));
+    }
+    // Fall back to whatever global prefix the user's npm (nvm, fnm, volta, …)
+    // already uses.
+    attempts.push(InstallAttempt::one(
+        "npm",
+        InstallCommand::new("npm", &["install", "-g", "bash-language-server"]),
+    ));
+    attempts
+}
+
+/// Install a tool by trying each strategy and verifying the result.
 ///
-/// Intended for the background worker. Tries each planned command in turn and
-/// returns a short success message, or the most recent actionable error so the
-/// user sees what went wrong even when the network is unavailable.
+/// Intended for the background worker. A strategy's commands run in order; if
+/// one fails the strategy is abandoned, and after every strategy Koda re-probes
+/// the tool — a package manager can report success without producing a binary
+/// Koda can find. Returns a short success message or the most recent
+/// actionable error.
 pub fn install(tool: Tool) -> Result<String, String> {
-    let plan = tool.install_plan();
-    if plan.is_empty() {
+    let attempts = tool.install_attempts();
+    if attempts.is_empty() {
         return Err(format!(
             "{} cannot be installed automatically — {}",
             tool.label(),
@@ -238,37 +395,51 @@ pub fn install(tool: Tool) -> Result<String, String> {
     }
 
     let mut last_error = None;
-    for step in &plan {
-        match Command::new(&step.program).args(&step.args).output() {
-            Ok(output) if output.status.success() => {
-                return Ok(format!("Installed {}", tool.label()));
+    for attempt in &attempts {
+        for command in &attempt.commands {
+            match Command::new(&command.program).args(&command.args).output() {
+                Ok(output) if output.status.success() => {}
+                Ok(output) => {
+                    last_error = Some(format!(
+                        "{}: {}",
+                        tool.label(),
+                        first_stderr_line(&output.stderr)
+                    ));
+                    break;
+                }
+                Err(err) => {
+                    last_error = Some(format!("could not run {}: {err}", command.program));
+                    break;
+                }
             }
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let message = stderr
-                    .lines()
-                    .find(|line| !line.trim().is_empty())
-                    .unwrap_or("installation failed")
-                    .trim()
-                    .to_string();
-                last_error = Some(format!("{}: {message}", tool.label()));
-            }
-            Err(err) => {
-                last_error = Some(format!("could not run {}: {err}", step.program));
-            }
+        }
+        if probe(tool).available {
+            return Ok(format!("Installed {}", tool.label()));
         }
     }
     Err(last_error.unwrap_or_else(|| format!("could not install {}", tool.label())))
 }
 
-/// Whether any package manager in `tool`'s install plan is actually available.
+fn first_stderr_line(stderr: &[u8]) -> String {
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("installation failed")
+        .trim()
+        .to_string()
+}
+
+/// Whether any command in `tool`'s install attempts is available.
 ///
-/// Koda only offers to install a tool when it can really do it, so it never
+/// Koda only offers to install a tool it can really install, so it never
 /// promises an install and then fails because no package manager exists.
 pub fn can_install(tool: Tool) -> bool {
-    tool.install_plan()
-        .iter()
-        .any(|step| locate(&step.program).is_some())
+    tool.install_attempts().iter().any(|attempt| {
+        attempt
+            .commands
+            .iter()
+            .any(|command| locate(&command.program).is_some())
+    })
 }
 
 /// What Koda learned about one tool.
@@ -419,12 +590,16 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         dirs.push(home.join(".npm-global/bin"));
         dirs.push(home.join(".local/share/pnpm"));
     }
-    // Tools Koda installed itself, plus the npm prefix it manages.
+    // Tools Koda installed itself, plus the npm prefix and Python virtualenv
+    // it manages.
     if let Some(tools) = tools_dir() {
         if let Some(prefix) = npm_prefix() {
             dirs.push(prefix.join("bin"));
             dirs.push(prefix.join("node_modules/.bin"));
             dirs.push(prefix);
+        }
+        if let Some(venv) = venv_dir() {
+            dirs.push(venv_bin_dir(&venv));
         }
         dirs.push(tools.join("bin"));
     }
@@ -448,6 +623,28 @@ pub fn tools_dir() -> Option<PathBuf> {
 /// `npm install -g --prefix` never hits a permission error.
 pub fn npm_prefix() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("npm"))
+}
+
+/// Koda's managed Python virtualenv, used to install the Python language
+/// server even when the system Python has no `pip`.
+pub fn venv_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("python"))
+}
+
+fn venv_bin_dir(venv: &Path) -> PathBuf {
+    if cfg!(windows) {
+        venv.join("Scripts")
+    } else {
+        venv.join("bin")
+    }
+}
+
+fn venv_program(venv: &Path, name: &str) -> PathBuf {
+    if cfg!(windows) {
+        venv_bin_dir(venv).join(format!("{name}.exe"))
+    } else {
+        venv_bin_dir(venv).join(name)
+    }
 }
 
 #[cfg(test)]
@@ -502,42 +699,70 @@ mod tests {
             Tool::BashLs.install_command(),
             Some(("npm", &["install", "-g", "bash-language-server"][..]))
         );
-        // Python tooling has pip fallbacks, so installation is attempted even
-        // without pipx.
-        assert!(Tool::Pylsp.install_plan().len() >= 2);
+        // Python tooling has several fallbacks, so installation is attempted
+        // even without pipx or a working `pip`.
+        assert!(Tool::Pylsp.install_attempts().len() >= 2);
         assert_eq!(Tool::Gofmt.install_command(), None);
         // `gofmt` cannot be installed on its own.
         assert!(install(Tool::Gofmt).is_err());
     }
 
     #[test]
-    fn install_plans_never_need_elevated_permissions() {
+    fn install_attempts_are_self_contained_and_user_local() {
         // `npm install -g` into a root-owned prefix fails with EACCES, so the
-        // plan must offer a user-local prefix first.
+        // first Shell strategy must use a user-local prefix and cache.
         let Some(prefix) = npm_prefix() else {
             return; // No home directory; nothing to manage.
         };
-        let plan = Tool::BashLs.install_plan();
-        let first = plan.first().expect("an npm install step");
-        assert_eq!(first.program, "npm");
+        let attempts = Tool::BashLs.install_attempts();
+        let first = attempts.first().expect("an npm attempt");
+        let command = first.commands.first().expect("an npm command");
+        assert_eq!(command.program, "npm");
         assert!(
-            first.args.iter().any(|arg| arg == "--prefix"),
-            "the first npm step should use --prefix: {:?}",
-            first.args
+            command.args.iter().any(|arg| arg == "--prefix"),
+            "the first npm command should use --prefix: {:?}",
+            command.args
         );
         assert!(
-            first
+            command
                 .args
                 .iter()
                 .any(|arg| arg == &prefix.to_string_lossy()),
             "the prefix should be Koda's own user-local directory: {:?}",
-            first.args
+            command.args
         );
-        // pipx and pip --user are likewise user-local.
-        for step in Tool::Pylsp.install_plan() {
-            let user_local = step.program == "pipx" || step.args.iter().any(|arg| arg == "--user");
-            assert!(user_local, "pylsp step is not user-local: {step:?}");
-        }
+        assert!(
+            command.args.iter().any(|arg| arg == "--cache"),
+            "a user-local cache avoids a root-owned ~/.npm: {:?}",
+            command.args
+        );
+
+        // A system Python without `pip` must not block pylsp: the plan includes
+        // a Koda-managed virtualenv (which bootstraps its own pip), and it
+        // never asks pip to override the OS (`--break-system-packages`).
+        let attempts = Tool::Pylsp.install_attempts();
+        assert!(
+            attempts.iter().any(|attempt| {
+                attempt
+                    .commands
+                    .iter()
+                    .any(|command| command.args.iter().any(|arg| arg == "venv"))
+            }),
+            "expected a managed-virtualenv strategy: {attempts:?}"
+        );
+        assert!(
+            attempts.iter().all(|attempt| {
+                attempt.commands.iter().all(|command| {
+                    !command
+                        .args
+                        .iter()
+                        .any(|arg| arg == "--break-system-packages")
+                })
+            }),
+            "pylsp must not modify system packages"
+        );
+        // pipx and uv bundle their own environments.
+        assert!(attempts.iter().any(|attempt| attempt.via == "pipx"));
     }
 
     #[test]
@@ -550,6 +775,23 @@ mod tests {
                 dirs.iter().any(|dir| dir == &prefix.join("bin")),
                 "the managed npm prefix should be searched"
             );
+        }
+        if let Some(venv) = venv_dir() {
+            assert!(
+                dirs.iter().any(|dir| dir == &venv_bin_dir(&venv)),
+                "the managed Python virtualenv should be searched"
+            );
+        }
+    }
+
+    #[test]
+    fn prerequisites_report_missing_toolchains() {
+        // A guaranteed-absent prerequisite is reported.
+        for tool in Tool::ALL {
+            let missing = tool.missing_prerequisites();
+            for program in &missing {
+                assert!(locate(program).is_none());
+            }
         }
     }
 
