@@ -156,7 +156,9 @@ command palette already reports which are available. Filling them in is additive
 - [ ] File iconography that respects monochrome terminals.
 - [ ] Better diff/merge view for git.
 - [ ] Staged/unstaged git view and basic commit flow.
-- [ ] Incremental search across the project.
+- [x] Project-wide text search (`Ctrl+Shift+F`): a `.gitignore`-aware,
+      case-insensitive scan on the background worker with a filterable result
+      list. (Per-file regex search is still to come.)
 - [ ] Notifications/toasts for long-running operations.
 
 ---

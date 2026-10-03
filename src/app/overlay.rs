@@ -178,6 +178,7 @@ pub enum PromptKind {
     Rename,
     NewFile,
     RenameFile,
+    ProjectSearch,
 }
 
 /// A single-line text prompt.

@@ -28,6 +28,7 @@ use crate::language::symbols::is_ident_char as is_word_char;
 use crate::language::tools::{Tool, ToolPurpose, ToolRegistry};
 use crate::language::{Capability, LanguageId, LanguageService, WorkspaceSymbol};
 use crate::project::Workspace;
+use crate::search::SearchMatch;
 use crate::session::{self, Session};
 use crate::terminal;
 use crate::ui;
@@ -119,6 +120,10 @@ pub struct App {
     pending_workspace_symbols: Option<u64>,
     /// Whether a language server workspace-symbol request is in flight.
     ws_lsp_pending: bool,
+    /// Monotonic id for project text searches.
+    project_search_seq: u64,
+    /// The project search awaiting a result, if any.
+    pending_project_search: Option<u64>,
     /// Animation frame, advanced while something on screen animates.
     pub anim_phase: usize,
     /// When the animation frame last advanced.
@@ -194,6 +199,8 @@ impl App {
             workspace_symbols_seq: 0,
             pending_workspace_symbols: None,
             ws_lsp_pending: false,
+            project_search_seq: 0,
+            pending_project_search: None,
             anim_phase: 0,
             anim_last: Instant::now(),
             tools: None,
@@ -364,6 +371,8 @@ impl App {
             Some("formatting")
         } else if self.pending_workspace_symbols.is_some() {
             Some("searching symbols")
+        } else if self.pending_project_search.is_some() {
+            Some("searching project")
         } else if self.pending_install.is_some() {
             Some("installing")
         } else if self.lsp_status == LspStatus::Starting {
@@ -437,7 +446,8 @@ impl App {
                     ('p', true) => self.open_command_palette(),
                     ('p', false) => self.open_quick_open(),
                     ('o', _) => self.execute_command(ids::OPEN),
-                    ('f', _) => self.open_search(false),
+                    ('f', true) => self.execute_command(ids::PROJECT_SEARCH),
+                    ('f', false) => self.open_search(false),
                     ('h', true) => self.open_hover(),
                     ('h', false) => self.open_search(true),
                     ('g', _) => self.execute_command(ids::GOTO_LINE),
@@ -1002,6 +1012,7 @@ impl App {
             ids::HOVER => self.open_hover(),
             ids::SETUP => self.language_setup(),
             ids::WORKSPACE_SYMBOLS => self.open_workspace_symbols(),
+            ids::PROJECT_SEARCH => self.open_project_search(),
             ids::FIND => self.open_search(false),
             ids::REPLACE => self.open_search(true),
             ids::GOTO_LINE => self.open_prompt(PromptKind::GotoLine, "Go to line", "42"),
@@ -1124,6 +1135,21 @@ impl App {
                     }
                     Err(err) => self.set_error(format!("Rename failed: {err}")),
                 }
+            }
+            PromptKind::ProjectSearch => {
+                if input.is_empty() {
+                    self.set_error("No search text provided");
+                    return;
+                }
+                self.project_search_seq += 1;
+                let revision = self.project_search_seq;
+                self.pending_project_search = Some(revision);
+                self.background.search_project(
+                    self.workspace.root().to_path_buf(),
+                    input.clone(),
+                    revision,
+                );
+                self.set_status(format!("Searching for \"{input}\"…"));
             }
         }
     }
@@ -1772,6 +1798,14 @@ impl App {
                 self.open_workspace_symbol_picker(symbols);
                 true
             }
+            BackgroundEvent::SearchResults { revision, matches } => {
+                if self.pending_project_search != Some(revision) {
+                    return false;
+                }
+                self.pending_project_search = None;
+                self.open_project_search_picker(matches);
+                true
+            }
             BackgroundEvent::Tools(registry) => {
                 self.tools = Some(registry);
                 // Discovery may finish after a file was already detected.
@@ -1794,6 +1828,62 @@ impl App {
                 true
             }
         }
+    }
+
+    /// Prompt for a project-wide text query.
+    fn open_project_search(&mut self) {
+        let mut prompt = Prompt::new(
+            PromptKind::ProjectSearch,
+            "Search in project",
+            "text to find",
+        );
+        // Prefill from a single-line selection, so searching for the word under
+        // the cursor is one keystroke.
+        if let Some(text) = self
+            .editor
+            .active_document()
+            .and_then(|doc| doc.selected_text())
+        {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() && !trimmed.contains('\n') {
+                prompt.input = trimmed.to_string();
+            }
+        }
+        self.overlay = Overlay::Prompt(prompt);
+    }
+
+    /// Show the matches from a project-wide search.
+    fn open_project_search_picker(&mut self, matches: Vec<SearchMatch>) {
+        if matches.is_empty() {
+            self.set_status("No matches in project");
+            return;
+        }
+        let total = matches.len();
+        let root = self.workspace.root().to_path_buf();
+        let items = matches
+            .into_iter()
+            .map(|entry| {
+                let relative = entry
+                    .path
+                    .strip_prefix(&root)
+                    .unwrap_or(&entry.path)
+                    .display()
+                    .to_string();
+                let detail = format!("{relative}:{}", entry.line + 1);
+                PickerItem::new(
+                    entry.text,
+                    detail,
+                    PickerAction::Reveal {
+                        path: entry.path,
+                        position: Position::new(entry.line, entry.col),
+                    },
+                )
+            })
+            .collect();
+        let mut picker = Picker::new("Search Results", "Filter results…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+        self.set_status(format!("{total} match(es)"));
     }
 
     /// Ask for project-wide symbols: the language server when attached, plus the
@@ -3802,6 +3892,34 @@ mod tests {
             labels.iter().any(|label| label == "main"),
             "labels: {labels:?}"
         );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn project_search_lists_matches_across_files() {
+        let dir = temp_project("project-search");
+        let a = dir.join("src/main.rs");
+        let b = dir.join("src/lib.rs");
+        fs::write(&a, "fn main() { needle(); }\n").unwrap();
+        fs::write(&b, "pub fn needle() {}\n").unwrap();
+
+        let mut app = App::new(Some(&a)).unwrap();
+        app.execute_command(ids::PROJECT_SEARCH);
+        assert!(matches!(app.overlay, Overlay::Prompt(_)));
+        app.submit_prompt(PromptKind::ProjectSearch, "needle".to_string());
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            app.apply_background_events();
+            if matches!(app.overlay, Overlay::Picker(_)) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let Overlay::Picker(picker) = &app.overlay else {
+            panic!("expected search results");
+        };
+        assert!(picker.filtered.len() >= 2, "expected both files to match");
         fs::remove_dir_all(&dir).ok();
     }
 

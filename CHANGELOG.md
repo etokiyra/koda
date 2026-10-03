@@ -191,6 +191,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Animations only run when there is something to show (the welcome scene or
   in-progress work); an idle editor still does no work.
 
+### Search
+
+- Added **Search in Project…** (`Ctrl+Shift+F`): a case-insensitive text
+  search across every file Koda knows about, run on the background worker and
+  shown as a filterable list of matches that jumps to the chosen line. It
+  respects `.gitignore`, skips binary and oversized files, and reports at most
+  one match per line. A single-line selection prefills the query.
+
 ### Editing & UX
 
 - Added **New File…**, **Rename…** and **Delete…** to the palette. New files

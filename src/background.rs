@@ -43,6 +43,12 @@ enum Request {
     },
     /// Scan a project for named definitions.
     WorkspaceSymbols { root: PathBuf, revision: u64 },
+    /// Search a project for a text query.
+    SearchProject {
+        root: PathBuf,
+        query: String,
+        revision: u64,
+    },
     /// Probe for the external tools Koda can drive.
     DiscoverTools,
     /// Install a tool through its trusted package manager.
@@ -71,6 +77,11 @@ pub enum Event {
     WorkspaceSymbols {
         revision: u64,
         symbols: Vec<WorkspaceSymbol>,
+    },
+    /// The result of a project-wide text search.
+    SearchResults {
+        revision: u64,
+        matches: Vec<crate::search::SearchMatch>,
     },
     /// The result of probing for external tools.
     Tools(ToolRegistry),
@@ -137,6 +148,14 @@ impl Background {
                             let symbols = language.workspace_symbols(&root, 3000);
                             let _ = event_tx.send(Event::WorkspaceSymbols { revision, symbols });
                         }
+                        Request::SearchProject {
+                            root,
+                            query,
+                            revision,
+                        } => {
+                            let matches = crate::search::search_project(&root, &query, 500);
+                            let _ = event_tx.send(Event::SearchResults { revision, matches });
+                        }
                         Request::DiscoverTools => {
                             let _ = event_tx.send(Event::Tools(ToolRegistry::discover()));
                         }
@@ -192,6 +211,15 @@ impl Background {
         let _ = self
             .requests
             .send(Request::WorkspaceSymbols { root, revision });
+    }
+
+    /// Ask for a project-wide text search.
+    pub fn search_project(&self, root: PathBuf, query: String, revision: u64) {
+        let _ = self.requests.send(Request::SearchProject {
+            root,
+            query,
+            revision,
+        });
     }
 
     /// Ask for the external tools to be probed.

@@ -51,6 +51,7 @@ pub mod ids {
     pub const DIAGNOSTICS_LIST: &str = "diagnostics.list";
 
     pub const WORKSPACE_SYMBOLS: &str = "project.symbols";
+    pub const PROJECT_SEARCH: &str = "project.search";
 
     pub const TOGGLE_TREE: &str = "view.toggleTree";
     pub const FOCUS_TREE: &str = "view.focusTree";
@@ -271,6 +272,13 @@ impl CommandRegistry {
                 Some("Ctrl+T"),
             )
             .describes("Search every definition in the project"),
+            Command::new(
+                PROJECT_SEARCH,
+                "Search in Project…",
+                "Project",
+                Some("Ctrl+Shift+F"),
+            )
+            .describes("Find text across every file in the project"),
             Command::new(TOGGLE_TREE, "Toggle File Tree", "View", Some("Ctrl+B"))
                 .describes("Show or hide the project sidebar"),
             Command::new(
