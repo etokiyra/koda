@@ -32,6 +32,10 @@ pub fn lsp_language_id(language: LanguageId) -> &'static str {
     match language {
         LanguageId::Rust => "rust",
         LanguageId::Go => "go",
+        LanguageId::Markdown => "markdown",
+        LanguageId::Json => "json",
+        LanguageId::Toml => "toml",
+        LanguageId::Yaml => "yaml",
         _ => "plaintext",
     }
 }

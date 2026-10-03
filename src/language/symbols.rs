@@ -32,6 +32,10 @@ pub enum SymbolKind {
     Constant,
     Variable,
     Macro,
+    /// A Markdown section heading.
+    Heading,
+    /// A key in a data format (JSON, TOML, YAML).
+    Key,
 }
 
 impl SymbolKind {
@@ -49,6 +53,8 @@ impl SymbolKind {
             SymbolKind::Constant => "const",
             SymbolKind::Variable => "var",
             SymbolKind::Macro => "macro",
+            SymbolKind::Heading => "heading",
+            SymbolKind::Key => "key",
         }
     }
 }

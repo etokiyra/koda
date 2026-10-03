@@ -36,12 +36,16 @@ mod tests {
             extensions: match id {
                 LanguageId::Rust => &["rs"],
                 LanguageId::Go => &["go"],
+                LanguageId::Markdown => &["md"],
+                LanguageId::Json => &["json"],
+                LanguageId::Toml => &["toml"],
+                LanguageId::Yaml => &["yaml", "yml"],
                 LanguageId::Unknown => &[],
             },
             project_markers: match id {
                 LanguageId::Rust => &["Cargo.toml"],
                 LanguageId::Go => &["go.mod"],
-                LanguageId::Unknown => &[],
+                _ => &[],
             },
             file_names: &[],
             shebangs: &[],

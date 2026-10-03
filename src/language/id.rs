@@ -11,6 +11,14 @@ use std::fmt;
 pub enum LanguageId {
     Rust,
     Go,
+    /// Markdown prose and documentation.
+    Markdown,
+    /// JSON (and its JSONC/GeoJSON relatives).
+    Json,
+    /// TOML configuration.
+    Toml,
+    /// YAML configuration.
+    Yaml,
     /// Used when detection could not reach a confident answer.
     #[default]
     Unknown,
@@ -18,13 +26,24 @@ pub enum LanguageId {
 
 impl LanguageId {
     /// Every language Koda understands today. Keep this in sync with [`crate::language::provider`].
-    pub const ALL: [LanguageId; 2] = [LanguageId::Rust, LanguageId::Go];
+    pub const ALL: [LanguageId; 6] = [
+        LanguageId::Rust,
+        LanguageId::Go,
+        LanguageId::Markdown,
+        LanguageId::Json,
+        LanguageId::Toml,
+        LanguageId::Yaml,
+    ];
 
     /// A human readable display name.
     pub fn name(self) -> &'static str {
         match self {
             LanguageId::Rust => "Rust",
             LanguageId::Go => "Go",
+            LanguageId::Markdown => "Markdown",
+            LanguageId::Json => "JSON",
+            LanguageId::Toml => "TOML",
+            LanguageId::Yaml => "YAML",
             LanguageId::Unknown => "Plain Text",
         }
     }
@@ -34,6 +53,10 @@ impl LanguageId {
         match self {
             LanguageId::Rust => "rust",
             LanguageId::Go => "go",
+            LanguageId::Markdown => "markdown",
+            LanguageId::Json => "json",
+            LanguageId::Toml => "toml",
+            LanguageId::Yaml => "yaml",
             LanguageId::Unknown => "text",
         }
     }

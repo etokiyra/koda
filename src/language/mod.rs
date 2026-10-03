@@ -10,17 +10,22 @@
 //! neither half depends on the other.
 
 pub mod completion;
+pub mod data;
 pub mod detection;
 pub mod diagnostics;
 pub mod format;
 pub mod go;
 pub mod hover;
 pub mod id;
+pub mod json;
 pub mod lsp;
+pub mod markdown;
 pub mod provider;
 pub mod rust;
 pub mod symbols;
+pub mod toml;
 pub mod tools;
+pub mod yaml;
 
 use std::path::Path;
 

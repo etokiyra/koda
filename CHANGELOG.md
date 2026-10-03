@@ -37,6 +37,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project root — never inside the project — and is written on quit. Opening a
   file directly (`koda src/main.rs`) still bypasses the saved session.
 
+### Language support
+
+- Added built-in support for **Markdown, JSON, TOML and YAML**. Each gets
+  syntax highlighting with no setup, so documentation and configuration files
+  are no longer plain text.
+- JSON, TOML and YAML reuse the shared delimiter checker for structural
+  diagnostics (unbalanced braces, brackets and quotes), with JSONC `//` and
+  `/* */` comments and TOML multi-line strings understood. Markdown skips
+  diagnostics because brackets are ordinary prose.
+- Symbol outlines now cover prose and config: Markdown headings, JSON top-level
+  keys, TOML tables and root keys, and YAML top-level keys appear in
+  **Go to Symbol** (`Ctrl+Shift+O`) and **Workspace Symbols** (`Ctrl+T`).
+- Completion offers each data format's literals, and `#`/`//` are wired up for
+  **Toggle Comment**.
+- `Cargo.toml` is detected as TOML (a file-name signal) while still marking a
+  Rust project; the TOML provider deliberately does **not** claim `Cargo.toml`
+  as a project marker, so Rust project context is unaffected.
+
 ### Language servers
 
 - Added an asynchronous language-server client. When a supported server is

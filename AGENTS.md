@@ -50,6 +50,11 @@ src/
 │   ├── provider/         # LanguageProvider trait + ProviderRegistry
 │   ├── rust/mod.rs       # Rust provider
 │   ├── go/mod.rs         # Go provider
+│   ├── markdown/mod.rs   # Markdown provider
+│   ├── json/mod.rs       # JSON provider
+│   ├── toml/mod.rs       # TOML provider
+│   ├── yaml/mod.rs       # YAML provider
+│   ├── data.rs           # shared scanners for the data formats
 │   └── mod.rs            # LanguageService facade
 ├── project/
 │   ├── mod.rs            # Project detection + Workspace
@@ -112,8 +117,9 @@ These are separate concerns and must stay separate:
   `LanguageDescriptor`s and combines signals into a `DetectionResult`
   (`language`, `confidence`, `reasons`). It never imports provider
   implementations.
-- **Providers** (`language/provider` + `language/{rust,go}`) implement the
-  `LanguageProvider` trait and *produce* those descriptors via `descriptor()`.
+- **Providers** (`language/provider` + `language/{rust,go,markdown,json,toml,yaml}`)
+  implement the `LanguageProvider` trait and *produce* those descriptors via
+  `descriptor()`.
 
 To add a language:
 
