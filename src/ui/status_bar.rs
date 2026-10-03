@@ -10,6 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::app::App;
+use crate::app::LspStatus;
 use crate::language::LanguageId;
 use crate::language::diagnostics::{Severity, TextPos};
 use crate::ui::{art, theme};
@@ -87,6 +88,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(
             " ✦ koda ready ",
             theme::pill(theme::MUTED, theme::PANEL_BG),
+        ));
+    }
+
+    // A connected language server earns a quiet chip.
+    if app.lsp_status == LspStatus::Ready {
+        spans.push(Span::styled("  ", on_panel));
+        spans.push(Span::styled(
+            format!("{} lsp", art::SPARK),
+            Style::default().fg(theme::SUCCESS).bg(theme::PANEL_BG),
         ));
     }
 

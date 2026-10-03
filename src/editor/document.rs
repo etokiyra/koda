@@ -34,6 +34,8 @@ pub struct Document {
     diagnostics_revision: u64,
     /// Whether the text changed since diagnostics were last requested.
     diagnostics_dirty: bool,
+    /// Whether the current diagnostics came from a language server.
+    diagnostics_from_lsp: bool,
 }
 
 impl Document {
@@ -51,6 +53,7 @@ impl Document {
             diagnostics: Vec::new(),
             diagnostics_revision: 0,
             diagnostics_dirty: false,
+            diagnostics_from_lsp: false,
         }
     }
 
@@ -119,6 +122,29 @@ impl Document {
     /// Discard diagnostics, e.g. because the document just changed.
     pub fn clear_diagnostics(&mut self) {
         self.diagnostics.clear();
+    }
+
+    /// Replace diagnostics with ones published by a language server.
+    pub fn set_lsp_diagnostics(&mut self, mut diagnostics: Vec<Diagnostic>) {
+        diagnostics.sort_by_key(|diagnostic| (diagnostic.start.line, diagnostic.start.col));
+        self.diagnostics = diagnostics;
+        self.diagnostics_from_lsp = true;
+        self.diagnostics_dirty = false;
+    }
+
+    /// Whether the current diagnostics came from a language server.
+    pub fn diagnostics_from_lsp(&self) -> bool {
+        self.diagnostics_from_lsp
+    }
+
+    /// Hand diagnostic ownership back to the built-in providers, e.g. after a
+    /// language server exits.
+    pub fn use_builtin_diagnostics(&mut self) {
+        if self.diagnostics_from_lsp {
+            self.diagnostics_from_lsp = false;
+            self.diagnostics.clear();
+            self.diagnostics_revision = 0;
+        }
     }
 
     /// Number of `(errors, warnings)`; other severities are not counted.
@@ -1237,5 +1263,46 @@ mod tests {
         d.insert_text("// hi\n");
         assert!(d.diagnostics().is_empty());
         assert!(d.diagnostics_dirty());
+    }
+
+    #[test]
+    fn lsp_diagnostics_replace_builtin_ones() {
+        let mut d = doc("fn main() {\n}\n");
+        d.set_diagnostics_revision(1);
+        d.apply_diagnostics(
+            1,
+            vec![Diagnostic::new(
+                TextPos::new(0, 0),
+                TextPos::new(0, 1),
+                Severity::Error,
+                "builtin",
+            )],
+        );
+        assert!(!d.diagnostics_from_lsp());
+
+        d.set_lsp_diagnostics(vec![
+            Diagnostic::new(
+                TextPos::new(1, 0),
+                TextPos::new(1, 1),
+                Severity::Warning,
+                "lsp warn",
+            ),
+            Diagnostic::new(
+                TextPos::new(0, 2),
+                TextPos::new(0, 3),
+                Severity::Error,
+                "lsp err",
+            ),
+        ]);
+        assert!(d.diagnostics_from_lsp());
+        // Sorted by position regardless of arrival order.
+        assert_eq!(d.diagnostics()[0].message, "lsp err");
+        assert_eq!(d.diagnostic_counts(), (1, 1));
+
+        // Handing ownership back clears them and re-arms the built-in pass.
+        d.use_builtin_diagnostics();
+        assert!(!d.diagnostics_from_lsp());
+        assert!(d.diagnostics().is_empty());
+        assert_eq!(d.diagnostics_revision(), 0);
     }
 }

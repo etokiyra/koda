@@ -93,6 +93,9 @@ Implemented:
 - Language-tool discovery: **Language Setup…** reports which of
   `rust-analyzer`, `gopls`, `rustfmt` and `gofmt` Koda found, with install
   hints for the rest.
+- An asynchronous **language-server client**: when `rust-analyzer` or `gopls` is
+  installed Koda starts it for the workspace and shows its diagnostics, falling
+  back to the built-in providers when no server is available.
 - Project-wide symbol search (`Ctrl+T`), scanned off the UI thread.
 - A keyboard-shortcuts cheatsheet (`F1`), a scroll margin, a live busy spinner
   and a gently animated mascot.

@@ -82,9 +82,14 @@ The highest-value work. These turn Koda from an editor into an IDE.
       installed. Fetching and installing compatible tools from trusted sources
       with integrity checks is still to come; basic editing and
       locally-available language support keep working offline.
-- [ ] **Rust/Go intelligence backends.** Integrate mature language tooling
-      internally (e.g. `rust-analyzer`, `gopls`), auto-discovered and launched by
-      Koda. The user must never install or configure an LSP.
+- [x] **Rust/Go intelligence backends (LSP client + diagnostics).** Koda now
+      spawns `rust-analyzer`/`gopls` when installed, runs the LSP lifecycle,
+      keeps documents in sync and shows server diagnostics through the existing
+      diagnostics UI. It falls back to the built-in heuristics when no server is
+      available. See the next section for the features still to run over LSP.
+- [ ] **LSP-backed completion, hover, go-to-definition, references, rename and
+      code actions.** The connection is in place; these features will reuse it
+      instead of the heuristics.
 
 The abstraction is already in place: providers declare `Capability`s, and the
 command palette already reports which are available. Filling them in is additive.

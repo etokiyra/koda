@@ -18,11 +18,12 @@ use crate::commands::{Command, CommandRegistry, ids};
 use crate::editor::{Document, Editor, Position, Selection};
 use crate::filesystem;
 use crate::language::completion::{Completion, CompletionKind};
-use crate::language::diagnostics::Severity;
+use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::format;
 use crate::language::format::FormatOutcome;
+use crate::language::lsp::{Server, ServerEvent};
 use crate::language::symbols::is_ident_char as is_word_char;
-use crate::language::tools::{Tool, ToolRegistry};
+use crate::language::tools::{Tool, ToolPurpose, ToolRegistry};
 use crate::language::{Capability, LanguageId, LanguageService, WorkspaceSymbol};
 use crate::project::Workspace;
 use crate::terminal;
@@ -41,6 +42,26 @@ const DIAGNOSTICS_DEBOUNCE: Duration = Duration::from_millis(150);
 pub enum Focus {
     Editor,
     FileTree,
+}
+
+/// How long to wait after opening a file before starting a language server.
+///
+/// Keeping this off the critical path means opening a file is instant and a
+/// server is never spawned for the brief use of a throwaway process.
+const LSP_START_DELAY: Duration = Duration::from_millis(600);
+
+/// The state of the language-server connection, for the statusline and setup.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum LspStatus {
+    /// No server is running (and none is expected).
+    #[default]
+    Offline,
+    /// A server was started and the handshake is in progress.
+    Starting,
+    /// The server is initialized and serving features.
+    Ready,
+    /// A server could not be started or exited.
+    Failed(String),
 }
 
 /// A short-lived status message.
@@ -97,6 +118,14 @@ pub struct App {
     anim_last: Instant,
     /// External tools Koda has probed for, once discovery completes.
     pub tools: Option<ToolRegistry>,
+    /// The running language server, if any.
+    lsp: Option<Server>,
+    /// The language the running (or attempted) server serves.
+    lsp_language: Option<LanguageId>,
+    /// When set, a language server should start once this delay elapses.
+    lsp_start_at: Option<(Instant, LanguageId)>,
+    /// Connection state, shown in the statusline.
+    pub lsp_status: LspStatus,
 }
 
 impl App {
@@ -145,6 +174,10 @@ impl App {
             anim_phase: 0,
             anim_last: Instant::now(),
             tools: None,
+            lsp: None,
+            lsp_language: None,
+            lsp_start_at: None,
+            lsp_status: LspStatus::Offline,
         };
 
         if let Some(path) = target
@@ -168,9 +201,11 @@ impl App {
             // work completed, the animation advanced, a status message expired,
             // or the terminal was resized. An idle Koda does no work at all.
             self.poll_diagnostics();
+            self.poll_lsp_start();
+            let lsp_changed = self.poll_lsp();
             let background_changed = self.apply_background_events();
             let animated = self.tick_animation();
-            if needs_redraw || background_changed || animated || self.tick_status() {
+            if needs_redraw || background_changed || lsp_changed || animated || self.tick_status() {
                 terminal.draw(|frame| ui::render(frame, self))?;
                 needs_redraw = false;
             }
@@ -240,6 +275,8 @@ impl App {
             Some("formatting")
         } else if self.pending_workspace_symbols.is_some() {
             Some("searching symbols")
+        } else if self.lsp_status == LspStatus::Starting {
+            Some("connecting")
         } else {
             None
         }
@@ -1218,7 +1255,7 @@ impl App {
     fn apply_background_event(&mut self, event: BackgroundEvent) -> bool {
         match event {
             BackgroundEvent::Detected { path, language, .. } => {
-                if let Some(doc) = self
+                let changed = if let Some(doc) = self
                     .editor
                     .documents
                     .iter_mut()
@@ -1232,9 +1269,14 @@ impl App {
                         doc.clear_diagnostics();
                         doc.set_diagnostics_revision(0);
                     }
-                    return changed;
+                    changed
+                } else {
+                    false
+                };
+                if changed {
+                    self.maybe_start_lsp(language);
                 }
-                false
+                changed
             }
             BackgroundEvent::Diagnostics {
                 path,
@@ -1278,6 +1320,15 @@ impl App {
             }
             BackgroundEvent::Tools(registry) => {
                 self.tools = Some(registry);
+                // Discovery may finish after a file was already detected.
+                if let Some(language) = self
+                    .editor
+                    .active_document()
+                    .map(|doc| doc.buffer.language)
+                    .filter(|language| *language != LanguageId::Unknown)
+                {
+                    self.maybe_start_lsp(language);
+                }
                 true
             }
         }
@@ -1434,11 +1485,6 @@ impl App {
             Some(doc) => (doc.buffer.path.clone(), doc.buffer.language),
             None => return,
         };
-        let supported = self
-            .language
-            .provider(language)
-            .capabilities()
-            .contains(&Capability::Diagnostics);
 
         self.diagnostics_seq += 1;
         let revision = self.diagnostics_seq;
@@ -1446,6 +1492,31 @@ impl App {
             doc.set_diagnostics_revision(revision);
         }
 
+        // If a language server owns this document, stream the change to it and
+        // let it publish fresh diagnostics.
+        let owned_by_lsp = self.lsp.as_ref().is_some_and(|server| {
+            server.is_ready()
+                && path
+                    .as_deref()
+                    .is_some_and(|path| server.has_open_document(path))
+        });
+        if owned_by_lsp {
+            let text = self
+                .editor
+                .active_document()
+                .map(|doc| doc.buffer.text())
+                .unwrap_or_default();
+            if let (Some(server), Some(path)) = (self.lsp.as_mut(), path.as_deref()) {
+                server.did_change(path, &text);
+            }
+            return;
+        }
+
+        let supported = self
+            .language
+            .provider(language)
+            .capabilities()
+            .contains(&Capability::Diagnostics);
         // Unsupported languages are marked analysed so we do not retry forever.
         if !supported {
             return;
@@ -1459,6 +1530,123 @@ impl App {
             .map(|doc| doc.buffer.text())
             .unwrap_or_default();
         self.background.diagnose(path, language, text, revision);
+    }
+
+    // ----------------------------------------------------------------------
+    // Language server
+    // ----------------------------------------------------------------------
+
+    /// Start a language server for `language` when one is installed, after a
+    /// short delay so opening a file never waits on server startup.
+    fn maybe_start_lsp(&mut self, language: LanguageId) {
+        if self.lsp.is_some() || self.lsp_language.is_some() || self.lsp_start_at.is_some() {
+            return;
+        }
+        let Some(tools) = &self.tools else {
+            return;
+        };
+        let Some(tool) = Tool::for_language(language, ToolPurpose::LanguageServer) else {
+            return;
+        };
+        if !tools.available(tool) {
+            return;
+        }
+        self.lsp_start_at = Some((Instant::now() + LSP_START_DELAY, language));
+    }
+
+    /// Start the scheduled language server once its delay has elapsed.
+    fn poll_lsp_start(&mut self) {
+        let Some((at, language)) = self.lsp_start_at else {
+            return;
+        };
+        if Instant::now() < at {
+            return;
+        }
+        self.lsp_start_at = None;
+        let Some(tool) = Tool::for_language(language, ToolPurpose::LanguageServer) else {
+            return;
+        };
+        self.start_lsp(language, tool.program(), &[]);
+    }
+
+    /// Start a language server, recording our attempt either way.
+    fn start_lsp(&mut self, language: LanguageId, program: &str, args: &[&str]) {
+        self.lsp_language = Some(language);
+        let root = self.workspace.root().to_path_buf();
+        match Server::start(language, program, args, &root) {
+            Ok(server) => {
+                self.lsp = Some(server);
+                self.lsp_status = LspStatus::Starting;
+            }
+            Err(err) => {
+                self.lsp_status = LspStatus::Failed(err.to_string());
+            }
+        }
+    }
+
+    /// Drain language-server events. Returns `true` when something changed.
+    fn poll_lsp(&mut self) -> bool {
+        let events = match self.lsp.as_mut() {
+            Some(server) => server.poll(),
+            None => return false,
+        };
+        if events.is_empty() {
+            return false;
+        }
+        for event in events {
+            match event {
+                ServerEvent::Ready => self.lsp_ready(),
+                ServerEvent::Diagnostics { path, diagnostics } => {
+                    self.apply_lsp_diagnostics(&path, diagnostics);
+                }
+                ServerEvent::Failed(message) => {
+                    self.lsp = None;
+                    self.lsp_status = LspStatus::Failed(message);
+                    // Fall back to the built-in providers for every document.
+                    for doc in &mut self.editor.documents {
+                        doc.use_builtin_diagnostics();
+                    }
+                    self.diagnostics_dirty_at = Some(Instant::now());
+                }
+            }
+        }
+        true
+    }
+
+    /// The handshake finished: open every matching document on the server.
+    fn lsp_ready(&mut self) {
+        self.lsp_status = LspStatus::Ready;
+        let Some(language) = self.lsp_language else {
+            return;
+        };
+        let documents: Vec<(PathBuf, String)> = self
+            .editor
+            .documents
+            .iter()
+            .filter(|doc| doc.buffer.language == language)
+            .filter_map(|doc| {
+                doc.buffer
+                    .path
+                    .clone()
+                    .map(|path| (path, doc.buffer.text()))
+            })
+            .collect();
+        if let Some(server) = self.lsp.as_mut() {
+            for (path, text) in documents {
+                server.did_open(&path, &text);
+            }
+        }
+    }
+
+    fn apply_lsp_diagnostics(&mut self, path: &Path, diagnostics: Vec<Diagnostic>) {
+        if let Some(doc) = self
+            .editor
+            .documents
+            .iter_mut()
+            .find(|doc| same_file(doc.buffer.path.as_deref(), path))
+        {
+            doc.set_lsp_diagnostics(diagnostics);
+        }
     }
 
     /// Jump to the next (`direction > 0`) or previous diagnostic, wrapping.
@@ -2702,6 +2890,68 @@ mod tests {
             panic!("expected the language setup list");
         };
         assert!(picker.filtered.len() >= crate::language::tools::Tool::ALL.len());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn language_server_diagnostics_reach_the_document() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Mock server: answer `initialize` (id 1) and publish one diagnostic
+        // for the file passed as the first argument.
+        const MOCK: &str = r#"#!/bin/sh
+target="$1"
+read -r header
+len=$(printf '%s' "$header" | tr -dc '0-9')
+read -r blank
+dd bs=1 count="$len" of=/dev/null 2>/dev/null
+resp='{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}'
+printf 'Content-Length: %s\r\n\r\n%s' "${#resp}" "$resp"
+note=$(printf '{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://%s","diagnostics":[{"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":3}},"severity":1,"message":"boom"}]}}' "$target")
+printf 'Content-Length: %s\r\n\r\n%s' "${#note}" "$note"
+cat >/dev/null
+"#;
+
+        let dir = temp_project("lsp-wire");
+        let file = dir.join("src/main.rs");
+        let script = dir.join("mock-lsp.sh");
+        {
+            let mut handle = fs::File::create(&script).unwrap();
+            handle.write_all(MOCK.as_bytes()).unwrap();
+        }
+        let mut perms = fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).unwrap();
+
+        let mut app = App::new(Some(&file)).unwrap();
+        app.start_lsp(
+            LanguageId::Rust,
+            script.to_str().unwrap(),
+            &[file.to_str().unwrap()],
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut applied = false;
+        while Instant::now() < deadline {
+            app.poll_lsp();
+            applied = app
+                .editor
+                .active_document()
+                .is_some_and(|doc| doc.diagnostics_from_lsp() && !doc.diagnostics().is_empty());
+            if applied {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        assert!(applied, "expected language-server diagnostics");
+        assert_eq!(app.lsp_status, LspStatus::Ready);
+        assert_eq!(
+            app.editor.active_document().unwrap().diagnostics()[0].message,
+            "boom"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 }

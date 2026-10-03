@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Language servers
+
+- Added an asynchronous language-server client. When a supported server is
+  installed (`rust-analyzer` for Rust, `gopls` for Go) Koda starts it for the
+  workspace, runs the LSP handshake, keeps documents in sync and shows the
+  server's `publishDiagnostics` through the existing diagnostics UI — gutter
+  markers, underlines, the statusline count and `F8` navigation.
+- Servers start lazily (~600 ms after a file is opened) so opening files is
+  instant, and if one exits Koda hands diagnostics back to its built-in
+  providers. With no server installed Koda keeps its heuristics, so offline
+  editing is unaffected. Completion, hover, navigation, rename and code actions
+  over LSP come next.
+
 ### Fixed
 
 - Corrected the theme to use the **actual upstream Helix Mellow colorscheme**.
