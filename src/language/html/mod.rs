@@ -305,6 +305,10 @@ fn html_symbols(text: &str) -> Vec<Symbol> {
 }
 
 /// Report tags that are opened but never closed (void elements excepted).
+///
+/// Everything is measured in **characters** into a local `chars` buffer: mixing
+/// a character index with a byte slice panics on any line containing non-ASCII
+/// text (`é`, CJK, emoji), which is ordinary HTML content.
 fn unbalanced_tags(text: &str) -> Vec<Diagnostic> {
     let mut stack: Vec<(String, TextPos)> = Vec::new();
     let mut diagnostics = Vec::new();
@@ -315,15 +319,16 @@ fn unbalanced_tags(text: &str) -> Vec<Diagnostic> {
         let mut i = 0;
         while i < chars.len() {
             if in_comment {
-                if let Some(off) = line[i..].find("-->") {
-                    i += off + 3;
-                    in_comment = false;
-                } else {
-                    break;
+                match find_char_seq(&chars, i, &['-', '-', '>']) {
+                    Some(end) => {
+                        i = end;
+                        in_comment = false;
+                    }
+                    None => break,
                 }
                 continue;
             }
-            if line[i..].starts_with("<!--") {
+            if chars[i..].starts_with(&['<', '!', '-', '-']) {
                 in_comment = true;
                 i += 4;
                 continue;
@@ -350,10 +355,11 @@ fn unbalanced_tags(text: &str) -> Vec<Diagnostic> {
                 .iter()
                 .collect::<String>()
                 .to_ascii_lowercase();
-            let end = line[j..]
-                .find('>')
+            let end = chars[j..]
+                .iter()
+                .position(|c| *c == '>')
                 .map(|off| j + off)
-                .unwrap_or(chars.len() - 1);
+                .unwrap_or(chars.len().saturating_sub(1));
             let self_closing = end > 0 && chars.get(end.wrapping_sub(1)) == Some(&'/');
             let attrs: String = chars[j..end].iter().collect();
 
@@ -369,7 +375,7 @@ fn unbalanced_tags(text: &str) -> Vec<Diagnostic> {
                         // A mismatched close; report it without losing the opener.
                         diagnostics.push(Diagnostic::new(
                             TextPos::new(row, i),
-                            TextPos::new(row, (i + 1).max(1)),
+                            TextPos::new(row, i + 1),
                             Severity::Error,
                             format!("</{name}> closes <{open}>"),
                         ));
@@ -377,7 +383,7 @@ fn unbalanced_tags(text: &str) -> Vec<Diagnostic> {
                     }
                     None => diagnostics.push(Diagnostic::new(
                         TextPos::new(row, i),
-                        TextPos::new(row, (i + 1).max(1)),
+                        TextPos::new(row, i + 1),
                         Severity::Error,
                         format!("stray closing </{name}>"),
                     )),
@@ -398,6 +404,18 @@ fn unbalanced_tags(text: &str) -> Vec<Diagnostic> {
         ));
     }
     diagnostics
+}
+
+/// The index just past `needle` in `chars` at or after `from`, all in
+/// characters. Used so the tag scanner never slices a `&str` by a character
+/// offset.
+fn find_char_seq(chars: &[char], from: usize, needle: &[char]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > chars.len() || from > chars.len() - needle.len() {
+        return None;
+    }
+    (from..=chars.len() - needle.len())
+        .find(|&i| chars[i..].starts_with(needle))
+        .map(|i| i + needle.len())
 }
 
 #[cfg(test)]
@@ -445,5 +463,40 @@ mod tests {
         let names: Vec<_> = symbols.into_iter().map(|symbol| symbol.name).collect();
         assert!(names.contains(&"intro".to_string()));
         assert!(names.contains(&"outro".to_string()));
+    }
+
+    #[test]
+    fn non_ascii_content_does_not_panic() {
+        // Regression: the tag scanner measured positions in characters but
+        // sliced the line by bytes, so any non-ASCII character could land the
+        // index mid-codepoint and panic. These are ordinary documents.
+        let documents = [
+            "<é></é>",
+            "<h1>Café ☕</h1>",
+            "<p>こんにちは</p><p>world</p>",
+            "<div title=\"café\">emoji 🎉</div>",
+            "<!-- commenté -->\n<span>ünïcödé</span>",
+        ];
+        for document in documents {
+            let diagnostics = unbalanced_tags(document);
+            // The well-formed documents above have nothing to report.
+            assert!(
+                diagnostics.is_empty(),
+                "unexpected diagnostics for {document:?}: {diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn finds_comment_terminators_in_characters() {
+        assert_eq!(
+            find_char_seq(&['a', '-', '-', '>'], 0, &['-', '-', '>']),
+            Some(4)
+        );
+        assert_eq!(
+            find_char_seq(&['→', '-', '-', '>'], 0, &['-', '-', '>']),
+            Some(4)
+        );
+        assert_eq!(find_char_seq(&['-', '-'], 0, &['-', '-', '>']), None);
     }
 }

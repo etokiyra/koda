@@ -12,13 +12,29 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
 
 use crate::language::id::LanguageId;
+use crate::process::wait_captured;
 
 /// A lock older than this is assumed to be left by a crashed instance.
 const STALE_INSTALL_LOCK: Duration = Duration::from_secs(15 * 60);
+
+/// The longest a `--version` probe may run. A first-run shim can be slow, but a
+/// probe must never hang the background worker.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a stdio language server is given to prove it starts. A server that
+/// is still running when the window closes is treated as usable.
+const PROBE_ALIVE_WINDOW: Duration = Duration::from_millis(600);
+
+/// The Node.js LTS release Koda provisions when the user has no `node`/`npm`.
+///
+/// Pinned so the download and the SHA-256 Node.js publishes for it are
+/// reproducible; the npm bundled with this release installs the npm-based
+/// language servers into Koda's managed prefix.
+const NODE_VERSION: &str = "24.21.0";
 
 /// The longest a single install command may run before it is killed. Package
 /// managers can legitimately take a while on a slow link, but a hung process
@@ -182,20 +198,30 @@ impl Tool {
         }
     }
 
+    /// Whether this tool can only be probed by launching its stdio server.
+    ///
+    /// The extracted VS Code servers reject `--version` and `--help` — they
+    /// require a connection mode — so a version probe reports a perfectly good
+    /// install as missing. They are verified by starting the server and
+    /// confirming it stays up instead.
+    fn probe_as_server(self) -> bool {
+        matches!(self, Tool::HtmlLs | Tool::CssLs)
+    }
+
     /// A short, actionable message for when the tool is missing.
     pub fn install_hint(self) -> &'static str {
         match self {
             Tool::RustAnalyzer => "install with `rustup component add rust-analyzer`",
             Tool::Gopls => "install with `go install golang.org/x/tools/gopls@latest`",
             Tool::Pylsp => "install `python-lsp-server` into a Koda-managed environment",
-            Tool::BashLs => "install with `npm` — Koda uses a user-local prefix",
-            Tool::TypeScriptLs => "install with `npm` — Koda uses a user-local prefix",
+            Tool::BashLs => "install with npm — Koda provisions Node.js if missing",
+            Tool::TypeScriptLs => "install with npm — Koda provisions Node.js if missing",
             Tool::Clangd => {
                 "install clangd with your system package manager (it ships with most C/C++ toolchains)"
             }
             Tool::Jdtls => "Koda can install a managed JDK and Eclipse JDT",
             Tool::OmniSharp => "Koda can install the .NET SDK and OmniSharp",
-            Tool::HtmlLs | Tool::CssLs => "install with `npm` — Koda uses a user-local prefix",
+            Tool::HtmlLs | Tool::CssLs => "install with npm — Koda provisions Node.js if missing",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
         }
@@ -245,8 +271,11 @@ impl Tool {
             Tool::RustAnalyzer | Tool::Rustfmt => &["rustup"],
             Tool::Gopls | Tool::Gofmt => &["go"],
             Tool::Pylsp => &["python3"],
-            Tool::BashLs | Tool::TypeScriptLs => &["npm"],
-            Tool::HtmlLs | Tool::CssLs => &["npm"],
+            // Koda can provision Node.js itself, so npm is not a hard
+            // prerequisite. The install plan checks for `curl` and an archive
+            // tool before offering the managed runtime.
+            Tool::BashLs | Tool::TypeScriptLs => &[],
+            Tool::HtmlLs | Tool::CssLs => &[],
             // `jdtls` is a Python launcher script.
             Tool::Jdtls => &["python3"],
             Tool::Clangd | Tool::OmniSharp => &[],
@@ -330,6 +359,10 @@ pub enum InstallStep {
     /// Download and verify an Eclipse Adoptium JDK, whose checksum Adoptium
     /// publishes in the same JSON document that carries the link.
     AdoptiumJdk { feature: u32, dest: PathBuf },
+    /// Download and verify a Koda-managed Node.js runtime, whose checksum the
+    /// Node.js project publishes in `SHASUMS256.txt`. The archive still needs
+    /// an [`InstallStep::Extract`].
+    NodeRuntime { dest: PathBuf },
     /// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`, optionally
     /// dropping `strip` leading path components.
     Extract {
@@ -497,6 +530,10 @@ fn python_attempts() -> Vec<InstallAttempt> {
 }
 
 /// Strategies for installing an npm package into a user-local prefix.
+///
+/// The first two use whatever `npm` the user already has; the last provisions a
+/// Koda-managed Node.js runtime (with its bundled npm) so the install still
+/// succeeds on a machine with no Node.js at all.
 fn npm_attempts(packages: &[&str]) -> Vec<InstallAttempt> {
     let mut attempts = Vec::new();
     if let Some(prefix) = npm_prefix() {
@@ -504,29 +541,58 @@ fn npm_attempts(packages: &[&str]) -> Vec<InstallAttempt> {
         // prefix, or a `~/.npm` left root-owned by a past `sudo npm`, would
         // otherwise fail with EACCES.
         let cache = prefix.with_file_name("npm-cache");
-        let mut args = vec![
-            "install".to_string(),
-            "-g".to_string(),
-            "--prefix".to_string(),
-            prefix.to_string_lossy().into_owned(),
-            "--cache".to_string(),
-            cache.to_string_lossy().into_owned(),
-        ];
-        args.extend(packages.iter().map(|package| (*package).to_string()));
         attempts.push(InstallAttempt::one(
             "npm (user-local prefix)",
-            InstallCommand::with_args("npm", args),
+            InstallCommand::with_args("npm", npm_args(Some((&prefix, &cache)), packages)),
         ));
     }
     // Fall back to whatever global prefix the user's npm (nvm, fnm, volta, …)
     // already uses.
-    let mut args = vec!["install".to_string(), "-g".to_string()];
-    args.extend(packages.iter().map(|package| (*package).to_string()));
     attempts.push(InstallAttempt::one(
         "npm",
-        InstallCommand::with_args("npm", args),
+        InstallCommand::with_args("npm", npm_args(None, packages)),
     ));
+
+    // No Node.js at all: install one under Koda's data directory and use its
+    // bundled npm, so zero-configuration still holds.
+    if node_provisionable()
+        && let (Some(prefix), Some(archive), Some(dest), Some(npm)) =
+            (npm_prefix(), node_archive(), node_dir(), managed_npm())
+    {
+        let cache = prefix.with_file_name("npm-cache");
+        attempts.push(InstallAttempt::managed(
+            "a Koda-managed Node.js runtime",
+            vec![
+                InstallStep::NodeRuntime {
+                    dest: archive.clone(),
+                },
+                InstallStep::Extract {
+                    archive,
+                    dest,
+                    strip: 1,
+                },
+                InstallStep::Run(InstallCommand::with_args(
+                    npm.to_string_lossy().into_owned(),
+                    npm_args(Some((&prefix, &cache)), packages),
+                )),
+            ],
+        ));
+    }
     attempts
+}
+
+/// The `npm install -g` arguments for a package list, optionally targeting a
+/// user-local prefix and cache (so a system-owned prefix cannot make it fail).
+fn npm_args(prefix_and_cache: Option<(&Path, &Path)>, packages: &[&str]) -> Vec<String> {
+    let mut args = vec!["install".to_string(), "-g".to_string()];
+    if let Some((prefix, cache)) = prefix_and_cache {
+        args.push("--prefix".to_string());
+        args.push(prefix.to_string_lossy().into_owned());
+        args.push("--cache".to_string());
+        args.push(cache.to_string_lossy().into_owned());
+    }
+    args.extend(packages.iter().map(|package| (*package).to_string()));
+    args
 }
 
 /// A best-effort advisory lock over the managed tools directory.
@@ -657,6 +723,7 @@ fn run_step(step: &InstallStep) -> Result<(), String> {
         InstallStep::Run(command) => run_command(command),
         InstallStep::Download { url, dest, sha256 } => download(url, dest, sha256.as_deref()),
         InstallStep::AdoptiumJdk { feature, dest } => adoptium_jdk(*feature, dest),
+        InstallStep::NodeRuntime { dest } => node_runtime(dest),
         InstallStep::Extract {
             archive,
             dest,
@@ -672,10 +739,17 @@ fn run_step(step: &InstallStep) -> Result<(), String> {
 /// to an attacker-controlled registry. Running from a Koda-managed directory
 /// removes that vector while leaving the user's own `~/.npmrc` and similar
 /// configuration in effect.
+///
+/// A Koda-managed Node.js runtime (once provisioned) is put on `PATH`, so its
+/// bundled `npm` and any `#!/usr/bin/env node` server launcher work even when
+/// the user has no system Node.js.
 fn install_command(program: &str) -> Command {
     let mut command = Command::new(program);
     if let Some(dir) = install_work_dir() {
         command.current_dir(dir);
+    }
+    if let Some(node) = node_bin_dir() {
+        command.env("PATH", prepend_path(&node.to_string_lossy()));
     }
     command
 }
@@ -831,6 +905,89 @@ fn adoptium_platform() -> Option<(&'static str, &'static str)> {
     Some((os, arch))
 }
 
+/// The Node.js distribution archive for this platform, or `None` when the
+/// project publishes none.
+fn node_asset() -> Option<String> {
+    let (triple, extension) = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => ("linux-x64", "tar.xz"),
+        ("linux", "aarch64") => ("linux-arm64", "tar.xz"),
+        ("macos", "x86_64") => ("darwin-x64", "tar.gz"),
+        ("macos", "aarch64") => ("darwin-arm64", "tar.gz"),
+        ("windows", "x86_64") => ("win-x64", "zip"),
+        _ => return None,
+    };
+    Some(format!("node-v{NODE_VERSION}-{triple}.{extension}"))
+}
+
+/// Whether Koda can provision a managed Node.js runtime here: a published
+/// archive for the platform, plus `curl` and the matching archive tool.
+fn node_provisionable() -> bool {
+    let Some(asset) = node_asset() else {
+        return false;
+    };
+    let archive_tool = if asset.ends_with(".zip") {
+        locate("unzip")
+    } else {
+        locate("tar")
+    };
+    locate("curl").is_some() && archive_tool.is_some()
+}
+
+/// Download and verify the Node.js runtime archive.
+///
+/// Node.js publishes one `SHASUMS256.txt` per release, so Koda reads the
+/// checksum for *this* platform's asset and verifies it before extraction. The
+/// archive is not unpacked here; an [`InstallStep::Extract`] follows.
+fn node_runtime(dest: &Path) -> Result<(), String> {
+    let asset = node_asset().ok_or_else(|| {
+        "no managed Node.js is published for this platform; install Node.js manually".to_string()
+    })?;
+    let sums_url = format!("https://nodejs.org/dist/v{NODE_VERSION}/SHASUMS256.txt");
+    let output = install_command("curl")
+        .args([
+            "--proto",
+            "=https",
+            "--tlsv1.2",
+            "-sS",
+            "-L",
+            "--fail",
+            "--connect-timeout",
+            "30",
+            "--max-time",
+            "60",
+        ])
+        .arg(&sums_url)
+        .output()
+        .map_err(|err| format!("could not query the Node.js checksums: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "could not query the Node.js checksums: {}",
+            first_stderr_line(&output.stderr)
+        ));
+    }
+    // Fail closed: an unverified runtime would be executed to install and run
+    // language servers, so never fall back to "no checksum required".
+    let checksum = checksum_for(&String::from_utf8_lossy(&output.stdout), &asset)
+        .ok_or_else(|| format!("Node.js published no checksum for {asset}"))?;
+    let url = format!("https://nodejs.org/dist/v{NODE_VERSION}/{asset}");
+    download(&url, dest, Some(&checksum))
+}
+
+/// Find the published SHA-256 for `asset` in a `SHASUMS256.txt` body.
+///
+/// The format is `<sha256>  <name>`, one entry per line. A malformed or
+/// truncated line is ignored rather than trusted, and a leading `*` (binary
+/// mode) is tolerated.
+fn checksum_for(sums: &str, asset: &str) -> Option<String> {
+    sums.lines().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        let hash = parts.next()?;
+        let name = parts.next()?.trim_start_matches('*');
+        (name == asset && hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()))
+            .then(|| hash.to_string())
+    })
+}
+
 /// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`.
 fn extract(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
     std::fs::create_dir_all(dest)
@@ -905,7 +1062,9 @@ fn step_available(step: &InstallStep) -> bool {
         InstallStep::Run(command) => {
             locate(&command.program).is_some() || is_user_bin_program(&command.program)
         }
-        InstallStep::Download { .. } | InstallStep::AdoptiumJdk { .. } => locate("curl").is_some(),
+        InstallStep::Download { .. }
+        | InstallStep::AdoptiumJdk { .. }
+        | InstallStep::NodeRuntime { .. } => locate("curl").is_some(),
         InstallStep::Extract { archive, .. } => {
             let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
             locate(if zip { "unzip" } else { "tar" }).is_some()
@@ -1033,18 +1192,35 @@ fn probe(tool: Tool) -> ToolStatus {
         };
     };
     let mut command = Command::new(&path);
-    command.args(tool.version_args());
     // Managed runtimes (the JDK for jdtls, the .NET SDK for OmniSharp) are
     // found through the launch environment.
     for (key, value) in launch_env(tool) {
         command.env(key, value);
     }
-    // `output()` nulls stdin, so `gofmt` reads an empty document and exits.
-    match command.output() {
-        Ok(output) if output.status.success() => {
+    if tool.probe_as_server() {
+        return probe_server(tool, path, command);
+    }
+    command.args(tool.version_args());
+    // A probe is bounded in both time and output so a hung or chatty tool
+    // cannot wedge the worker. `stdin` is null, so `gofmt` reads an empty
+    // document and exits.
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let Ok(mut child) = command.spawn() else {
+        return ToolStatus {
+            tool,
+            available: false,
+            version: None,
+            path: Some(path),
+        };
+    };
+    match wait_captured(&mut child, PROBE_TIMEOUT, MAX_TOOL_OUTPUT) {
+        Ok(captured) if captured.status.is_some_and(|status| status.success()) => {
             // Only keep a version line that actually looks like one; `--help`
             // usage output should not masquerade as a version.
-            let version = String::from_utf8_lossy(&output.stdout)
+            let version = String::from_utf8_lossy(&captured.stdout)
                 .lines()
                 .map(str::trim)
                 .find(|line| !line.is_empty())
@@ -1064,6 +1240,49 @@ fn probe(tool: Tool) -> ToolStatus {
             path: Some(path),
         },
     }
+}
+
+/// Verify a stdio language server by starting it and confirming it stays up.
+///
+/// The extracted VS Code servers reject every version query, so the only honest
+/// check is to launch the real server and see that it does not exit with an
+/// error. `stdin` is held open so the server initializes and waits; Koda stops
+/// it once the window elapses. A server that exits successfully on its own is
+/// also accepted, and one that exits with a failure status is not.
+fn probe_server(tool: Tool, path: PathBuf, mut command: Command) -> ToolStatus {
+    command.args(tool.server_args());
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let Ok(mut child) = command.spawn() else {
+        return ToolStatus {
+            tool,
+            available: false,
+            version: None,
+            path: Some(path),
+        };
+    };
+    // Hold the write end so the server does not see EOF and shut down at once.
+    let _stdin = child.stdin.take();
+    let available = alive_or_clean(&mut child);
+    ToolStatus {
+        tool,
+        available,
+        version: None,
+        path: Some(path),
+    }
+}
+
+/// Whether a launched process is a usable server: still running when the window
+/// elapses, or already exited cleanly. A process that fails immediately (the
+/// exact symptom of a broken Node launcher) is rejected.
+fn alive_or_clean(child: &mut std::process::Child) -> bool {
+    matches!(
+        wait_captured(child, PROBE_ALIVE_WINDOW, MAX_TOOL_OUTPUT),
+        Ok(captured) if captured.status.is_none()
+            || captured.status.is_some_and(|status| status.success())
+    )
 }
 
 /// Whether `program` can be found, returning its full path.
@@ -1110,8 +1329,8 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         dirs.push(home.join(".npm-global/bin"));
         dirs.push(home.join(".local/share/pnpm"));
     }
-    // Tools Koda installed itself, plus the npm prefix, Python virtualenv and
-    // managed runtimes it maintains.
+    // Tools Koda installed itself, plus the npm prefix, Python virtualenv,
+    // managed Node.js and managed runtimes it maintains.
     if let Some(tools) = tools_dir() {
         if let Some(prefix) = npm_prefix() {
             dirs.push(prefix.join("bin"));
@@ -1120,6 +1339,9 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         }
         if let Some(venv) = venv_dir() {
             dirs.push(venv_bin_dir(&venv));
+        }
+        if let Some(node) = node_bin_dir() {
+            dirs.push(node);
         }
         dirs.push(tools.join("omnisharp"));
         dirs.push(tools.join("jdtls/bin"));
@@ -1153,6 +1375,40 @@ pub fn npm_prefix() -> Option<PathBuf> {
 /// server even when the system Python has no `pip`.
 pub fn venv_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("python"))
+}
+
+/// Koda's managed Node.js runtime, used to run `npm` and the npm-based language
+/// servers without requiring the user to install Node.js themselves.
+pub fn node_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("node"))
+}
+
+/// The `bin` directory of Koda's managed Node.js runtime (the runtime root on
+/// Windows, where `node.exe`/`npm.cmd` sit directly in the extracted folder).
+fn node_bin_dir() -> Option<PathBuf> {
+    let dir = node_dir()?;
+    if cfg!(windows) {
+        Some(dir)
+    } else {
+        Some(dir.join("bin"))
+    }
+}
+
+/// The `npm` bundled with Koda's managed Node.js, whether or not it exists yet.
+fn managed_npm() -> Option<PathBuf> {
+    let dir = node_dir()?;
+    Some(if cfg!(windows) {
+        dir.join("npm.cmd")
+    } else {
+        dir.join("bin/npm")
+    })
+}
+
+/// The scratch path for the managed Node.js archive.
+fn node_archive() -> Option<PathBuf> {
+    let dir = downloads_dir()?;
+    let asset = node_asset()?;
+    Some(dir.join(asset))
 }
 
 /// Koda's managed .NET install directory (the SDK OmniSharp runs on).
@@ -1199,6 +1455,13 @@ pub fn launch_env(tool: Tool) -> Vec<(String, String)> {
                 let jdk = jdk.to_string_lossy().into_owned();
                 env.push(("JAVA_HOME".to_string(), jdk.clone()));
                 env.push(("PATH".to_string(), prepend_path(&format!("{jdk}/bin"))));
+            }
+        }
+        // npm-based servers are launched through `#!/usr/bin/env node`, so a
+        // Koda-managed Node.js must be on `PATH` when the user has none.
+        Tool::BashLs | Tool::TypeScriptLs | Tool::HtmlLs | Tool::CssLs => {
+            if let Some(node) = node_bin_dir() {
+                env.push(("PATH".to_string(), prepend_path(&node.to_string_lossy())));
             }
         }
         _ => {}
@@ -1677,5 +1940,150 @@ mod tests {
         let dirs = known_bin_dirs();
         assert!(dirs.iter().any(|dir| dir.ends_with(".cargo/bin")));
         assert!(dirs.iter().any(|dir| dir.ends_with(".local/bin")));
+    }
+
+    #[test]
+    fn html_and_css_are_probed_by_starting_their_server() {
+        // Regression: the extracted VS Code servers reject `--version`, so a
+        // version probe reported a successful install as missing.
+        for tool in [Tool::HtmlLs, Tool::CssLs] {
+            assert!(
+                tool.probe_as_server(),
+                "{tool:?} must be probed by launching its stdio server"
+            );
+        }
+        for tool in [Tool::RustAnalyzer, Tool::BashLs, Tool::TypeScriptLs] {
+            assert!(
+                !tool.probe_as_server(),
+                "{tool:?} answers a version query and must keep the cheap probe"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn server_probe_accepts_a_live_server_and_rejects_a_broken_launcher() {
+        use std::process::{Command, Stdio};
+
+        // A server still running at the deadline is usable.
+        let mut live = Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn sleep");
+        assert!(alive_or_clean(&mut live));
+
+        // A launcher that fails immediately (the broken-Node symptom) is not.
+        let mut broken = Command::new("sh")
+            .args(["-c", "exit 1"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn sh");
+        assert!(!alive_or_clean(&mut broken));
+
+        // A clean one-shot exit is still a usable binary.
+        let mut clean = Command::new("sh")
+            .args(["-c", "exit 0"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn sh");
+        assert!(alive_or_clean(&mut clean));
+    }
+
+    #[test]
+    fn npm_tools_can_provision_a_managed_node_runtime() {
+        if !node_provisionable() {
+            // No `curl`/archive tool for this platform: nothing to assert.
+            return;
+        }
+        for tool in [Tool::HtmlLs, Tool::CssLs, Tool::BashLs, Tool::TypeScriptLs] {
+            let attempts = tool.install_attempts();
+            assert!(
+                attempts.iter().any(|attempt| attempt
+                    .steps
+                    .iter()
+                    .any(|step| matches!(step, InstallStep::NodeRuntime { .. }))),
+                "{tool:?} must be installable without a system Node.js: {attempts:?}"
+            );
+            // The managed runtime is downloaded, unpacked and then used to run npm.
+            let managed = attempts
+                .iter()
+                .find(|attempt| {
+                    attempt
+                        .steps
+                        .iter()
+                        .any(|step| matches!(step, InstallStep::NodeRuntime { .. }))
+                })
+                .expect("a managed Node plan");
+            assert!(
+                managed
+                    .steps
+                    .iter()
+                    .any(|step| matches!(step, InstallStep::Extract { .. })),
+                "the Node archive must be extracted"
+            );
+            assert!(
+                run_commands(managed)
+                    .into_iter()
+                    .any(|command| is_user_bin_program(&command.program)),
+                "the managed npm must be the runtime Koda just installed"
+            );
+        }
+    }
+
+    #[test]
+    fn managed_bin_dirs_are_searched_when_node_is_managed() {
+        if let Some(node) = node_bin_dir() {
+            assert!(
+                known_bin_dirs().iter().any(|dir| dir == &node),
+                "Koda's managed Node.js bin directory should be searched"
+            );
+        }
+    }
+
+    #[test]
+    fn node_checksum_lookup_rejects_malformed_entries() {
+        let asset = "node-v24.21.0-linux-x64.tar.xz";
+        let sum = "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6";
+        let body = format!(
+            "aec7b2464afb99f078c19cb06d201d543bd3b311cba071282bce1b17c97e58bb  node-v24.21.0-aix-ppc64.tar.gz\n\
+             {sum}  {asset}\n\
+             22ca85110f26015696a3fa9216bc372ae65203d170622eaf7d211e2dd5bb49e3  node-v24.21.0-arm64.msi\n"
+        );
+        assert_eq!(checksum_for(&body, asset).as_deref(), Some(sum));
+
+        // An absent asset, a short hash and a lone line never yield a checksum.
+        assert_eq!(
+            checksum_for(&body, "node-v24.21.0-linux-arm64.tar.xz"),
+            None
+        );
+        assert_eq!(checksum_for("not-a-hash  some-file", "some-file"), None);
+        assert_eq!(checksum_for("deadbeef", "deadbeef"), None);
+        assert_eq!(checksum_for("", asset), None);
+        // A binary-mode `*` prefix is tolerated.
+        assert_eq!(
+            checksum_for(&format!("{sum}  *{asset}"), asset).as_deref(),
+            Some(sum)
+        );
+    }
+
+    #[test]
+    fn managed_node_asset_matches_the_pinned_version() {
+        if let Some(asset) = node_asset() {
+            assert!(
+                asset.starts_with(&format!("node-v{NODE_VERSION}-")),
+                "asset should carry the pinned version: {asset}"
+            );
+            assert!(
+                asset.ends_with(".tar.xz") || asset.ends_with(".tar.gz") || asset.ends_with(".zip"),
+                "asset should be an extractable archive: {asset}"
+            );
+        }
     }
 }

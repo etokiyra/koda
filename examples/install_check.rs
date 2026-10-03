@@ -11,8 +11,10 @@ fn main() {
     let tool = match std::env::args().nth(1).as_deref() {
         Some("omnisharp") => koda::language::tools::Tool::OmniSharp,
         Some("jdtls") => koda::language::tools::Tool::Jdtls,
+        Some("html") => koda::language::tools::Tool::HtmlLs,
+        Some("css") => koda::language::tools::Tool::CssLs,
         other => {
-            eprintln!("usage: install_check <omnisharp|jdtls> (got {other:?})");
+            eprintln!("usage: install_check <omnisharp|jdtls|html|css> (got {other:?})");
             std::process::exit(2);
         }
     };

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### HTML/CSS tooling and a crash fix
+
+- **The HTML provider no longer crashes on non-ASCII documents.** The tag-balance
+  scanner measured positions in characters but sliced each line by *bytes*, so
+  ordinary content — `Café`, CJK text, emoji — could land an index mid-codepoint
+  and panic the worker that computes diagnostics. The scanner now works entirely
+  in characters, with a regression test covering accented text, CJK, emoji and
+  comments.
+- **HTML/CSS language servers are now recognised after installation.** Koda
+  probes a tool by running `--version`, but the extracted VS Code servers reject
+  every version query (they require a connection mode), so a successful
+  `npm` install was reported as missing and the install was reported as failed.
+  These servers are now verified by launching the real server over stdio and
+  confirming it stays up, so one install is enough and the language features
+  come online.
+- **Koda now provisions Node.js and npm itself.** If neither `node` nor `npm` is
+  present, installing an npm-based language server first downloads a
+  checksum-verified Node.js LTS runtime (`SHASUMS256.txt`, verified before
+  extraction) into Koda's data directory, unpacks it, and uses its bundled
+  `npm` to install the package into Koda's managed prefix. A working system
+  Node.js is still reused when present. Managed Node is placed on `PATH` for the
+  install and for launching `#!/usr/bin/env node` servers, and its `bin`
+  directory is searched when locating tools.
+- **Tool probes are bounded.** A `--version` probe now runs with a timeout and a
+  capped output buffer instead of blocking the background worker indefinitely.
+
 ### Reliability & security audit
 
 A focused debugging, reliability, security and performance pass. No new
