@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use koda::app::App;
 use koda::app::ToastKind;
-use koda::app::overlay::Overlay;
+use koda::app::overlay::{DiffState, Overlay};
 use koda::commands::ids;
 use koda::language::diagnostics::{Diagnostic, Severity, TextPos};
 use koda::ui::theme;
@@ -95,6 +95,28 @@ fn renders_project_tree_and_rust_file() {
     assert!(screen.contains("main.rs"), "file name missing:\n{screen}");
     assert!(screen.contains("fn main"), "code missing:\n{screen}");
     assert!(screen.contains("Rust"), "language missing:\n{screen}");
+
+    cleanup(&dir);
+}
+
+#[test]
+fn renders_a_unified_diff_overlay() {
+    let dir = temp_project("diff-view");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+
+    app.overlay = Overlay::Diff(DiffState::from_unified(
+        "working tree · src/main.rs",
+        "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n fn main() {}\n+// added\n",
+    ));
+
+    let screen = draw(&mut app);
+    assert!(
+        screen.contains("working tree"),
+        "diff title missing:\n{screen}"
+    );
+    assert!(screen.contains("@@"), "hunk marker missing:\n{screen}");
+    assert!(screen.contains("added"), "added line missing:\n{screen}");
 
     cleanup(&dir);
 }

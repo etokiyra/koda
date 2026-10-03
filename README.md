@@ -179,7 +179,8 @@ The editor is the heart of Koda, and it is built for real projects.
 - Multiple files in tabs, a lazy `.gitignore`-aware project tree, file
   create/rename/delete/duplicate/copy, git branch and per-file status, a
   changed-files list (`Ctrl+Shift+G`) where `Space` stages or unstages the
-  selected file, and a **Commit Changes…** flow.
+  selected file and `d` opens its diff, a colour-coded **diff panel** (also
+  **Diff File** in the palette), and a **Commit Changes…** flow.
 - A **split editor** (`Alt+V`): view two files side by side, with `Alt+O`
   moving focus between the panes. The focused pane owns the cursor and the
   active tab.
@@ -335,6 +336,8 @@ Koda reports what happened rather than deleting anything.
 | `Ctrl+G` | Go to line |
 | `Ctrl+Shift+G` | List the files changed in git |
 | `Space` (in changed files) | Stage / unstage the selected file |
+| `d` (in changed files) | Show the selected file's diff |
+| `Diff File` (palette) | Show the active file's unified diff |
 | `Ctrl+Shift+M` | Show diagnostics |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |

@@ -66,6 +66,7 @@ pub mod ids {
     pub const CHANGED_FILES: &str = "git.changedFiles";
     pub const GIT_COMMIT: &str = "git.commit";
     pub const GIT_TOGGLE_STAGE: &str = "git.toggleStage";
+    pub const DIFF: &str = "git.diff";
 
     pub const TOGGLE_TREE: &str = "view.toggleTree";
     pub const FOCUS_TREE: &str = "view.focusTree";
@@ -340,6 +341,8 @@ impl CommandRegistry {
                 .describes("Stage all changes and commit with a message"),
             Command::new(GIT_TOGGLE_STAGE, "Stage / Unstage File", "Git", None)
                 .describes("Toggle the selected file in the git index"),
+            Command::new(DIFF, "Diff File", "Git", None)
+                .describes("Show the unified diff for the active file"),
             Command::new(TOGGLE_TREE, "Toggle File Tree", "View", Some("Ctrl+B"))
                 .describes("Show or hide the project sidebar"),
             Command::new(

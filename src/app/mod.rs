@@ -38,8 +38,8 @@ use crate::session::{self, Session};
 use crate::terminal;
 use crate::ui;
 use overlay::{
-    CompletionState, DirPicker, Help, HoverState, NewProject, NewProjectStep, Overlay, Picker,
-    PickerAction, PickerItem, Prompt, PromptKind, Search, SearchField, TreeFilter,
+    CompletionState, DiffState, DirPicker, Help, HoverState, NewProject, NewProjectStep, Overlay,
+    Picker, PickerAction, PickerItem, Prompt, PromptKind, Search, SearchField, TreeFilter,
 };
 
 /// How long typing must pause before diagnostics are recomputed. Short enough to
@@ -711,6 +711,7 @@ impl App {
             }
             Overlay::Help(_) => return,
             Overlay::DirPicker(_) => return,
+            Overlay::Diff(_) => return,
             Overlay::NewProject(flow) => {
                 if flow.step == NewProjectStep::Name {
                     flow.name.push_str(text);
@@ -943,6 +944,15 @@ impl App {
                         _ => Outcome::Nothing,
                     }
                 }
+                KeyCode::Char('d') if picker.title == "Changed Files" => {
+                    match picker.selected_item().map(|item| item.action.clone()) {
+                        Some(PickerAction::OpenPath(path)) => {
+                            let staged = self.workspace.git.is_staged(&path);
+                            Outcome::Run(PickerAction::ShowDiff { path, staged }, None)
+                        }
+                        _ => Outcome::Nothing,
+                    }
+                }
                 KeyCode::Char(c) if !ctrl => {
                     picker.push_char(c);
                     Outcome::Nothing
@@ -1096,6 +1106,34 @@ impl App {
                 }
                 KeyCode::PageDown => {
                     help.scroll = help.scroll.saturating_add(8);
+                    Outcome::Nothing
+                }
+                _ => Outcome::Nothing,
+            },
+            Overlay::Diff(diff) => match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => Outcome::Close,
+                KeyCode::Up => {
+                    diff.scroll_by(-1);
+                    Outcome::Nothing
+                }
+                KeyCode::Down => {
+                    diff.scroll_by(1);
+                    Outcome::Nothing
+                }
+                KeyCode::PageUp => {
+                    diff.scroll_by(-16);
+                    Outcome::Nothing
+                }
+                KeyCode::PageDown => {
+                    diff.scroll_by(16);
+                    Outcome::Nothing
+                }
+                KeyCode::Home => {
+                    diff.scroll = 0;
+                    Outcome::Nothing
+                }
+                KeyCode::End => {
+                    diff.scroll = diff.lines.len();
                     Outcome::Nothing
                 }
                 _ => Outcome::Nothing,
@@ -1612,6 +1650,7 @@ impl App {
             ids::CHANGED_FILES => self.open_changed_files(),
             ids::GIT_COMMIT => self.commit_changes(),
             ids::GIT_TOGGLE_STAGE => self.toggle_stage_target(),
+            ids::DIFF => self.diff_active_file(),
             ids::FIND => self.open_search(false),
             ids::REPLACE => self.open_search(true),
             ids::REPLACE_ALL => self.replace_all(),
@@ -1658,6 +1697,7 @@ impl App {
             PickerAction::InstallTool(tool) => self.install_tool(tool),
             PickerAction::ApplyCodeAction(index) => self.apply_code_action(index),
             PickerAction::DeletePath(path) => self.delete_path(&path),
+            PickerAction::ShowDiff { path, staged } => self.show_diff(path, Some(staged)),
         }
     }
 
@@ -2993,6 +3033,68 @@ impl App {
                 true
             }
         }
+    }
+
+    /// Display the unified diff for `path`.
+    ///
+    /// When `staged` is `None`, the working-tree diff is preferred and the
+    /// staged diff is shown if the working tree is clean.
+    fn show_diff(&mut self, path: PathBuf, staged: Option<bool>) {
+        let root = self.workspace.root().to_path_buf();
+        let try_show = |side: bool| crate::git::diff(&root, &path, side);
+        let (text, side) = match staged {
+            Some(side) => match try_show(side) {
+                Ok(text) => (text, side),
+                Err(err) => {
+                    self.set_error(format!("Could not diff {}: {err}", path.display()));
+                    return;
+                }
+            },
+            None => match try_show(false) {
+                Ok(text) if !text.is_empty() => (text, false),
+                Ok(_) => match try_show(true) {
+                    Ok(text) => (text, true),
+                    Err(err) => {
+                        self.set_error(format!("Could not diff {}: {err}", path.display()));
+                        return;
+                    }
+                },
+                Err(err) => {
+                    self.set_error(format!("Could not diff {}: {err}", path.display()));
+                    return;
+                }
+            },
+        };
+
+        if text.is_empty() {
+            self.set_status(format!("No changes to show for {}", path.display()));
+            return;
+        }
+        let name = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        let where_ = if side { "staged" } else { "working tree" };
+        let title = format!("{where_} · {name}");
+        self.overlay = Overlay::Diff(DiffState::from_unified(title, &text));
+    }
+
+    /// Show the diff for the active file: working tree first, then staged.
+    fn diff_active_file(&mut self) {
+        if !self.workspace.git.available {
+            self.set_status("Not a git repository");
+            return;
+        }
+        let Some(path) = self
+            .editor
+            .active_document()
+            .and_then(|doc| doc.buffer.path.clone())
+        else {
+            self.set_status("No file to diff");
+            return;
+        };
+        self.show_diff(path, None);
     }
 
     /// Prompt for a commit message, then stage everything and commit.
@@ -6381,6 +6483,66 @@ mod tests {
             app.status_message()
         );
 
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn diff_active_file_shows_working_tree_changes() {
+        if std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return; // Skip when git is unavailable.
+        }
+        let dir = temp_project("diff-file");
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+        };
+        assert!(git(&["init", "-q"]).unwrap().status.success());
+        assert!(
+            git(&["config", "user.email", "koda@example.com"])
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(
+            git(&["config", "user.name", "Koda Test"])
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(git(&["add", "-A"]).unwrap().status.success());
+        assert!(
+            git(&["commit", "-q", "-m", "init"])
+                .unwrap()
+                .status
+                .success()
+        );
+
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+        assert!(app.workspace.git.available, "expected a git repository");
+
+        // Change the file on disk so the working tree differs from the index.
+        fs::write(&file, "fn main() {\n    let y = 2;\n}\n").unwrap();
+        app.diff_active_file();
+
+        match &app.overlay {
+            Overlay::Diff(diff) => assert!(
+                diff.lines
+                    .iter()
+                    .any(|line| line.kind == overlay::DiffLineKind::Add
+                        && line.text.contains("let y")),
+                "expected an added line, got {:?}",
+                diff.lines.iter().map(|line| &line.text).collect::<Vec<_>>()
+            ),
+            _ => panic!("expected a diff overlay"),
+        }
         fs::remove_dir_all(&dir).ok();
     }
 

@@ -24,6 +24,11 @@ pub enum PickerAction {
     ApplyCodeAction(usize),
     /// Delete a file or directory after confirmation.
     DeletePath(PathBuf),
+    /// Show the unified diff for a path (staged or working tree).
+    ShowDiff {
+        path: PathBuf,
+        staged: bool,
+    },
 }
 
 /// A single row in a picker.
@@ -222,11 +227,79 @@ pub enum Overlay {
     DirPicker(DirPicker),
     /// The guided "create a new project" flow.
     NewProject(NewProject),
+    /// A read-only unified diff.
+    Diff(DiffState),
 }
 
 impl Overlay {
     pub fn is_none(&self) -> bool {
         matches!(self, Overlay::None)
+    }
+}
+
+/// The role of a line inside a unified diff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiffLineKind {
+    /// A `diff`/`index`/`---`/`+++` header line.
+    Header,
+    /// An `@@ … @@` hunk marker.
+    Hunk,
+    /// An added line.
+    Add,
+    /// A removed line.
+    Remove,
+    /// Unchanged context.
+    Context,
+}
+
+/// One line of a rendered diff.
+#[derive(Clone, Debug)]
+pub struct DiffLine {
+    pub kind: DiffLineKind,
+    pub text: String,
+}
+
+/// A read-only unified diff, scrolled with the arrows.
+pub struct DiffState {
+    pub title: String,
+    pub lines: Vec<DiffLine>,
+    pub scroll: usize,
+}
+
+impl DiffState {
+    /// Build state from the output of `git diff`, classifying each line.
+    pub fn from_unified(title: impl Into<String>, text: &str) -> Self {
+        DiffState {
+            title: title.into(),
+            lines: text.lines().map(classify_diff_line).collect(),
+            scroll: 0,
+        }
+    }
+
+    pub fn scroll_by(&mut self, delta: i64) {
+        self.scroll = (self.scroll as i64 + delta).max(0) as usize;
+    }
+}
+
+fn classify_diff_line(line: &str) -> DiffLine {
+    let kind = if line.starts_with("@@") {
+        DiffLineKind::Hunk
+    } else if line.starts_with("+++")
+        || line.starts_with("---")
+        || line.starts_with("diff ")
+        || line.starts_with("index ")
+    {
+        DiffLineKind::Header
+    } else if line.starts_with('+') {
+        DiffLineKind::Add
+    } else if line.starts_with('-') {
+        DiffLineKind::Remove
+    } else {
+        DiffLineKind::Context
+    };
+    DiffLine {
+        kind,
+        text: line.to_string(),
     }
 }
 
@@ -688,6 +761,29 @@ impl TreeFilter {
 mod tests {
     use super::*;
     use crate::language::completion::CompletionKind;
+
+    #[test]
+    fn classifies_unified_diff_lines() {
+        let diff = DiffState::from_unified(
+            "working tree · a.rs",
+            "diff --git a/a.rs b/a.rs\n\
+             index 111..222 100644\n\
+             --- a/a.rs\n\
+             +++ b/a.rs\n\
+             @@ -1,2 +1,2 @@\n\
+             - old\n\
+             + new\n\
+             \u{20}unchanged\n",
+        );
+        assert_eq!(diff.title, "working tree · a.rs");
+        let kinds: Vec<_> = diff.lines.iter().map(|line| line.kind).collect();
+        assert_eq!(kinds[0], DiffLineKind::Header);
+        assert_eq!(kinds[4], DiffLineKind::Hunk);
+        assert_eq!(kinds[5], DiffLineKind::Remove);
+        assert_eq!(kinds[6], DiffLineKind::Add);
+        assert_eq!(kinds[7], DiffLineKind::Context);
+        assert!(diff.lines[6].text.starts_with("+ new"));
+    }
 
     #[test]
     fn completion_matches_fuzzy_subsequences() {

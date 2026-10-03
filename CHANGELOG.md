@@ -342,6 +342,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`git add -A`) and commits on the background worker, then refreshes the
   status bar and changed-files list. Failures — such as a missing git identity
   — are reported verbatim. Koda never rewrites history; the action is explicit.
+- Added a **diff view**. **Diff File** in the palette shows the active file's
+  unified diff in a scrollable, colour-coded panel (added lines green, removed
+  red, hunks as headers); the working tree is preferred and the staged diff is
+  shown when the working tree is clean. In the changed-files list, `d` opens
+  the selected file's diff and the footer advertises the key. Untracked files
+  are shown as entirely new.
 
 ### Search
 

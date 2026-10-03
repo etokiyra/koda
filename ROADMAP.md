@@ -206,8 +206,11 @@ command palette already reports which are available. Filling them in is additive
       of the affected line, folded into the existing diagnostics UI and
       toggleable from the palette.
 - [ ] A subtle, optional theme system (works with no config by default).
+- [x] A read-only unified **diff view** for git: a colour-coded, scrollable
+      panel for the active file, and `d` on a changed-files entry. (An
+      interactive merge view remains future work.)
 - [ ] File iconography that respects monochrome terminals.
-- [ ] Better diff/merge view for git.
+- [ ] An interactive diff/merge view for conflicting files.
 - [x] A changed-files list (`Ctrl+Shift+G`) over the working-tree snapshot;
       selecting an entry opens it.
 - [x] A basic commit flow: **Commit Changes…** prompts for a message, stages

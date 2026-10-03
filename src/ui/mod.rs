@@ -57,6 +57,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         }
         Overlay::DirPicker(picker) => overlay::render_dir_picker(frame, area, picker),
         Overlay::NewProject(flow) => overlay::render_new_project(frame, area, flow),
+        Overlay::Diff(diff) => overlay::render_diff(frame, area, diff),
     }
 
     if app.overlay.is_none() {

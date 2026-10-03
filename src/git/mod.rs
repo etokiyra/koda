@@ -207,6 +207,49 @@ pub fn unstage(root: &Path, path: &Path) -> Result<(), String> {
     }
 }
 
+/// The unified diff for one path.
+///
+/// `staged` compares the index against `HEAD`; otherwise the working tree is
+/// compared against the index. An untracked file produces no `git diff`, so it
+/// is rendered as an entirely new file instead of an empty result.
+pub fn diff(root: &Path, path: &Path, staged: bool) -> Result<String, String> {
+    let path_str = path.to_string_lossy().to_string();
+    let mut args = vec!["--no-pager", "diff", "--no-color"];
+    if staged {
+        args.push("--cached");
+    }
+    args.push("--");
+    args.push(path_str.as_str());
+    let unified = run_checked(root, &args)?;
+    if !unified.is_empty() {
+        return Ok(unified);
+    }
+
+    // An untracked file has no diff; present its contents as additions.
+    let tracked = run(
+        root,
+        &["ls-files", "--error-unmatch", "--", path_str.as_str()],
+    )
+    .is_some();
+    if tracked || !path.is_file() {
+        return Ok(unified);
+    }
+    let content = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
+    let relative = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string();
+    let count = content.lines().count();
+    let mut out = format!("--- /dev/null\n+++ b/{relative}\n@@ -0,0 +1,{count} @@\n");
+    for line in content.lines() {
+        out.push('+');
+        out.push_str(line);
+        out.push('\n');
+    }
+    Ok(out)
+}
+
 fn parse_status(code: &str) -> GitFileStatus {
     let mut chars = code.chars();
     let x = chars.next().unwrap_or(' ');
@@ -288,6 +331,63 @@ mod tests {
 
         let log = git(&["log", "--oneline"]).unwrap();
         assert!(String::from_utf8_lossy(&log.stdout).contains("initial commit"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diff_shows_working_tree_staged_and_untracked_changes() {
+        if std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return; // Skip when git is unavailable.
+        }
+        let dir = std::env::temp_dir().join(format!("koda-git-diff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+        };
+        assert!(git(&["init", "-q"]).unwrap().status.success());
+        assert!(
+            git(&["config", "user.email", "koda@example.com"])
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(
+            git(&["config", "user.name", "Koda Test"])
+                .unwrap()
+                .status
+                .success()
+        );
+        let path = dir.join("a.txt");
+        std::fs::write(&path, "one\n").unwrap();
+        assert!(stage_all(&dir).is_ok());
+        assert!(commit_all(&dir, "initial").is_ok());
+
+        // Working-tree change.
+        std::fs::write(&path, "one\ntwo\n").unwrap();
+        let unstaged = diff(&dir, &path, false).unwrap();
+        assert!(unstaged.contains("+two"), "unstaged diff: {unstaged}");
+        assert!(diff(&dir, &path, true).unwrap().is_empty());
+
+        // Staged change.
+        stage(&dir, &path).unwrap();
+        let staged = diff(&dir, &path, true).unwrap();
+        assert!(staged.contains("+two"), "staged diff: {staged}");
+
+        // Untracked file: the whole file is an addition.
+        let fresh = dir.join("new.txt");
+        std::fs::write(&fresh, "hello\nworld\n").unwrap();
+        let untracked = diff(&dir, &fresh, false).unwrap();
+        assert!(untracked.contains("+hello") && untracked.contains("+world"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
