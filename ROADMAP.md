@@ -119,6 +119,8 @@ command palette already reports which are available. Filling them in is additive
 
 ## Then — polish
 
+- [x] Keyboard-shortcuts overlay (`F1`), generated from the command registry.
+- [x] Editor scroll margin (scrolloff) and a gentle welcome-mascot animation.
 - [ ] Split editor.
 - [ ] A subtle, optional theme system (works with no config by default).
 - [ ] File iconography that respects monochrome terminals.

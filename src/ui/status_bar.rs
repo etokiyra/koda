@@ -90,13 +90,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         ));
     }
 
+    // Background work in progress: a small spinning sparkle, whatever the task.
+    if let Some(label) = app.busy() {
+        spans.push(Span::styled("  ", on_panel));
+        spans.push(Span::styled(
+            format!("{} {label}…", art::spinner(app.anim_phase)),
+            Style::default().fg(theme::ACCENT).bg(theme::PANEL_BG),
+        ));
+    }
+
     // Right side: cursor position and scroll percentage.
     let right = document.map(|doc| {
         let position = doc.clamped_cursor();
         let total = doc.buffer.len_lines().max(1);
         let percent = ((position.row + 1) * 100 / total).min(100);
+        // The line ending only earns its space on roomy terminals.
+        let ending = if area.width >= 80 {
+            format!("{}   ", doc.buffer.line_ending.label())
+        } else {
+            String::new()
+        };
         format!(
-            "Ln {}, Col {}   {} {}% ",
+            "{ending}Ln {}, Col {}   {} {}% ",
             position.row + 1,
             position.col + 1,
             art::MOON,

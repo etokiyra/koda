@@ -38,8 +38,19 @@ pub const CAT_ASLEEP: &[&str] = &["/\\___/\\", "( -ω- )", " > ω < ", " ~~~~~ "
 /// The Koda familiar, a little surprised.
 pub const CAT_AWAKE: &[&str] = &["/\\___/\\", "( o.o )", " > ω < ", "/|   |\\"];
 
+/// The Koda familiar, mid-blink.
+pub const CAT_BLINK: &[&str] = &["/\\___/\\", "( -ω- )", " > ω < ", "/|   |\\"];
+
 /// The Koda familiar, celebrating.
 pub const CAT_HAPPY: &[&str] = &["/\\___/\\", "( ^ω^ )", "\\|   |/"];
+
+/// Frames for the busy sparkle, cycled while background work runs.
+pub const SPINNER: &[&str] = &["✶", "✸", "✹", "✷"];
+
+/// The busy sparkle for a given animation phase.
+pub fn spinner(phase: usize) -> &'static str {
+    SPINNER[phase % SPINNER.len()]
+}
 
 /// Pad lines to equal width so per-line centering keeps the art aligned.
 pub fn equalize(lines: &[&str]) -> Vec<String> {

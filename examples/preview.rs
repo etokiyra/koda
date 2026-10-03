@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! cargo run --example preview -- [width] [height] [mode]
-//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols | completion | hover
+//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols | completion | hover | help
 //! ```
 
 use koda::app::App;
@@ -134,6 +134,11 @@ fn main() {
                 .unwrap()
                 .move_to(koda::editor::Position::new(1, 4));
             app.execute_command(ids::HOVER);
+            app
+        }
+        "help" => {
+            let mut app = App::new(Some(&root)).expect("app");
+            app.execute_command(ids::HELP);
             app
         }
         _ => App::new(Some(&root)).expect("app"),

@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use koda::app::App;
+use koda::app::overlay::Overlay;
 use koda::commands::ids;
 use koda::language::diagnostics::{Diagnostic, Severity, TextPos};
 use koda::ui::theme;
@@ -376,6 +377,103 @@ fn hover_popup_is_drawn() {
     assert!(
         screen.contains("fn main"),
         "the hover popup should be visible:\n{screen}"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn editor_keeps_context_below_the_cursor() {
+    let dir = temp_project("scrolloff");
+    let file = dir.join("src/main.rs");
+    let source: String = (0..40).map(|line| format!("line {line}\n")).collect();
+    fs::write(&file, source).unwrap();
+
+    let mut app = App::new(Some(&file)).unwrap();
+    app.editor
+        .active_document_mut()
+        .unwrap()
+        .move_to(koda::editor::Position::new(30, 0));
+
+    let screen = draw_at(&mut app, 100, 20);
+    assert!(
+        screen.contains("line 31"),
+        "a scroll margin should keep context below the cursor:\n{screen}"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn statusline_shows_the_line_ending() {
+    let dir = temp_project("line-ending");
+    let file = dir.join("src/main.rs");
+    fs::write(&file, "fn main() {\r\n}\r\n").unwrap();
+
+    let mut app = App::new(Some(&file)).unwrap();
+    let screen = draw_at(&mut app, 100, 20);
+    assert!(
+        screen.contains("CRLF"),
+        "the line ending should appear in the statusline:\n{screen}"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn welcome_mascot_blinks_on_later_frames() {
+    let dir = temp_project("blink");
+    // No file open, so the welcome scene is shown.
+    let mut app = App::new(Some(&dir)).unwrap();
+
+    app.anim_phase = 0;
+    let calm = draw_at(&mut app, 90, 24);
+    assert!(
+        calm.contains("･ω･"),
+        "the familiar should be awake and content by default:\n{calm}"
+    );
+
+    app.anim_phase = 7;
+    let blink = draw_at(&mut app, 90, 24);
+    assert!(
+        blink.contains("-ω-"),
+        "the familiar should blink on the blink frame:\n{blink}"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn help_overlay_lists_shortcuts() {
+    let dir = temp_project("help");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    app.execute_command(ids::HELP);
+
+    let screen = draw_at(&mut app, 100, 30);
+    assert!(
+        screen.contains("keyboard shortcuts"),
+        "the help cheatsheet should be visible:\n{screen}"
+    );
+    assert!(
+        screen.contains("Ctrl+S"),
+        "the help cheatsheet should list real shortcuts:\n{screen}"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn command_palette_shows_a_no_matches_state() {
+    let dir = temp_project("palette-empty");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    app.execute_command(ids::PALETTE);
+    if let Overlay::Picker(picker) = &mut app.overlay {
+        for c in "zzzzzz".chars() {
+            picker.push_char(c);
+        }
+    }
+
+    let screen = draw_at(&mut app, 100, 30);
+    assert!(
+        screen.contains("no matches"),
+        "an empty filter should explain itself:\n{screen}"
     );
     cleanup(&dir);
 }

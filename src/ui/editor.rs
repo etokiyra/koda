@@ -50,26 +50,34 @@ pub fn render(
         return None;
     }
     let view_height = area.height as usize;
+    // Keep a little context visible around the cursor so it never sits glued to
+    // an edge (scrolloff, as in Helix).
+    const SCROLL_OFF: usize = 3;
 
-    // Keep the cursor inside the viewport.
+    // Keep the cursor inside the viewport, with a margin.
     let cursor = doc.clamped_cursor();
-    if cursor.row < doc.scroll_top {
-        doc.scroll_top = cursor.row;
+    let max_top = total_lines.saturating_sub(view_height);
+    if cursor.row < doc.scroll_top + SCROLL_OFF {
+        doc.scroll_top = cursor.row.saturating_sub(SCROLL_OFF);
     }
-    if cursor.row >= doc.scroll_top + view_height {
-        doc.scroll_top = cursor.row + 1 - view_height;
+    if cursor.row + SCROLL_OFF >= doc.scroll_top + view_height {
+        doc.scroll_top = (cursor.row + SCROLL_OFF + 1).saturating_sub(view_height);
     }
+    doc.scroll_top = doc.scroll_top.min(max_top);
 
-    // Horizontal scroll is driven by the cursor line.
+    // Horizontal scroll is driven by the cursor line, with the same margin.
     let cursor_line = doc.buffer.line_text(cursor.row);
     let cursor_layout = LineLayout::new(&cursor_line, TAB_WIDTH);
     let cursor_col = cursor_layout.display_col(cursor.col);
-    if cursor_col < doc.scroll_left {
-        doc.scroll_left = cursor_col;
+    if cursor_col < doc.scroll_left + SCROLL_OFF {
+        doc.scroll_left = cursor_col.saturating_sub(SCROLL_OFF);
     }
-    if cursor_col >= doc.scroll_left + text_width {
-        doc.scroll_left = cursor_col + 1 - text_width;
+    if cursor_col + SCROLL_OFF >= doc.scroll_left + text_width {
+        doc.scroll_left = (cursor_col + SCROLL_OFF + 1).saturating_sub(text_width);
     }
+    doc.scroll_left = doc
+        .scroll_left
+        .min(cursor_layout.len.saturating_sub(text_width));
 
     let mut lines: Vec<Line> = Vec::with_capacity(view_height);
     let brackets = doc.matching_brackets(provider);

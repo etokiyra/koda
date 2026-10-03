@@ -43,6 +43,9 @@ fn compose(area: Rect, app: &App) -> Vec<Line<'static>> {
 
     let pose = if project_empty && app.workspace.project.markers.is_empty() {
         art::CAT_ASLEEP
+    } else if app.anim_phase % 12 == 7 {
+        // A rare blink keeps the familiar alive without being distracting.
+        art::CAT_BLINK
     } else {
         art::CAT
     };

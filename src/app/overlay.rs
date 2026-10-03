@@ -172,12 +172,20 @@ pub enum Overlay {
     None,
     Picker(Picker),
     Prompt(Prompt),
+    /// The keyboard-shortcuts cheatsheet.
+    Help(Help),
 }
 
 impl Overlay {
     pub fn is_none(&self) -> bool {
         matches!(self, Overlay::None)
     }
+}
+
+/// Scroll state for the help cheatsheet.
+#[derive(Default)]
+pub struct Help {
+    pub scroll: usize,
 }
 
 /// Which search field has focus.

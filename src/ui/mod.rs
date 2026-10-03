@@ -47,6 +47,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Overlay::None => {}
         Overlay::Picker(picker) => overlay::render_picker(frame, area, picker),
         Overlay::Prompt(prompt) => overlay::render_prompt(frame, area, prompt),
+        Overlay::Help(help) => {
+            overlay::render_help(frame, area, help, &app.commands, app.anim_phase)
+        }
     }
 
     if app.overlay.is_none() {

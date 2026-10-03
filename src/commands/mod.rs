@@ -54,6 +54,7 @@ pub mod ids {
     pub const NEXT_TAB: &str = "view.nextTab";
     pub const PREV_TAB: &str = "view.previousTab";
     pub const PALETTE: &str = "view.commandPalette";
+    pub const HELP: &str = "app.help";
 }
 
 /// A single command definition.
@@ -272,6 +273,8 @@ impl CommandRegistry {
                 .describes("Switch to the previous open tab"),
             Command::new(PALETTE, "Command Palette", "View", Some("Ctrl+Shift+P"))
                 .describes("Search every command Koda offers"),
+            Command::new(HELP, "Keyboard Shortcuts", "Help", Some("F1"))
+                .describes("Show every shortcut at a glance"),
         ];
         CommandRegistry { commands }
     }

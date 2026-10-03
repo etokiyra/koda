@@ -73,6 +73,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Koda repaints only when input arrives, background work completes, a status
   message expires, or the terminal is resized.
 
+### Polish & motion
+
+- The editor keeps a small scroll margin (scrolloff), so the cursor never sits
+  glued to the top or bottom edge and there is always context in view.
+- Background work shows a live spinning sparkle in the statusline
+  (`formatting…`, `searching symbols…`). It runs only while work is in progress.
+- A keyboard-shortcuts cheatsheet (`F1`) is generated from the command registry,
+  so it can never drift from the real keymap. It scrolls and shows the Koda
+  familiar, which also blinks gently on the welcome screen.
+- The statusline reports the active file's line ending (`LF`/`CRLF`) on wide
+  terminals.
+- Overlays that filter to nothing now say "no matches" instead of showing an
+  empty panel.
+- Animations only run when there is something to show (the welcome scene or
+  in-progress work); an idle editor still does no work.
+
 ### Editing & UX
 
 - Undo grouping: consecutive typing, backspacing and forward-deletes coalesce

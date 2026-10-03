@@ -25,6 +25,14 @@ impl LineEnding {
             LineEnding::Crlf => "\r\n",
         }
     }
+
+    /// A short label for the statusline.
+    pub fn label(self) -> &'static str {
+        match self {
+            LineEnding::Lf => "LF",
+            LineEnding::Crlf => "CRLF",
+        }
+    }
 }
 
 /// An in-memory text buffer with identity and dirty tracking.

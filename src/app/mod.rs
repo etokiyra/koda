@@ -26,8 +26,8 @@ use crate::project::Workspace;
 use crate::terminal;
 use crate::ui;
 use overlay::{
-    CompletionState, HoverState, Overlay, Picker, PickerAction, PickerItem, Prompt, PromptKind,
-    Search, SearchField, TreeFilter,
+    CompletionState, Help, HoverState, Overlay, Picker, PickerAction, PickerItem, Prompt,
+    PromptKind, Search, SearchField, TreeFilter,
 };
 
 /// How long typing must pause before diagnostics are recomputed. Short enough to
@@ -89,6 +89,10 @@ pub struct App {
     workspace_symbols_seq: u64,
     /// The workspace symbol scan awaiting a result, if any.
     pending_workspace_symbols: Option<u64>,
+    /// Animation frame, advanced while something on screen animates.
+    pub anim_phase: usize,
+    /// When the animation frame last advanced.
+    anim_last: Instant,
 }
 
 impl App {
@@ -134,6 +138,8 @@ impl App {
             pending_format: None,
             workspace_symbols_seq: 0,
             pending_workspace_symbols: None,
+            anim_phase: 0,
+            anim_last: Instant::now(),
         };
 
         if let Some(path) = target
@@ -152,15 +158,24 @@ impl App {
         let mut needs_redraw = true;
         while !self.should_quit {
             // Only repaint when something changed: input arrived, background
-            // work completed, a status message expired, or the terminal was
-            // resized. An idle Koda does no work at all.
+            // work completed, the animation advanced, a status message expired,
+            // or the terminal was resized. An idle Koda does no work at all.
             self.poll_diagnostics();
             let background_changed = self.apply_background_events();
-            if needs_redraw || background_changed || self.tick_status() {
+            let animated = self.tick_animation();
+            if needs_redraw || background_changed || animated || self.tick_status() {
                 terminal.draw(|frame| ui::render(frame, self))?;
                 needs_redraw = false;
             }
-            if event::poll(Duration::from_millis(250))? {
+            let timeout = if self.wants_animation() {
+                // Wake exactly when the next frame is due, not sooner.
+                self.animation_interval()
+                    .saturating_sub(self.anim_last.elapsed())
+                    .max(Duration::from_millis(16))
+            } else {
+                Duration::from_millis(250)
+            };
+            if event::poll(timeout)? {
                 match event::read()? {
                     Event::Key(key)
                         if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
@@ -178,6 +193,49 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    // ----------------------------------------------------------------------
+    // Animation
+    // ----------------------------------------------------------------------
+
+    /// Whether anything on screen animates right now.
+    fn wants_animation(&self) -> bool {
+        self.editor.is_empty() || self.busy().is_some()
+    }
+
+    fn animation_interval(&self) -> Duration {
+        if self.busy().is_some() {
+            // Busy work is short-lived, so spin smoothly while it lasts.
+            Duration::from_millis(90)
+        } else {
+            // The welcome mascot only blinks now and then.
+            Duration::from_millis(650)
+        }
+    }
+
+    /// Advance the animation frame once enough time has passed.
+    fn tick_animation(&mut self) -> bool {
+        if !self.wants_animation() {
+            return false;
+        }
+        if self.anim_last.elapsed() >= self.animation_interval() {
+            self.anim_last = Instant::now();
+            self.anim_phase = self.anim_phase.wrapping_add(1);
+            return true;
+        }
+        false
+    }
+
+    /// A short label for background work in progress, if any.
+    pub fn busy(&self) -> Option<&'static str> {
+        if self.pending_format.is_some() {
+            Some("formatting")
+        } else if self.pending_workspace_symbols.is_some() {
+            Some("searching symbols")
+        } else {
+            None
+        }
     }
 
     // ----------------------------------------------------------------------
@@ -218,6 +276,11 @@ impl App {
     fn handle_global_key(&mut self, key: KeyEvent) -> bool {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        if key.code == KeyCode::F(1) {
+            self.completion = None;
+            self.toggle_help();
+            return true;
+        }
         if key.code == KeyCode::F(8) {
             self.completion = None;
             self.goto_diagnostic(if shift { -1 } else { 1 });
@@ -275,6 +338,7 @@ impl App {
                 picker.refilter();
                 return;
             }
+            Overlay::Help(_) => return,
             Overlay::None => {}
         }
         self.completion = None;
@@ -487,6 +551,26 @@ impl App {
                 }
                 KeyCode::Char(c) if !ctrl => {
                     prompt.push_char(c);
+                    Outcome::Nothing
+                }
+                _ => Outcome::Nothing,
+            },
+            Overlay::Help(help) => match key.code {
+                KeyCode::Esc => Outcome::Close,
+                KeyCode::Up => {
+                    help.scroll = help.scroll.saturating_sub(1);
+                    Outcome::Nothing
+                }
+                KeyCode::Down => {
+                    help.scroll = help.scroll.saturating_add(1);
+                    Outcome::Nothing
+                }
+                KeyCode::PageUp => {
+                    help.scroll = help.scroll.saturating_sub(8);
+                    Outcome::Nothing
+                }
+                KeyCode::PageDown => {
+                    help.scroll = help.scroll.saturating_add(8);
                     Outcome::Nothing
                 }
                 _ => Outcome::Nothing,
@@ -761,6 +845,7 @@ impl App {
             ids::NEXT_TAB => self.editor.next_tab(),
             ids::PREV_TAB => self.editor.previous_tab(),
             ids::PALETTE => self.open_command_palette(),
+            ids::HELP => self.toggle_help(),
             ids::RENAME | ids::CODE_ACTIONS => self.report_language_capability(id),
             ids::FORMAT => self.format_document(),
             ids::GOTO_DEFINITION => self.goto_definition(),
@@ -1192,7 +1277,6 @@ impl App {
         self.pending_workspace_symbols = Some(revision);
         self.background
             .workspace_symbols(self.workspace.root().to_path_buf(), revision);
-        self.set_status("Searching for symbols…");
     }
 
     fn open_workspace_symbol_picker(&mut self, symbols: Vec<WorkspaceSymbol>) {
@@ -1261,7 +1345,6 @@ impl App {
         let revision = self.format_seq;
         self.pending_format = Some((path.clone(), revision));
         self.background.format(path, language, text, revision);
-        self.set_status("Formatting…");
     }
 
     /// Apply a formatting result, or explain why it could not run.
@@ -1866,6 +1949,16 @@ impl App {
 
     fn open_prompt(&mut self, kind: PromptKind, label: &str, placeholder: &str) {
         self.overlay = Overlay::Prompt(Prompt::new(kind, label, placeholder));
+    }
+
+    /// Show the keyboard-shortcuts cheatsheet, or hide it if it is already up.
+    fn toggle_help(&mut self) {
+        self.completion = None;
+        self.hover = None;
+        self.overlay = match self.overlay {
+            Overlay::Help(_) => Overlay::None,
+            _ => Overlay::Help(Help::default()),
+        };
     }
 
     // ----------------------------------------------------------------------
@@ -2497,6 +2590,22 @@ mod tests {
             labels.iter().any(|label| label == "main"),
             "labels: {labels:?}"
         );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn busy_reports_pending_background_work() {
+        let dir = temp_project("busy");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+        assert!(app.busy().is_none());
+
+        app.pending_format = Some((file.clone(), 1));
+        assert_eq!(app.busy(), Some("formatting"));
+
+        app.pending_format = None;
+        app.pending_workspace_symbols = Some(1);
+        assert_eq!(app.busy(), Some("searching symbols"));
         fs::remove_dir_all(&dir).ok();
     }
 }

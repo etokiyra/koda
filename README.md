@@ -91,6 +91,8 @@ Implemented:
 - Hover (`Ctrl+Shift+H`) showing a symbol's kind, definition line and usage
   count.
 - Project-wide symbol search (`Ctrl+T`), scanned off the UI thread.
+- A keyboard-shortcuts cheatsheet (`F1`), a scroll margin, a live busy spinner
+  and a gently animated mascot.
 - Lightweight git integration (branch + per-file status, via the `git` binary).
 - A distinctive Mellow-based visual identity: a semantic theme layer, an
   adaptive ASCII welcome scene, the Koda familiar and personality-rich empty
@@ -138,6 +140,7 @@ and establishes language context automatically.
 | `Ctrl+O` | Open file (path prompt) |
 | `Ctrl+P` | Quick open |
 | `Ctrl+Shift+P` | Command palette |
+| `F1` | Keyboard-shortcuts cheatsheet |
 | `Ctrl+F` | Find |
 | `Ctrl+H` | Replace |
 | `Ctrl+G` | Go to line |
