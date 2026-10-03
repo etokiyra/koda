@@ -196,6 +196,13 @@ command palette already reports which are available. Filling them in is additive
 
 ## Then — polish
 
+- [x] Animated **welcome scenes**: *starry night*, *cozy desk*, *rainy window*
+      and *sakura drift*, composed on a character canvas, with the familiar
+      cycling expressions. `v` (or **Change Welcome Scene**) cycles them.
+- [x] **Toggle Animations** for a calm, reduced-motion experience; the scene and
+      busy sparkle freeze when it is off.
+- [x] Personable, contextual **empty states** across pickers and the file tree:
+      a familiar pose, a short line and a hint instead of a bare "no matches".
 - [x] Refresh the project tree and git status on terminal focus and on demand
       (`F5`).
 - [x] Keyboard-shortcuts overlay (`F1`), generated from the command registry.

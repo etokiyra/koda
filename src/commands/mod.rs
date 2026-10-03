@@ -81,6 +81,8 @@ pub mod ids {
     pub const PREV_TAB: &str = "view.previousTab";
     pub const PALETTE: &str = "view.commandPalette";
     pub const HELP: &str = "app.help";
+    pub const TOGGLE_MOTION: &str = "app.toggleMotion";
+    pub const WELCOME_SCENE: &str = "app.welcomeScene";
 }
 
 /// A single command definition.
@@ -181,6 +183,10 @@ impl CommandRegistry {
             Command::new(QUIT, "Quit", "File", Some("Ctrl+Q")).describes("Leave Koda"),
             Command::new(HOME, "Welcome Screen", "File", None)
                 .describes("Close all tabs and return to the home screen"),
+            Command::new(WELCOME_SCENE, "Change Welcome Scene", "View", None)
+                .describes("Cycle the animated scene on the welcome screen"),
+            Command::new(TOGGLE_MOTION, "Toggle Animations", "View", None)
+                .describes("Turn the welcome and busy animations on or off"),
             Command::new(UNDO, "Undo", "Edit", Some("Ctrl+Z"))
                 .describes("Undo the last change")
                 .needs_doc(),

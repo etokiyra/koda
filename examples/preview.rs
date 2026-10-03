@@ -30,6 +30,25 @@ fn main() {
     let root = std::env::current_dir().expect("cwd");
 
     let mut app = match mode {
+        "empty-picker" => {
+            let mut app = file_app(&root.join("src/main.rs"));
+            app.execute_command(ids::QUICK_OPEN);
+            if let koda::app::overlay::Overlay::Picker(picker) = &mut app.overlay {
+                picker.query = "zzzz".to_string();
+                picker.refilter();
+            }
+            app
+        }
+        "scene-starry" | "scene-cozy" | "scene-rainy" | "scene-sakura" => {
+            let mut app = App::new(Some(&root)).expect("app");
+            app.welcome_scene = match mode {
+                "scene-cozy" => koda::ui::art::WelcomeScene::Cozy,
+                "scene-rainy" => koda::ui::art::WelcomeScene::Rainy,
+                "scene-sakura" => koda::ui::art::WelcomeScene::Sakura,
+                _ => koda::ui::art::WelcomeScene::Starry,
+            };
+            app
+        }
         "file" => file_app(&root.join("src/main.rs")),
         "palette" => {
             let mut app = file_app(&root.join("src/main.rs"));

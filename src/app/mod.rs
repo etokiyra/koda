@@ -266,6 +266,11 @@ pub struct App {
     pub anim_phase: usize,
     /// When the animation frame last advanced.
     anim_last: Instant,
+    /// Whether the welcome scene and busy indicators animate. Users can turn
+    /// motion off from the palette.
+    pub motion: bool,
+    /// The active welcome scene.
+    pub welcome_scene: crate::ui::art::WelcomeScene,
     /// External tools Koda has probed for, once discovery completes.
     pub tools: Option<ToolRegistry>,
     /// One language server per language.
@@ -360,6 +365,8 @@ impl App {
             pending_project_search: None,
             anim_phase: 0,
             anim_last: Instant::now(),
+            motion: true,
+            welcome_scene: crate::ui::art::WelcomeScene::default(),
             tools: None,
             lsp: HashMap::new(),
             pending_rename: None,
@@ -468,7 +475,7 @@ impl App {
 
     /// Whether anything on screen animates right now.
     fn wants_animation(&self) -> bool {
-        self.editor.is_empty() || self.busy().is_some()
+        self.motion && (self.editor.is_empty() || self.busy().is_some())
     }
 
     fn animation_interval(&self) -> Duration {
@@ -476,8 +483,8 @@ impl App {
             // Busy work is short-lived, so spin smoothly while it lasts.
             Duration::from_millis(90)
         } else {
-            // The welcome mascot only blinks now and then.
-            Duration::from_millis(650)
+            // The welcome scene drifts gently.
+            Duration::from_millis(450)
         }
     }
 
@@ -1633,6 +1640,19 @@ impl App {
             ids::COPY_FILE => self.copy_file(),
             ids::QUIT => self.request_quit(),
             ids::HOME => self.go_home(),
+            ids::WELCOME_SCENE => {
+                self.welcome_scene = self.welcome_scene.next();
+                self.set_status(format!("Welcome scene: {}", self.welcome_scene.label()));
+            }
+            ids::TOGGLE_MOTION => {
+                self.motion = !self.motion;
+                let message = if self.motion {
+                    "Animations on"
+                } else {
+                    "Animations off"
+                };
+                self.set_status(message);
+            }
             ids::OPEN_PROJECT => self.open_dir_picker(),
             ids::NEW_PROJECT => self.open_new_project(),
             ids::UNDO => self.with_doc(|d| d.undo()),
@@ -2210,6 +2230,9 @@ impl App {
             }
             KeyCode::Home => self.welcome_selected = 0,
             KeyCode::End => self.welcome_selected = count.saturating_sub(1),
+            KeyCode::Char('v') | KeyCode::Char('V') => {
+                self.welcome_scene = self.welcome_scene.next();
+            }
             KeyCode::Enter => {
                 if let Some(item) = self.welcome_items().into_iter().nth(self.welcome_selected) {
                     self.activate_welcome(item.action);
@@ -6116,6 +6139,27 @@ mod tests {
             state.items.iter().any(|item| item.label == "value"),
             "the buffer identifier should be offered"
         );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn motion_and_scene_commands_toggle() {
+        let dir = temp_project("motion");
+        let mut app = App::new(Some(&dir)).unwrap();
+
+        assert!(app.motion, "motion defaults on");
+        app.execute_command(ids::TOGGLE_MOTION);
+        assert!(!app.motion, "motion toggles off");
+        app.execute_command(ids::TOGGLE_MOTION);
+        assert!(app.motion, "motion toggles back on");
+
+        let scene = app.welcome_scene;
+        app.execute_command(ids::WELCOME_SCENE);
+        assert_ne!(app.welcome_scene, scene, "the scene cycles");
+
+        // `v` on the welcome screen cycles too.
+        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
+        assert_ne!(app.welcome_scene, scene, "v cycles the scene");
         fs::remove_dir_all(&dir).ok();
     }
 

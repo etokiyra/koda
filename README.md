@@ -212,9 +212,12 @@ Koda has a personality, but the code always comes first.
 - **Transparency first.** Plain surfaces use your terminal's own background;
   only the statusline, popups and the current line carry a soft panel.
 - **A little familiar.** A star-cat keeps you company on the welcome screen and
-  in empty states — never behind your code.
+  in empty states — never behind your code. It cycles through expressions, and
+  the welcome screen offers four animated scenes (a starry night, a cozy desk, a
+  rainy window, a drift of blossom).
 - **One visual vocabulary.** `✦` stars, `☾` moons, `❯` pointers and `·`
   separators recur throughout, so the whole environment reads as one piece.
+  Empty, loading and error states are all written in the same voice.
 - **Quiet feedback.** Background results — a language server installing or
   recovering, a commit, a format — surface as short-lived toasts above the
   statusline, coloured by outcome, so you always know what Koda just did.
@@ -259,28 +262,36 @@ is offered there as an **Open <path>** action rather than being opened for you.
 
 ## ✦ The welcome screen
 
-Koda always opens on its home screen. The Koda familiar sits above a small,
-keyboard-navigable menu — no file is opened automatically, and nothing you
-passed on the command line is thrown away.
+Koda always opens on its home screen. It is a small, atmospheric scene — the
+Koda familiar on a moonlit hill, at a cozy desk, by a rainy window, or in a
+drift of blossom — above a keyboard-navigable menu. No file is opened
+automatically, and nothing you passed on the command line is thrown away.
 
 ```text
-        ✦  ·  ☾  ·  ✦
-        /\___/\
-       ( ･ω･ )        ✦  K O D A  ✦
-        > ω <     your cozy little coding space
-       /|   |\
+              ✦         ·          ✧        ☾
+           ·        ✧         ✦        ·
+                 ✧        /\___/\              ✦
+                         ( ･ω･ )
+                          > ω <
+           ·  ·  ·  ~~~~~~~~~~~~~~  ·  ·
 
-       ❯ Open a file…                          Ctrl+O
-         Open a project…                choose a folder
-         Create a new project…   Rust · Go · Python · Shell
-         Resume “my-project”            3 file(s)
-         Keyboard shortcuts                       F1
+                     ✦  K O D A  ✦
+             your cozy little coding space
 
-         ↑↓ choose  ·  Enter open  ·  Ctrl+Shift+P commands
+    ❯ Open a file…                          Ctrl+O
+      Open a project…                choose a folder
+      Create a new project…   Rust · Go · Python · Shell
+      Resume “my-project”            3 file(s)
+      Keyboard shortcuts                       F1
+
+      ↑↓ choose  ·  Enter open  ·  v scene  ·  Ctrl+Shift+P
 ```
 
 - **Move** with `↑`/`↓` (or `Home`/`End`), **open** with `Enter`.
 - **Open a file…** or press `Ctrl+O`; **Open a project…** browses directories.
+- **Cycle the scene** with `v`, or **Change Welcome Scene** in the palette.
+- **Toggle Animations** in the palette freezes the scene and spinner for a calm,
+  reduced-motion experience.
 - **Resume** restores the workspace's saved session; **recent projects and
   files** reappear here once you have opened a few.
 - Any path given on the command line shows up as an **Open <path>** row.
@@ -333,6 +344,7 @@ Koda reports what happened rather than deleting anything.
 | `F5` | Refresh the file tree and git status |
 | `↑` / `↓` (welcome) | Choose a welcome-screen action |
 | `Enter` (welcome) | Open the chosen action |
+| `v` (welcome) | Cycle the animated scene |
 | `Ctrl+F` / `Ctrl+H` | Find / replace |
 | `F3` / `Shift+F3` | Find next / previous |
 | `Ctrl+Shift+F` | Search in the whole project |

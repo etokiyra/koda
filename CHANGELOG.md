@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Welcome screen
 
+- The welcome screen now opens on one of four **animated scenes** — *starry
+  night*, *cozy desk*, *rainy window* and *sakura drift* — each composed on a
+  small character canvas rather than hand-aligned text. Stars twinkle, rain
+  streaks fall, petals drift and the Koda familiar cycles through expressions.
+  Cycle scenes with `v` on the welcome screen or **Change Welcome Scene** in the
+  palette.
+- Added **Toggle Animations** (palette): turning motion off freezes the scene on
+  its first frame and stills the busy sparkle, for a calm, reduced-motion
+  experience. Motion is on by default.
 - Koda now always opens on its **welcome screen** — an interactive home screen
   built around the animated Koda familiar. Move with `↑`/`↓` and open with
   `Enter`; it offers opening a file, opening a project, creating a new project,
@@ -23,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result of closing the last tab.
 - Session saving is gated on the user having engaged with a project, so
   starting Koda and quitting does not overwrite an untouched session.
+- Empty states are now personable and contextual: an empty picker shows a Koda
+  a familiar pose, a short line and a hint rather than a bare "no matches", and
+  each pose reflects the situation (asleep for a clean working tree, curious for
+  a missing search, proud for a tidy codebase). The file-tree filter greets an
+  empty result with the familiar too.
 
 ### Project creation
 

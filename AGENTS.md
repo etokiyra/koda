@@ -237,6 +237,15 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   auto-indent, `Tab` and indent/outdent. This is zero-configuration and keeps
   the editor core language-agnostic: the width is a property of the file, not a
   per-language branch.
+- **Scenes are drawn on a canvas.** `ui/art.rs` composes each welcome scene by
+  placing glyphs at coordinates on a small `Canvas`, then turning runs of equal
+  style into spans. This keeps the art symmetric and lets one element animate
+  without the rest drifting; every scene is padded to an equal width so
+  per-line centering stays aligned. The welcome composer budgets its height and
+  drops the scene for just the familiar, or nothing, on small terminals.
+- **Motion is a toggle, not a config file.** `App::motion` (palette:
+  **Toggle Animations**) freezes the scene and the busy sparkle. Zero
+  configuration is preserved; reduced motion is one keypress away.
 
 ---
 

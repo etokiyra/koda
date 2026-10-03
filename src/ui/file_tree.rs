@@ -50,7 +50,7 @@ pub fn render_filter(frame: &mut Frame, area: Rect, filter: &TreeFilter, focused
 
     if filter.matches.is_empty() {
         frame.render_widget(
-            Paragraph::new(Span::styled("  no matching files", theme::muted())),
+            Paragraph::new(art::familiar_line("no matching files")),
             list,
         );
         return;

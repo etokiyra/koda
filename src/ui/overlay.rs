@@ -23,7 +23,13 @@ use crate::ui::{art, centered, theme};
 /// Render a filterable list (command palette / quick open).
 pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
     let width = ((area.width as u32 * 3 / 5) as u16).clamp(36, area.width.max(1));
-    let rows = picker.filtered.len().min(12) as u16 + 4;
+    // An empty result gets a little extra room so the familiar and its hint can
+    // breathe instead of being clipped to a single row.
+    let rows = if picker.filtered.is_empty() {
+        12
+    } else {
+        picker.filtered.len().min(12) as u16 + 4
+    };
     // Keep enough room for the query row, the divider and a result area even
     // when the filter matches nothing.
     let height = rows.max(6).min(area.height);
@@ -102,10 +108,8 @@ pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
     // Results.
     let list_area = chunks[2];
     if picker.filtered.is_empty() {
-        frame.render_widget(
-            Paragraph::new(art::familiar_line("no matches")).style(on_panel),
-            list_area,
-        );
+        let empty = picker_empty(picker, list_area.height as usize);
+        frame.render_widget(Paragraph::new(Text::from(empty)).style(on_panel), list_area);
         render_picker_footer(
             frame,
             show_footer.then(|| chunks[3]),
@@ -188,6 +192,68 @@ fn picker_footer_hint(picker: &Picker) -> Option<&'static str> {
     match picker.title.as_str() {
         "Changed Files" => Some("Space stage · d diff"),
         _ => None,
+    }
+}
+
+/// A warm, contextual empty state for a picker with nothing to show.
+///
+/// A missing search result should never feel like a dead end, so the familiar
+/// keeps the user company and the hint suggests what to do next. Short panels
+/// get the single-line familiar instead of the full composition.
+fn picker_empty(picker: &Picker, height: usize) -> Vec<Line<'static>> {
+    let (pose, title, hint): (&[&str], &str, &str) = match picker.title.as_str() {
+        "Changed Files" => (
+            art::CAT_ASLEEP,
+            "the working tree is clean",
+            "edit a file and it will appear here",
+        ),
+        "Diagnostics" => (
+            art::CAT_HAPPY,
+            "no problems found",
+            "a tidy little codebase",
+        ),
+        "Search Results" => (
+            art::CAT_CURIOUS,
+            "nothing matched",
+            "try a different word or pattern",
+        ),
+        "Workspace Symbols" => (
+            art::CAT_CURIOUS,
+            "no symbols found",
+            "this project may still be waking up",
+        ),
+        "Symbols" => (
+            art::CAT_CURIOUS,
+            "no symbols in this file",
+            "nothing to outline yet",
+        ),
+        "References" => (
+            art::CAT_CURIOUS,
+            "no references found",
+            "the symbol may be unused here",
+        ),
+        "Code Actions" => (
+            art::CAT_SLEEPY,
+            "no quick fixes here",
+            "the code under the cursor looks settled",
+        ),
+        "Language Setup" => (
+            art::CAT_HAPPY,
+            "every language tool is ready",
+            "nothing left to install",
+        ),
+        _ => (
+            art::CAT_CURIOUS,
+            "no matches",
+            "keep typing to narrow it down",
+        ),
+    };
+    if height >= 6 {
+        art::empty_state(pose, title, hint)
+    } else if height >= 1 {
+        vec![art::familiar_line(title)]
+    } else {
+        Vec::new()
     }
 }
 
@@ -763,7 +829,12 @@ fn render_panel_rows(frame: &mut Frame, list: Rect, rows: &[(String, String)], s
     let on_panel = Style::default().bg(theme::PANEL_BG);
     if rows.is_empty() {
         frame.render_widget(
-            Paragraph::new(Span::styled("  (empty)", theme::muted())).style(on_panel),
+            Paragraph::new(art::empty_state(
+                art::CAT_CURIOUS,
+                "nothing here",
+                "try another folder",
+            ))
+            .style(on_panel),
             list,
         );
         return;

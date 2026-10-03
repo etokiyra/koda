@@ -62,7 +62,9 @@ fn compose(area: Rect, app: &App) -> Vec<Line<'static>> {
     ];
 
     // Footer: navigation hint and (when there is room) the project context.
-    let hint = if width >= 44 {
+    let hint = if width >= 52 {
+        "↑↓ choose  ·  Enter open  ·  v scene  ·  Ctrl+Shift+P"
+    } else if width >= 44 {
         "↑↓ choose  ·  Enter open  ·  Ctrl+Shift+P commands"
     } else if width >= 32 {
         "↑↓ choose  ·  Enter open"
@@ -79,19 +81,14 @@ fn compose(area: Rect, app: &App) -> Vec<Line<'static>> {
     let min_list = items.len().clamp(3, 6);
     let available_art = height.saturating_sub(header.len() + footer.len() + min_list + 1);
     let mut art_block: Vec<Line<'static>> = Vec::new();
-    let mut remaining = available_art;
-    if roomy && remaining >= 2 {
-        art_block.push(art::star_scatter());
+    // The atmospheric scene is the centrepiece; fall back to just the familiar
+    // when there is room for one but not the whole scene.
+    let scene = art::scene(app.welcome_scene, app.anim_phase, app.motion);
+    if roomy && available_art > scene.len() {
+        art_block.extend(scene.into_iter().map(Line::centered));
         art_block.push(Line::from(""));
-        remaining -= 2;
-    }
-    if roomy && remaining >= 5 {
+    } else if roomy && available_art >= 5 {
         art_block.extend(art::art_lines(cat_pose(app), theme::soft()));
-        art_block.push(Line::from(""));
-        remaining -= 5;
-    }
-    if roomy && remaining >= 7 {
-        art_block.extend(art::code_window().into_iter().map(Line::centered));
         art_block.push(Line::from(""));
     }
 

@@ -174,6 +174,31 @@ fn renders_welcome_when_no_file_open() {
 }
 
 #[test]
+fn renders_a_welcome_scene() {
+    let dir = temp_project("scene");
+    let mut app = App::new(Some(&dir)).unwrap();
+    app.welcome_scene = koda::ui::art::WelcomeScene::Cozy;
+
+    let screen = draw(&mut app);
+    assert!(screen.contains('ω'), "familiar missing:\n{screen}");
+    assert!(screen.contains("K O D A"), "wordmark missing:\n{screen}");
+
+    cleanup(&dir);
+}
+
+#[test]
+fn frozen_motion_still_renders_the_welcome() {
+    let dir = temp_project("frozen");
+    let mut app = App::new(Some(&dir)).unwrap();
+    app.motion = false;
+
+    let screen = draw(&mut app);
+    assert!(screen.contains("K O D A"), "welcome missing:\n{screen}");
+
+    cleanup(&dir);
+}
+
+#[test]
 fn command_palette_renders_overlay() {
     let dir = temp_project("palette");
     let file = dir.join("src/main.rs");
@@ -207,7 +232,7 @@ fn picker_empty_state_is_personable() {
 
     let screen = draw(&mut app);
     assert!(
-        screen.contains("( -ω- )"),
+        screen.contains('ω'),
         "the familiar should greet an empty result:\n{screen}"
     );
     assert!(screen.contains("no matches"), "missing message:\n{screen}");
