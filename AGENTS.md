@@ -232,6 +232,11 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   Feature requests resolve against the active document's language, and a
   language's server failing never disturbs another. Workspace-wide requests
   prefer the active language's server, then any ready one.
+- **Inferred indentation.** Each document detects its indentation unit from the
+  file's leading whitespace (falling back to four), and uses it for
+  auto-indent, `Tab` and indent/outdent. This is zero-configuration and keeps
+  the editor core language-agnostic: the width is a property of the file, not a
+  per-language branch.
 
 ---
 

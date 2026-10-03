@@ -136,6 +136,8 @@ command palette already reports which are available. Filling them in is additive
 - [x] Selection-aware indentation, line move/duplicate, and grouped undo.
 - [x] Inline fuzzy file filtering in the sidebar.
 - [ ] Multiple cursors.
+- [x] Indentation width is inferred per file (two-space JavaScript, four-space
+      Rust, …) with no configuration.
 - [ ] Indentation guides and a more complete tokenizer (strings, lifetimes,
       generics) for both providers.
 - [x] Case-sensitive and whole-word search options (`Alt+C` / `Alt+W`),
@@ -143,7 +145,7 @@ command palette already reports which are available. Filling them in is additive
 - [x] Regular-expression search in the find bar (`Alt+R`), powered by a small
       built-in engine.
 - [x] Undo grouping for consecutive typing.
-- [ ] Soft wrap and a configurable tab width.
+- [ ] Soft wrap.
 - [x] Persist cursor position, open tabs and expanded directories per project.
 - [x] A kill-ring with **Alt+Y** yank-pop; the newest kill still drives the
       system clipboard. Named registers remain to come.

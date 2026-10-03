@@ -187,7 +187,9 @@ The editor is the heart of Koda, and it is built for real projects.
   moving focus between the panes. The focused pane owns the cursor and the
   active tab.
 - Grouped undo, auto-pairing, smart newline, selection-aware indent/outdent,
-  line move/duplicate, delete-line, go-to-matching-bracket, matching-bracket
+  **detected indentation** (a two-space JavaScript file and a four-space Rust
+  file both indent the way their project does, with no config), line
+  move/duplicate, delete-line, go-to-matching-bracket, matching-bracket
   highlighting and a kill-ring with `Alt+Y` yank-pop.
 - Quick open (`Ctrl+P`), inline fuzzy file filtering in the sidebar (`/`),
   find/replace with case, whole-word and regex options, project-wide text

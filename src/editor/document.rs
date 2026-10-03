@@ -11,7 +11,8 @@ use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::id::LanguageId;
 use crate::language::provider::{HighlightSpan, HighlightState, LanguageProvider, TokenKind};
 
-/// The number of columns one level of indentation represents.
+/// The number of columns one level of indentation represents when a file has no
+/// discernible style.
 pub const INDENT_WIDTH: usize = 4;
 
 /// One open file.
@@ -39,10 +40,13 @@ pub struct Document {
     diagnostics_from_lsp: bool,
     /// The file's modification time when it was last read or written.
     disk_mtime: Option<SystemTime>,
+    /// The indentation unit detected for this file, in spaces.
+    indent_width: usize,
 }
 
 impl Document {
     pub fn new(buffer: Buffer) -> Self {
+        let indent_width = detect_indent_width(&buffer.text());
         Document {
             buffer,
             cursor: Position::zero(),
@@ -58,7 +62,13 @@ impl Document {
             diagnostics_dirty: false,
             diagnostics_from_lsp: false,
             disk_mtime: None,
+            indent_width,
         }
+    }
+
+    /// The indentation unit detected for this file, in spaces.
+    pub fn indent_width(&self) -> usize {
+        self.indent_width
     }
 
     pub fn from_path(path: &Path) -> std::io::Result<Self> {
@@ -118,6 +128,7 @@ impl Document {
         self.buffer.replace_contents(&text);
         self.history.clear();
         self.buffer.mark_clean();
+        self.indent_width = detect_indent_width(&text);
         self.selection = None;
         self.preferred_col = None;
         self.cursor = self.buffer.clamp_position(cursor);
@@ -368,7 +379,7 @@ impl Document {
             && after == matching_close(open)
         {
             let outer = leading;
-            let inner = format!("{outer}{}", " ".repeat(INDENT_WIDTH));
+            let inner = format!("{outer}{}", " ".repeat(self.indent_width));
             let text = format!("\n{inner}\n{outer}");
             self.apply_edit(self.cursor, self.cursor, &text);
             self.cursor = Position::new(self.cursor.row.saturating_sub(1), inner.chars().count());
@@ -386,7 +397,7 @@ impl Document {
             leading
         };
         if before.trim_end().ends_with(['{', '(', '[']) {
-            indent.push_str(&" ".repeat(INDENT_WIDTH));
+            indent.push_str(&" ".repeat(self.indent_width));
         }
         let text = format!("\n{indent}");
         let (start, end) = self.selection_range().unwrap_or((self.cursor, self.cursor));
@@ -462,7 +473,8 @@ impl Document {
     }
 
     fn insert_tab(&mut self) {
-        let spaces = INDENT_WIDTH - (self.cursor.col % INDENT_WIDTH);
+        let width = self.indent_width.max(1);
+        let spaces = width - (self.cursor.col % width);
         self.apply_edit(self.cursor, self.cursor, &" ".repeat(spaces));
     }
 
@@ -481,10 +493,10 @@ impl Document {
                         line
                     } else {
                         changed = true;
-                        format!("{}{line}", " ".repeat(INDENT_WIDTH))
+                        format!("{}{line}", " ".repeat(self.indent_width))
                     }
                 } else {
-                    let remove = leading_outdent(&line);
+                    let remove = leading_outdent(&line, self.indent_width);
                     if remove > 0 {
                         changed = true;
                         line.chars().skip(remove).collect()
@@ -1155,15 +1167,62 @@ fn matching_close(open: char) -> Option<char> {
 }
 
 /// How many leading characters outdent should remove from a line.
-fn leading_outdent(line: &str) -> usize {
+fn leading_outdent(line: &str, width: usize) -> usize {
     match line.chars().next() {
         Some('\t') => 1,
         Some(' ') => line
             .chars()
             .take_while(|c| *c == ' ')
-            .take(INDENT_WIDTH)
+            .take(width.max(1))
             .count(),
         _ => 0,
+    }
+}
+
+/// Infer a file's indentation unit from its leading whitespace.
+///
+/// The smallest increase in indentation between consecutive non-blank lines is
+/// taken as one level, which matches 2-space JavaScript and 4-space Rust alike.
+/// A file indented with tabs keeps Koda's default width for any spaces it
+/// inserts, since Koda does not convert tabs.
+fn detect_indent_width(text: &str) -> usize {
+    let mut tabs = 0usize;
+    let mut spaces = 0usize;
+    let mut unit: Option<usize> = None;
+    let mut previous = 0usize;
+    let mut seen = false;
+
+    for line in text.lines().take(2000) {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let leading: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+        let width = if leading.contains('\t') {
+            tabs += 1;
+            // Tabs have no fixed width here; treat each as one level.
+            leading.chars().filter(|c| *c == '\t').count() * INDENT_WIDTH
+        } else {
+            if !leading.is_empty() {
+                spaces += 1;
+            }
+            leading.chars().count()
+        };
+
+        if seen && width > previous {
+            let delta = width - previous;
+            if (1..=8).contains(&delta) {
+                unit = Some(unit.map_or(delta, |current| current.min(delta)));
+            }
+        }
+        previous = width;
+        seen = true;
+    }
+
+    if tabs > spaces && tabs > 0 {
+        // Tab-indented file: keep the conventional width for inserted spaces.
+        INDENT_WIDTH
+    } else {
+        unit.unwrap_or(INDENT_WIDTH).clamp(1, 8)
     }
 }
 
@@ -1230,6 +1289,39 @@ mod tests {
         d.move_end(false);
         d.insert_newline();
         assert_eq!(d.buffer.text(), "    let x = 1;\n    ");
+    }
+
+    #[test]
+    fn detects_and_uses_the_file_indentation_unit() {
+        // Two-space JavaScript.
+        let javascript = doc("function f() {\n  return 1;\n}");
+        assert_eq!(javascript.indent_width(), 2);
+
+        // Four-space Rust.
+        let rust = doc("fn main() {\n    let x = 1;\n}");
+        assert_eq!(rust.indent_width(), 4);
+
+        // Tab-indented files keep the default width for inserted spaces.
+        let tabbed = doc("fn main() {\n\tlet x = 1;\n}");
+        assert_eq!(tabbed.indent_width(), INDENT_WIDTH);
+
+        // New lines adopt the detected unit after an opening brace.
+        let mut d = doc("function f() {\n  return 1;\n}");
+        d.move_to(Position::new(0, 14));
+        d.insert_newline();
+        assert_eq!(d.buffer.text(), "function f() {\n  \n  return 1;\n}");
+    }
+
+    #[test]
+    fn indent_and_outdent_use_the_detected_unit() {
+        let mut d = doc("function f() {\n  return 1;\n}");
+        d.selection = Some(Selection::new(Position::new(1, 0)));
+        d.cursor = Position::new(1, 2);
+        d.outdent();
+        assert_eq!(d.buffer.text(), "function f() {\nreturn 1;\n}");
+
+        d.indent();
+        assert_eq!(d.buffer.text(), "function f() {\n  return 1;\n}");
     }
 
     #[test]

@@ -388,6 +388,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Editing & UX
 
+- Inferred **indentation**. On opening a file Koda detects its indentation unit
+  from the leading whitespace — two spaces in a JavaScript file, four in a Rust
+  file — and uses it for auto-indent, `Tab`, and indent/outdent, so Koda matches
+  the project without any configuration. A file with no discernible style (or a
+  tab-indented one) keeps the four-space default.
 - Added **Delete Line** (`Ctrl+Shift+K`), which removes every line the cursor
   or selection touches, and **Go to Matching Bracket** (`Alt+M`), which jumps
   between a bracket and its partner using the same nesting-aware scan that
