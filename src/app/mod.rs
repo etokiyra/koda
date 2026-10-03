@@ -2592,11 +2592,8 @@ impl App {
                 PickerItem::new(label, detail.clone(), PickerAction::Info(detail))
             } else if tool.install_command().is_some() {
                 let hint = tool.install_hint();
-                PickerItem::new(
-                    label,
-                    format!("{hint}  ·  press Enter to install"),
-                    PickerAction::InstallTool(tool),
-                )
+                PickerItem::new(label, hint.to_string(), PickerAction::InstallTool(tool))
+                    .shortcut("Enter")
             } else {
                 let hint = tool.install_hint();
                 PickerItem::new(label, hint, PickerAction::Info(hint.to_string())).disabled(hint)
