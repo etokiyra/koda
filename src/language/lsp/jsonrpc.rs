@@ -180,6 +180,25 @@ mod tests {
     }
 
     #[test]
+    fn a_bad_json_body_can_be_skipped() {
+        // A body that is not JSON consumes exactly its framed length, so the
+        // stream stays in sync and the next message is still readable.
+        let mut stream = Vec::new();
+        let bad = b"definitely not json";
+        stream.extend_from_slice(format!("Content-Length: {}\r\n\r\n", bad.len()).as_bytes());
+        stream.extend_from_slice(bad);
+        let good = serde_json::json!({"jsonrpc": "2.0", "id": 1, "result": true});
+        let good_body = serde_json::to_vec(&good).unwrap();
+        stream.extend_from_slice(format!("Content-Length: {}\r\n\r\n", good_body.len()).as_bytes());
+        stream.extend_from_slice(&good_body);
+
+        let mut reader = Cursor::new(stream);
+        let err = read_message(&mut reader).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Other);
+        assert_eq!(read_message(&mut reader).unwrap().unwrap(), good);
+    }
+
+    #[test]
     fn headerless_line_is_end_of_stream() {
         // Not a framed message, and no header follows; treat as EOF.
         let mut reader = Cursor::new(b"{\"id\":1}\n".to_vec());

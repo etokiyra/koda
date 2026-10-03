@@ -84,6 +84,11 @@ const LSP_RESTART_DELAY: Duration = Duration::from_secs(2);
 /// providers. The counter resets whenever a server connects successfully.
 const MAX_LSP_RESTARTS: u32 = 2;
 
+/// How long a server must stay ready before a later crash earns a fresh restart
+/// budget. Without this, a server that initializes and then crashes on real
+/// work would reset its budget on every handshake and restart forever.
+const LSP_STABLE_UPTIME: Duration = Duration::from_secs(60);
+
 /// The state of the language-server connection, for the statusline and setup.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum LspStatus {
@@ -121,6 +126,8 @@ struct LspJob {
     started_at: Option<Instant>,
     /// Automatic restarts attempted since the server last connected.
     restarts: u32,
+    /// When the server last became ready, for the stable-uptime budget reset.
+    ready_at: Option<Instant>,
     /// The most recent failure, for the status summary.
     failed: Option<String>,
 }
@@ -2618,7 +2625,15 @@ impl App {
             return;
         }
         self.close_armed = None;
+        let closed = self
+            .editor
+            .documents
+            .get(index)
+            .and_then(|doc| doc.buffer.path.clone().map(|p| (p, doc.buffer.language)));
         self.editor.close(index);
+        if let Some((path, language)) = closed {
+            self.notify_lsp_close(&path, language);
+        }
         self.remap_pane_indices(index);
         self.set_status("Tab closed");
     }
@@ -2628,7 +2643,16 @@ impl App {
             self.set_error("Unsaved changes — save first (Ctrl+S)");
             return;
         }
+        let closed: Vec<(PathBuf, LanguageId)> = self
+            .editor
+            .documents
+            .iter()
+            .filter_map(|doc| doc.buffer.path.clone().map(|p| (p, doc.buffer.language)))
+            .collect();
         self.editor.close_all();
+        for (path, language) in closed {
+            self.notify_lsp_close(&path, language);
+        }
         self.pane_left = 0;
         self.pane_right = None;
         self.split = false;
@@ -2841,6 +2865,7 @@ impl App {
         }
         match filesystem::remove_path(path) {
             Ok(()) => {
+                let mut closed: Vec<(PathBuf, LanguageId)> = Vec::new();
                 let mut index = self.editor.documents.len();
                 while index > 0 {
                     index -= 1;
@@ -2850,8 +2875,16 @@ impl App {
                         .as_deref()
                         .is_some_and(|candidate| candidate.starts_with(path));
                     if matches {
+                        if let Some(doc) = self.editor.documents.get(index)
+                            && let Some(closed_path) = doc.buffer.path.clone()
+                        {
+                            closed.push((closed_path, doc.buffer.language));
+                        }
                         self.editor.close(index);
                     }
+                }
+                for (closed_path, language) in closed {
+                    self.notify_lsp_close(&closed_path, language);
                 }
                 self.clamp_panes();
                 self.recent_files
@@ -2974,6 +3007,10 @@ impl App {
                 };
                 if changed {
                     self.maybe_start_lsp(language);
+                    // If a server for this language is already ready, attach the
+                    // newly detected document to it. Handshake-time `lsp_ready`
+                    // only covers the files open at that instant.
+                    self.sync_document_to_lsp(&path, language);
                 }
                 changed
             }
@@ -3931,6 +3968,15 @@ impl App {
         if let Some(job) = self.lsp.get_mut(&language) {
             job.server = None;
             job.started_at = None;
+            // A server that served for a good while earns a fresh budget; one
+            // that crashes immediately after connecting keeps counting down.
+            let stable = job
+                .ready_at
+                .take()
+                .is_some_and(|ready| ready.elapsed() >= LSP_STABLE_UPTIME);
+            if stable {
+                job.restarts = 0;
+            }
             job.failed = Some(message.clone());
         }
         // Fall back to the built-in providers for every document.
@@ -3947,9 +3993,11 @@ impl App {
     /// The handshake finished: open every matching document on the server.
     fn lsp_ready(&mut self, language: LanguageId) {
         if let Some(job) = self.lsp.get_mut(&language) {
-            // A healthy connection earns a fresh restart budget for later.
-            job.restarts = 0;
+            // Do not reset the restart budget here: a server that initializes
+            // and then crashes must still exhaust its budget. A stable server
+            // earns a fresh budget when it eventually crashes (see `lsp_failed`).
             job.started_at = None;
+            job.ready_at = Some(Instant::now());
             job.failed = None;
         }
         let documents: Vec<(PathBuf, String)> = self
@@ -3972,6 +4020,36 @@ impl App {
             for (path, text) in documents {
                 server.did_open(&path, &text);
             }
+        }
+    }
+
+    /// Open a freshly detected document on its language's ready server.
+    fn sync_document_to_lsp(&mut self, path: &Path, language: LanguageId) {
+        let text = match self.editor.documents.iter().find(|doc| {
+            same_file(doc.buffer.path.as_deref(), path) && doc.buffer.language == language
+        }) {
+            Some(doc) => doc.buffer.text(),
+            None => return,
+        };
+        if let Some(server) = self
+            .lsp
+            .get_mut(&language)
+            .and_then(|job| job.server.as_mut())
+            && server.is_ready()
+            && !server.has_open_document(path)
+        {
+            server.did_open(path, &text);
+        }
+    }
+
+    /// Tell a language's server that a document was closed, if it had it open.
+    fn notify_lsp_close(&mut self, path: &Path, language: LanguageId) {
+        if let Some(server) = self
+            .lsp
+            .get_mut(&language)
+            .and_then(|job| job.server.as_mut())
+        {
+            server.did_close(path);
         }
     }
 
@@ -7214,6 +7292,30 @@ mod tests {
     }
 
     #[test]
+    fn a_successful_handshake_does_not_forgive_an_earlier_crash() {
+        let dir = temp_project("restart-budget-reset");
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+        app.lsp.clear();
+        app.lsp.insert(
+            LanguageId::Rust,
+            LspJob {
+                restarts: 1,
+                ..LspJob::default()
+            },
+        );
+
+        // Connecting must not reset the budget on its own.
+        app.lsp_ready(LanguageId::Rust);
+        assert_eq!(
+            app.lsp.get(&LanguageId::Rust).unwrap().restarts,
+            1,
+            "a fresh handshake must not grant a fresh restart budget"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn restart_server_reports_for_unsupported_files() {
         let dir = temp_project("restart-server");
         let file = dir.join("notes.txt");
@@ -7290,6 +7392,94 @@ cat >/dev/null
         assert_eq!(
             app.editor.active_document().unwrap().diagnostics()[0].message,
             "boom"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn documents_opened_after_ready_are_synced_to_the_server() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Mock server: answer `initialize`, append every `didOpen` URI to the
+        // log file named by the first argument, and stay alive.
+        const MOCK: &str = r#"#!/bin/sh
+log="$1"
+while read -r header; do
+  header=$(printf '%s' "$header" | tr -d '\r')
+  case "$header" in
+    Content-Length:*) len=${header#Content-Length: } ;;
+    *) continue ;;
+  esac
+  read -r blank
+  body=$(dd bs=1 count="$len" 2>/dev/null)
+  id=$(printf '%s' "$body" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  method=$(printf '%s' "$body" | sed -n 's/.*"method":"\([^"]*\)".*/\1/p')
+  if [ "$method" = "textDocument/didOpen" ]; then
+    uri=$(printf '%s' "$body" | sed -n 's/.*"uri":"\([^"]*\)".*/\1/p')
+    printf '%s\n' "$uri" >> "$log"
+  fi
+  [ -z "$id" ] && continue
+  case "$method" in
+    initialize) result='{"capabilities":{}}' ;;
+    *) result='null' ;;
+  esac
+  resp=$(printf '{"jsonrpc":"2.0","id":%s,"result":%s}' "$id" "$result")
+  printf 'Content-Length: %s\r\n\r\n%s' "${#resp}" "$resp"
+done
+"#;
+
+        let dir = temp_project("lsp-late-open");
+        let first = dir.join("src/main.rs");
+        let second = dir.join("src/other.rs");
+        fs::write(&second, "pub fn other() {}\n").unwrap();
+        let log = dir.join("opens.log");
+        let script = dir.join("mock-lsp.sh");
+        {
+            let mut handle = fs::File::create(&script).unwrap();
+            handle.write_all(MOCK.as_bytes()).unwrap();
+        }
+        let mut perms = fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).unwrap();
+
+        let mut app = app_with_file(&first);
+        // Drop any scheduled auto-start so only our mock runs.
+        app.lsp.clear();
+        app.start_lsp(
+            LanguageId::Rust,
+            script.to_str().unwrap(),
+            &[log.to_str().unwrap()],
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && !app
+                .lsp
+                .get(&LanguageId::Rust)
+                .and_then(|job| job.server.as_ref())
+                .is_some_and(|server| server.is_ready())
+        {
+            app.poll_lsp();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        // Opening a second file after the handshake must attach it too.
+        app.open_path(second.clone());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut synced = false;
+        while Instant::now() < deadline && !synced {
+            app.apply_background_events();
+            app.poll_lsp();
+            synced = fs::read_to_string(&log)
+                .map(|log| log.contains("other.rs"))
+                .unwrap_or(false);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        assert!(
+            synced,
+            "a document opened after ready must be sent to the server"
         );
         fs::remove_dir_all(&dir).ok();
     }

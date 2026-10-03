@@ -197,12 +197,21 @@ impl Server {
             .name("koda-lsp-reader".to_string())
             .spawn(move || {
                 let mut reader = BufReader::new(stdout);
-                while let Ok(Some(value)) = jsonrpc::read_message(&mut reader) {
-                    let Some(message) = jsonrpc::decode(value) else {
-                        continue;
-                    };
-                    if tx.send(message).is_err() {
-                        break;
+                loop {
+                    match jsonrpc::read_message(&mut reader) {
+                        Ok(Some(value)) => {
+                            let Some(message) = jsonrpc::decode(value) else {
+                                continue;
+                            };
+                            if tx.send(message).is_err() {
+                                break;
+                            }
+                        }
+                        // A message whose *body* was not valid JSON has already
+                        // been consumed, so we are still framed correctly and can
+                        // keep serving. Framing/I/O errors are fatal.
+                        Err(err) if err.kind() == io::ErrorKind::Other => continue,
+                        Ok(None) | Err(_) => break,
                     }
                 }
             })?;

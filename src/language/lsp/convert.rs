@@ -104,13 +104,8 @@ fn parse_command(value: &Value) -> Option<CommandRef> {
 pub fn workspace_edit(value: &Value) -> Vec<FileEdit> {
     let mut files = Vec::new();
 
-    if let Some(changes) = value.get("changes").and_then(Value::as_object) {
-        for (uri, edits) in changes {
-            if let Some(file) = file_edit(uri, edits) {
-                files.push(file);
-            }
-        }
-    } else if let Some(changes) = value.get("documentChanges").and_then(Value::as_array) {
+    // `documentChanges` supersedes `changes` when both are present (LSP 3.16).
+    if let Some(changes) = value.get("documentChanges").and_then(Value::as_array) {
         for change in changes {
             // Skip create/rename/delete operations; we only apply edits.
             let Some(uri) = change.pointer("/textDocument/uri").and_then(Value::as_str) else {
@@ -118,6 +113,12 @@ pub fn workspace_edit(value: &Value) -> Vec<FileEdit> {
             };
             let edits = change.get("edits").cloned().unwrap_or(Value::Null);
             if let Some(file) = file_edit(uri, &edits) {
+                files.push(file);
+            }
+        }
+    } else if let Some(changes) = value.get("changes").and_then(Value::as_object) {
+        for (uri, edits) in changes {
+            if let Some(file) = file_edit(uri, edits) {
                 files.push(file);
             }
         }
@@ -563,6 +564,25 @@ mod tests {
         let files = workspace_edit(&document_changes);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, PathBuf::from("/tmp/b.rs"));
+    }
+
+    #[test]
+    fn prefers_document_changes_when_both_are_present() {
+        let value = json!({
+            "changes": {
+                "file:///tmp/stale.rs": [
+                    { "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 1 } }, "newText": "stale" }
+                ]
+            },
+            "documentChanges": [
+                { "textDocument": { "uri": "file:///tmp/fresh.rs" },
+                  "edits": [ { "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 1 } }, "newText": "fresh" } ] }
+            ]
+        });
+        let files = workspace_edit(&value);
+        assert_eq!(files.len(), 1, "documentChanges supersedes changes");
+        assert_eq!(files[0].path, PathBuf::from("/tmp/fresh.rs"));
+        assert_eq!(files[0].edits[0].new_text, "fresh");
     }
 
     #[test]
