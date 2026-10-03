@@ -118,8 +118,10 @@ The complexity lives inside Koda:
 ```
 
 Missing something? Koda notices when a Rust, Go, Python, TypeScript,
-JavaScript or Shell file is open without its language server and offers to
-install it, once, without blocking startup.
+JavaScript, C, C++ or Shell file is open without its language server and offers
+to install it, once, without blocking startup. Some servers have no portable,
+user-local installer — `clangd` ships with the C/C++ toolchain — so Koda uses
+them when present and says so plainly when they are not.
 **Language Setup…** in the command palette then lists every tool Koda knows
 about and installs a missing one with a single `Enter` — through the official
 channel, so provenance and integrity stay with the package manager:
@@ -131,6 +133,7 @@ channel, so provenance and integrity stay with the package manager:
 | `pylsp` | Python language server | a Koda-managed virtualenv (or `pipx`/`uv`/`pip --user`) |
 | `bash-language-server` | Shell language server | `npm`, with a prefix Koda manages |
 | `typescript-language-server` | TypeScript & JavaScript language server | `npm`, with a prefix Koda manages |
+| `clangd` | C/C++ language server | detected if installed (ships with the C/C++ toolchain) |
 | `rustfmt` | Rust formatting | `rustup component add rustfmt` |
 | `gofmt` | Go formatting | ships with the Go toolchain |
 
@@ -158,6 +161,8 @@ two Koda instances cannot corrupt the same managed prefix.
 | **Python** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **TypeScript** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **JavaScript** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
+| **C** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
+| **C++** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **Shell** | built-in | LSP | built-in (functions) | built-in | built-in | built-in | — |
 | **Markdown** | built-in | — | built-in (headings) | — | — | — | — |
 | **JSON** | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — |
@@ -167,12 +172,12 @@ two Koda instances cannot corrupt the same managed prefix.
 Prose and configuration files are first-class too. Markdown, JSON, TOML and YAML
 get syntax highlighting, structural diagnostics where they make sense, and a
 symbol outline, all offline and with no setup. **Python**, **Shell**,
-**TypeScript** and **JavaScript** work offline through Koda's built-in
-intelligence (highlighting, diagnostics where available, symbols, completion,
-hover, navigation) and gain richer server-backed features when Koda installs
-`pylsp`, `bash-language-server` or `typescript-language-server`. Adding a
-language means implementing one trait and registering it — no changes to the
-editor or the UI.
+**TypeScript**, **JavaScript**, **C** and **C++** work offline through Koda's
+built-in intelligence (highlighting, diagnostics where available, symbols,
+completion, hover, navigation) and gain richer server-backed features when Koda
+installs `pylsp`, `bash-language-server` or `typescript-language-server`, or
+finds `clangd`. Adding a language means implementing one trait and registering
+it — no changes to the editor or the UI.
 
 ## ❯ Editing & workflow
 
@@ -416,6 +421,7 @@ src/
 │   ├── python/     # Python provider (built-in, offline)
 │   ├── shell/      # Shell provider (bash/zsh/sh)
 │   ├── web/        # TypeScript/JavaScript provider
+│   ├── c/          # C/C++ provider
 │   ├── markdown/   # Markdown provider (headings as symbols)
 │   └── json|toml|yaml/  # configuration-data providers
 ├── project/      # workspace, project detection, file tree, templates

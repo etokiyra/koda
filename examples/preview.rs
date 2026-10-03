@@ -18,6 +18,16 @@ fn file_app(path: &std::path::Path) -> App {
     let mut app = App::new(Some(path)).expect("app");
     app.open_path(path.to_path_buf());
     app.pump_background(std::time::Duration::from_millis(300));
+    // Detection runs behind git/tool probes; wait for it to settle.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while app
+        .editor
+        .active_document()
+        .is_some_and(|doc| doc.buffer.language == koda::language::LanguageId::Unknown)
+        && std::time::Instant::now() < deadline
+    {
+        app.pump_background(std::time::Duration::from_millis(20));
+    }
     app
 }
 
@@ -48,6 +58,15 @@ fn main() {
                 _ => koda::ui::art::WelcomeScene::Starry,
             };
             app
+        }
+        "cfile" => {
+            let path = std::env::temp_dir().join("koda-preview.c");
+            std::fs::write(
+                &path,
+                "#include <stdio.h>\n\nstruct Point { int x; int y; };\n\nint add(int a, int b) {\n    // sum the pair\n    return a + b;\n}\n\nint main(void) {\n    printf(\"%d\\n\", add(1, 2));\n    return 0;\n}\n",
+            )
+            .unwrap();
+            file_app(&path)
         }
         "file" => file_app(&root.join("src/main.rs")),
         "palette" => {

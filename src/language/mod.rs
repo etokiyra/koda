@@ -9,6 +9,7 @@
 //! [`LanguageService`] wires the two together for convenient use by the app, but
 //! neither half depends on the other.
 
+pub mod c;
 pub mod completion;
 pub mod data;
 pub mod detection;

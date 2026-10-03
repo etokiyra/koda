@@ -144,6 +144,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Language support
 
+- Added **C** and **C++** support. One built-in, offline scanner serves both:
+  highlighting for preprocessor lines, line and block comments, strings and
+  character literals, numbers, keywords, types and standard-library functions;
+  structural diagnostics; symbols (functions, structs, classes, enums, unions,
+  typedefs and `#define` constants); completion, hover and within-file
+  navigation. Detection understands `.c`/`.h` and `.cc`/`.cpp`/`.cxx`/`.hpp`
+  and friends. `clangd` is used when it is already on the system (it ships with
+  most C/C++ toolchains); there is no portable user-local installer, so Koda
+  reports it as missing rather than pretending to install it.
 - Added **TypeScript** and **JavaScript** support. Both share one built-in,
   offline scanner: highlighting for comments, block comments (carried across
   lines), strings, template literals, numbers, keywords, types and decorators;

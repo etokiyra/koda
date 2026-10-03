@@ -66,6 +66,8 @@ pub fn lsp_language_id(language: LanguageId) -> &'static str {
         LanguageId::Yaml => "yaml",
         LanguageId::TypeScript => "typescript",
         LanguageId::JavaScript => "javascript",
+        LanguageId::C => "c",
+        LanguageId::Cpp => "cpp",
         _ => "plaintext",
     }
 }

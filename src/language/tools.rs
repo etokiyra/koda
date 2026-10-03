@@ -28,6 +28,7 @@ pub enum Tool {
     Pylsp,
     BashLs,
     TypeScriptLs,
+    Clangd,
     Rustfmt,
     Gofmt,
 }
@@ -47,6 +48,7 @@ impl Tool {
         Tool::Pylsp,
         Tool::BashLs,
         Tool::TypeScriptLs,
+        Tool::Clangd,
         Tool::Rustfmt,
         Tool::Gofmt,
     ];
@@ -58,6 +60,7 @@ impl Tool {
             Tool::Pylsp => "pylsp",
             Tool::BashLs => "bash-language-server",
             Tool::TypeScriptLs => "typescript-language-server",
+            Tool::Clangd => "clangd",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
         }
@@ -70,6 +73,7 @@ impl Tool {
             Tool::Pylsp => "pylsp",
             Tool::BashLs => "bash-language-server",
             Tool::TypeScriptLs => "typescript-language-server",
+            Tool::Clangd => "clangd",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
         }
@@ -82,21 +86,26 @@ impl Tool {
             Tool::Pylsp => LanguageId::Python,
             Tool::BashLs => LanguageId::Shell,
             Tool::TypeScriptLs => LanguageId::TypeScript,
+            Tool::Clangd => LanguageId::C,
         }
     }
 
     /// Whether this tool serves `language`. The TypeScript server also handles
-    /// JavaScript.
+    /// JavaScript; clangd serves both C and C++.
     pub fn serves(self, language: LanguageId) -> bool {
         self.language() == language
             || (self == Tool::TypeScriptLs && language == LanguageId::JavaScript)
+            || (self == Tool::Clangd && language == LanguageId::Cpp)
     }
 
     pub fn purpose(self) -> ToolPurpose {
         match self {
-            Tool::RustAnalyzer | Tool::Gopls | Tool::Pylsp | Tool::BashLs | Tool::TypeScriptLs => {
-                ToolPurpose::LanguageServer
-            }
+            Tool::RustAnalyzer
+            | Tool::Gopls
+            | Tool::Pylsp
+            | Tool::BashLs
+            | Tool::TypeScriptLs
+            | Tool::Clangd => ToolPurpose::LanguageServer,
             Tool::Rustfmt | Tool::Gofmt => ToolPurpose::Formatter,
         }
     }
@@ -109,7 +118,8 @@ impl Tool {
             | Tool::Rustfmt
             | Tool::Pylsp
             | Tool::BashLs
-            | Tool::TypeScriptLs => &["--version"],
+            | Tool::TypeScriptLs
+            | Tool::Clangd => &["--version"],
             Tool::Gopls => &["version"],
             Tool::Gofmt => &[],
         }
@@ -134,6 +144,9 @@ impl Tool {
             Tool::Pylsp => "install `python-lsp-server` into a Koda-managed environment",
             Tool::BashLs => "install with `npm` — Koda uses a user-local prefix",
             Tool::TypeScriptLs => "install with `npm` — Koda uses a user-local prefix",
+            Tool::Clangd => {
+                "install clangd with your system package manager (it ships with most C/C++ toolchains)"
+            }
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
         }
@@ -163,6 +176,9 @@ impl Tool {
                 "npm",
                 &["install", "-g", "typescript-language-server", "typescript"],
             )),
+            // `clangd` has no portable user-local installer; it ships with the
+            // C/C++ toolchain and is used when it is already present.
+            Tool::Clangd => None,
             Tool::Gofmt => None,
         }
     }
@@ -175,6 +191,7 @@ impl Tool {
             Tool::Gopls | Tool::Gofmt => &["go"],
             Tool::Pylsp => &["python3"],
             Tool::BashLs | Tool::TypeScriptLs => &["npm"],
+            Tool::Clangd => &[],
         }
     }
 
@@ -206,6 +223,9 @@ impl Tool {
             Tool::Pylsp => python_attempts(),
             Tool::BashLs => npm_attempts(&["bash-language-server"]),
             Tool::TypeScriptLs => npm_attempts(&["typescript-language-server", "typescript"]),
+            // `clangd` ships with the C/C++ toolchain; there is no user-local
+            // installer to run, so Koda uses it when it is already present.
+            Tool::Clangd => Vec::new(),
             // `gofmt` ships with the Go toolchain; there is nothing to install.
             Tool::Gofmt => Vec::new(),
         }
@@ -748,6 +768,7 @@ mod tests {
                     | LanguageId::Python
                     | LanguageId::Shell
                     | LanguageId::TypeScript
+                    | LanguageId::C
             ));
         }
     }
@@ -787,6 +808,24 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clangd_serves_c_and_cpp_without_provisioning() {
+        assert!(Tool::Clangd.serves(LanguageId::C));
+        assert!(Tool::Clangd.serves(LanguageId::Cpp));
+        assert_eq!(
+            Tool::for_language(LanguageId::Cpp, ToolPurpose::LanguageServer),
+            Some(Tool::Clangd)
+        );
+        assert!(
+            Tool::Clangd.install_attempts().is_empty(),
+            "clangd has no user-local installer"
+        );
+        assert!(
+            !can_install(Tool::Clangd),
+            "Koda must not promise a clangd install"
+        );
     }
 
     #[test]

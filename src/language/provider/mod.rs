@@ -220,6 +220,8 @@ impl ProviderRegistry {
         registry.register(Box::new(crate::language::yaml::YamlProvider));
         registry.register(Box::new(crate::language::web::WebProvider::typescript()));
         registry.register(Box::new(crate::language::web::WebProvider::javascript()));
+        registry.register(Box::new(crate::language::c::CProvider::c()));
+        registry.register(Box::new(crate::language::c::CProvider::cpp()));
         registry
     }
 

@@ -27,6 +27,10 @@ pub enum LanguageId {
     TypeScript,
     /// JavaScript source (and `.jsx`), including ES modules.
     JavaScript,
+    /// C source and headers.
+    C,
+    /// C++ source and headers.
+    Cpp,
     /// Used when detection could not reach a confident answer.
     #[default]
     Unknown,
@@ -34,7 +38,7 @@ pub enum LanguageId {
 
 impl LanguageId {
     /// Every language Koda understands today. Keep this in sync with [`crate::language::provider`].
-    pub const ALL: [LanguageId; 10] = [
+    pub const ALL: [LanguageId; 12] = [
         LanguageId::Rust,
         LanguageId::Go,
         LanguageId::Python,
@@ -45,6 +49,8 @@ impl LanguageId {
         LanguageId::Yaml,
         LanguageId::TypeScript,
         LanguageId::JavaScript,
+        LanguageId::C,
+        LanguageId::Cpp,
     ];
 
     /// A human readable display name.
@@ -60,6 +66,8 @@ impl LanguageId {
             LanguageId::Yaml => "YAML",
             LanguageId::TypeScript => "TypeScript",
             LanguageId::JavaScript => "JavaScript",
+            LanguageId::C => "C",
+            LanguageId::Cpp => "C++",
             LanguageId::Unknown => "Plain Text",
         }
     }
@@ -77,6 +85,8 @@ impl LanguageId {
             LanguageId::Yaml => "yaml",
             LanguageId::TypeScript => "typescript",
             LanguageId::JavaScript => "javascript",
+            LanguageId::C => "c",
+            LanguageId::Cpp => "cpp",
             LanguageId::Unknown => "text",
         }
     }

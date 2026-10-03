@@ -24,6 +24,7 @@ Go   → solid
 Python → built-in, offline
 Shell  → built-in, offline
 TypeScript / JavaScript → built-in, offline
+C / C++ → built-in, offline (clangd when present)
 then expand
 ```
 
@@ -178,6 +179,10 @@ command palette already reports which are available. Filling them in is additive
       highlighting (including block comments and template literals), structural
       diagnostics, symbols, completion, hover and navigation, with
       `typescript-language-server` provisioned for rename and code actions.
+- [x] C and C++ support: preprocessor/comment/string highlighting, structural
+      diagnostics, symbols (functions, structs, classes, enums, unions,
+      typedefs, `#define`) and offline completion/hover/navigation, with
+      `clangd` used when the toolchain provides it.
 - [x] `.gitignore`-aware file tree and quick open. A dependency-free matcher
       reads root and nested `.gitignore` files plus `.git/info/exclude`, and
       hides ignored paths from the tree, quick open, the inline filter and
