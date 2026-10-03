@@ -95,7 +95,8 @@ Implemented:
   hints for the rest.
 - An asynchronous **language-server client**: when `rust-analyzer` or `gopls` is
   installed Koda starts it for the workspace and shows its diagnostics, falling
-  back to the built-in providers when no server is available.
+  back to the built-in providers when no server is available. Completion, hover,
+  go-to-definition and references use the server when attached.
 - **Session persistence**: open files, cursors and expanded directories are
   restored per project on the next launch.
 - External-change detection: clean files reload when they change on disk, and

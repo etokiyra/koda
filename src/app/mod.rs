@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::DefaultTerminal;
+use serde_json::Value;
 
 use crate::background::{Background, Event as BackgroundEvent};
 use crate::commands::{Command, CommandRegistry, ids};
@@ -21,7 +22,7 @@ use crate::language::completion::{Completion, CompletionKind};
 use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::format;
 use crate::language::format::FormatOutcome;
-use crate::language::lsp::{Server, ServerEvent};
+use crate::language::lsp::{RequestKind, Server, ServerEvent, convert};
 use crate::language::symbols::is_ident_char as is_word_char;
 use crate::language::tools::{Tool, ToolPurpose, ToolRegistry};
 use crate::language::{Capability, LanguageId, LanguageService, WorkspaceSymbol};
@@ -828,11 +829,22 @@ impl App {
         }
 
         let state = CompletionState::new(pool, self.completion_prefix());
-        if state.items.is_empty() {
+        let lsp_available = self.lsp_target().is_some();
+        if state.items.is_empty() && !lsp_available {
             self.set_status("No completions");
             return;
         }
         self.completion = Some(state);
+        self.request_lsp_completion();
+    }
+
+    /// Ask the language server for completions at the cursor.
+    fn request_lsp_completion(&mut self) {
+        if let Some((path, row, col)) = self.lsp_target()
+            && let Some(server) = self.lsp.as_mut()
+        {
+            server.completion(&path, row, col);
+        }
     }
 
     /// Show information about the symbol under the cursor.
@@ -841,20 +853,27 @@ impl App {
             Some(doc) => (doc.buffer.language, doc.buffer.text(), doc.clamped_cursor()),
             None => return,
         };
-        let Some(hover) = self
+        let local = self
             .language
             .provider(language)
-            .hover(&text, cursor.row, cursor.col)
-        else {
-            self.set_status("No symbol under the cursor");
-            return;
-        };
+            .hover(&text, cursor.row, cursor.col);
         self.completion = None;
-        self.hover = Some(HoverState {
+        self.hover = local.map(|hover| HoverState {
             title: hover.title,
             kind: hover.kind,
             body: hover.body,
         });
+
+        // Ask the language server for a richer answer when one is attached.
+        if let Some((path, row, col)) = self.lsp_target() {
+            if let Some(server) = self.lsp.as_mut() {
+                server.hover(&path, row, col);
+            }
+            return;
+        }
+        if self.hover.is_none() {
+            self.set_status("No symbol under the cursor");
+        }
     }
 
     /// The identifier characters immediately before the cursor.
@@ -1727,6 +1746,9 @@ impl App {
                 ServerEvent::Diagnostics { path, diagnostics } => {
                     self.apply_lsp_diagnostics(&path, diagnostics);
                 }
+                ServerEvent::Response { kind, result } => {
+                    self.handle_lsp_response(kind, result);
+                }
                 ServerEvent::Failed(message) => {
                     self.lsp = None;
                     self.lsp_status = LspStatus::Failed(message);
@@ -1775,6 +1797,98 @@ impl App {
         {
             doc.set_lsp_diagnostics(diagnostics);
         }
+    }
+
+    /// The active document's `(path, line, col)` when a ready server owns it.
+    fn lsp_target(&self) -> Option<(PathBuf, usize, usize)> {
+        let server = self.lsp.as_ref()?;
+        if !server.is_ready() {
+            return None;
+        }
+        let doc = self.editor.active_document()?;
+        let path = doc.buffer.path.clone()?;
+        if !server.has_open_document(&path) {
+            return None;
+        }
+        let cursor = doc.clamped_cursor();
+        Some((path, cursor.row, cursor.col))
+    }
+
+    /// Apply a language-server feature response.
+    fn handle_lsp_response(&mut self, kind: RequestKind, result: Result<Value, String>) {
+        let value = match result {
+            Ok(value) => value,
+            Err(message) => {
+                self.set_error(format!("Language server: {message}"));
+                return;
+            }
+        };
+        match kind {
+            RequestKind::Completion => {
+                let items = convert::completions(&value);
+                if let Some(state) = self.completion.as_mut() {
+                    state.extend(items);
+                }
+            }
+            RequestKind::Hover => match convert::hover(&value) {
+                Some(hover) => {
+                    self.hover = Some(HoverState {
+                        title: hover.title,
+                        kind: hover.kind,
+                        body: hover.body,
+                    });
+                }
+                None if self.hover.is_none() => {
+                    self.set_status("No information available");
+                }
+                None => {}
+            },
+            RequestKind::Definition => {
+                let locations = convert::locations(&value);
+                match locations.into_iter().next() {
+                    Some(location) => {
+                        self.reveal(location.path, Position::new(location.line, location.col));
+                    }
+                    None => self.set_status("No definition found"),
+                }
+            }
+            RequestKind::References => {
+                let locations = convert::locations(&value);
+                if locations.is_empty() {
+                    self.set_status("No references found");
+                } else {
+                    self.open_location_picker("References", locations);
+                }
+            }
+        }
+    }
+
+    /// Offer a picker of jump targets.
+    fn open_location_picker(&mut self, title: &str, locations: Vec<convert::Location>) {
+        let root = self.workspace.root().to_path_buf();
+        let items = locations
+            .into_iter()
+            .map(|location| {
+                let relative = location
+                    .path
+                    .strip_prefix(&root)
+                    .unwrap_or(&location.path)
+                    .display()
+                    .to_string();
+                let detail = format!("{}:{}", location.line + 1, location.col + 1);
+                PickerItem::new(
+                    relative,
+                    detail,
+                    PickerAction::Reveal {
+                        path: location.path,
+                        position: Position::new(location.line, location.col),
+                    },
+                )
+            })
+            .collect();
+        let mut picker = Picker::new(title, "Filter locations…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
     }
 
     /// Jump to the next (`direction > 0`) or previous diagnostic, wrapping.
@@ -1881,8 +1995,16 @@ impl App {
         });
     }
 
-    /// Jump to the definition of the word under the cursor (within this file).
+    /// Jump to the definition of the word under the cursor.
     fn goto_definition(&mut self) {
+        if let Some((path, row, col)) = self.lsp_target() {
+            if let Some(server) = self.lsp.as_mut() {
+                server.definition(&path, row, col);
+            }
+            self.set_status("Resolving definition…");
+            return;
+        }
+
         let (path, language, file, text, cursor) = match self.editor.active_document() {
             Some(doc) => (
                 doc.buffer.path.clone(),
@@ -1914,8 +2036,16 @@ impl App {
         ));
     }
 
-    /// List every occurrence of the word under the cursor in this file.
+    /// List every occurrence of the word under the cursor.
     fn find_references(&mut self) {
+        if let Some((path, row, col)) = self.lsp_target() {
+            if let Some(server) = self.lsp.as_mut() {
+                server.references(&path, row, col);
+            }
+            self.set_status("Finding references…");
+            return;
+        }
+
         let (path, language, file, text, cursor) = match self.editor.active_document() {
             Some(doc) => (
                 doc.buffer.path.clone(),
@@ -3080,6 +3210,126 @@ cat >/dev/null
             app.editor.active_document().unwrap().diagnostics()[0].message,
             "boom"
         );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn language_server_answers_hover_completion_and_definition() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        // A mock server that answers each feature request by method.
+        const MOCK: &str = r#"#!/bin/sh
+target="$1"
+while read -r header; do
+  header=$(printf '%s' "$header" | tr -d '\r')
+  case "$header" in
+    Content-Length:*) len=${header#Content-Length: } ;;
+    *) continue ;;
+  esac
+  read -r blank
+  body=$(dd bs=1 count="$len" 2>/dev/null)
+  id=$(printf '%s' "$body" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  method=$(printf '%s' "$body" | sed -n 's/.*"method":"\([^"]*\)".*/\1/p')
+  [ -z "$id" ] && continue
+  case "$method" in
+    initialize) result='{"capabilities":{}}' ;;
+    textDocument/hover) result='{"contents":{"kind":"plaintext","value":"LSP HOVER TEXT"}}' ;;
+    textDocument/completion) result='{"items":[{"label":"koda_lsp_item","kind":3}]}' ;;
+    textDocument/definition) result="[{\"uri\":\"file://$target\",\"range\":{\"start\":{\"line\":2,\"character\":0},\"end\":{\"line\":2,\"character\":5}}}]" ;;
+    textDocument/references) result="[{\"uri\":\"file://$target\",\"range\":{\"start\":{\"line\":1,\"character\":4},\"end\":{\"line\":1,\"character\":9}}}]" ;;
+    *) result='null' ;;
+  esac
+  resp=$(printf '{"jsonrpc":"2.0","id":%s,"result":%s}' "$id" "$result")
+  printf 'Content-Length: %s\r\n\r\n%s' "${#resp}" "$resp"
+done
+"#;
+
+        let dir = temp_project("lsp-features");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main() {\n    let value = 1;\n    value;\n}\n").unwrap();
+        let script = dir.join("mock-lsp.sh");
+        {
+            let mut handle = fs::File::create(&script).unwrap();
+            handle.write_all(MOCK.as_bytes()).unwrap();
+        }
+        let mut perms = fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).unwrap();
+
+        let mut app = App::new(Some(&file)).unwrap();
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .set_language(LanguageId::Rust);
+        app.start_lsp(
+            LanguageId::Rust,
+            script.to_str().unwrap(),
+            &[file.to_str().unwrap()],
+        );
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .move_to(Position::new(2, 4));
+
+        let wait = |app: &mut App, predicate: &dyn Fn(&App) -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                app.poll_lsp();
+                if predicate(app) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            false
+        };
+
+        assert!(
+            wait(&mut app, &|app| app
+                .lsp
+                .as_ref()
+                .is_some_and(|server| server.is_ready())),
+            "server should become ready"
+        );
+
+        // Hover.
+        app.open_hover();
+        assert!(
+            wait(&mut app, &|app| app
+                .hover
+                .as_ref()
+                .is_some_and(|hover| hover.title.contains("LSP HOVER"))),
+            "expected the server's hover"
+        );
+
+        // Completion.
+        app.hover = None;
+        app.open_completion();
+        assert!(
+            wait(&mut app, &|app| app.completion.as_ref().is_some_and(
+                |state| state.items.iter().any(|item| item.label == "koda_lsp_item")
+            )),
+            "expected the server's completion"
+        );
+
+        // Definition (same file, line 2 column 0).
+        app.completion = None;
+        app.goto_definition();
+        assert!(
+            wait(&mut app, &|app| app.editor.active_document().is_some_and(
+                |doc| doc.clamped_cursor() == Position::new(2, 0)
+            )),
+            "expected the server's definition to move the cursor"
+        );
+
+        // References (the server returns one location).
+        app.find_references();
+        assert!(
+            wait(&mut app, &|app| matches!(app.overlay, Overlay::Picker(_))),
+            "expected the references picker"
+        );
+
         fs::remove_dir_all(&dir).ok();
     }
 

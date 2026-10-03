@@ -10,6 +10,7 @@
 //! keeps using its built-in heuristic providers, so an offline machine still
 //! has syntax highlighting, structural diagnostics, symbols and formatting.
 
+pub mod convert;
 pub mod jsonrpc;
 
 use std::collections::HashMap;
@@ -35,6 +36,15 @@ pub fn lsp_language_id(language: LanguageId) -> &'static str {
     }
 }
 
+/// The Koda feature a server request belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequestKind {
+    Completion,
+    Hover,
+    Definition,
+    References,
+}
+
 /// Something the app consumes from a running server.
 #[derive(Clone, Debug)]
 pub enum ServerEvent {
@@ -45,6 +55,11 @@ pub enum ServerEvent {
     Diagnostics {
         path: PathBuf,
         diagnostics: Vec<Diagnostic>,
+    },
+    /// The answer to a [`RequestKind`] request.
+    Response {
+        kind: RequestKind,
+        result: Result<Value, String>,
     },
     /// The server could not start or exited unexpectedly.
     Failed(String),
@@ -60,6 +75,7 @@ pub struct Server {
     ready: bool,
     root: PathBuf,
     versions: HashMap<PathBuf, i64>,
+    pending: HashMap<i64, RequestKind>,
     language: LanguageId,
 }
 
@@ -112,6 +128,7 @@ impl Server {
             ready: false,
             root: root.to_path_buf(),
             versions: HashMap::new(),
+            pending: HashMap::new(),
             language,
         };
 
@@ -124,7 +141,11 @@ impl Server {
                 "capabilities": {
                     "textDocument": {
                         "synchronization": { "dynamicRegistration": false, "didSave": false },
-                        "publishDiagnostics": { "relatedInformation": false }
+                        "publishDiagnostics": { "relatedInformation": false },
+                        "completion": { "completionItem": { "snippetSupport": false } },
+                        "hover": { "contentFormat": ["markdown", "plaintext"] },
+                        "definition": {},
+                        "references": {}
                     },
                     "workspace": { "configuration": true }
                 },
@@ -190,13 +211,50 @@ impl Server {
         self.versions.contains_key(path)
     }
 
+    /// Ask the server to complete at a position.
+    pub fn completion(&mut self, path: &Path, line: usize, col: usize) {
+        let _ = self.send_request(
+            RequestKind::Completion,
+            "textDocument/completion",
+            position_params(path, line, col),
+        );
+    }
+
+    /// Ask the server for hover information at a position.
+    pub fn hover(&mut self, path: &Path, line: usize, col: usize) {
+        let _ = self.send_request(
+            RequestKind::Hover,
+            "textDocument/hover",
+            position_params(path, line, col),
+        );
+    }
+
+    /// Ask the server for the definition at a position.
+    pub fn definition(&mut self, path: &Path, line: usize, col: usize) {
+        let _ = self.send_request(
+            RequestKind::Definition,
+            "textDocument/definition",
+            position_params(path, line, col),
+        );
+    }
+
+    /// Ask the server for every reference to the symbol at a position.
+    pub fn references(&mut self, path: &Path, line: usize, col: usize) {
+        let mut params = position_params(path, line, col);
+        if let Some(object) = params.as_object_mut() {
+            object.insert("context".to_string(), json!({ "includeDeclaration": true }));
+        }
+        let _ = self.send_request(RequestKind::References, "textDocument/references", params);
+    }
+
     /// Drain pending events without blocking.
     pub fn poll(&mut self) -> Vec<ServerEvent> {
         let mut events = Vec::new();
         loop {
             match self.events.try_recv() {
                 Ok(Message::Response { id, result, error }) => {
-                    if Some(id.as_i64().unwrap_or(-1)) == self.init_id {
+                    let id_number = id.as_i64().unwrap_or(-1);
+                    if Some(id_number) == self.init_id {
                         self.init_id = None;
                         match error {
                             Some(error) => events.push(ServerEvent::Failed(error.message)),
@@ -207,6 +265,12 @@ impl Server {
                             }
                             None => {}
                         }
+                    } else if let Some(kind) = self.pending.remove(&id_number) {
+                        let result = match error {
+                            Some(error) => Err(error.message),
+                            None => Ok(result.unwrap_or(Value::Null)),
+                        };
+                        events.push(ServerEvent::Response { kind, result });
                     }
                 }
                 Ok(Message::Notification { method, params }) => {
@@ -238,6 +302,12 @@ impl Server {
             &mut self.stdin,
             &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
         )?;
+        Ok(id)
+    }
+
+    fn send_request(&mut self, kind: RequestKind, method: &str, params: Value) -> io::Result<i64> {
+        let id = self.request(method, params)?;
+        self.pending.insert(id, kind);
         Ok(id)
     }
 
@@ -317,6 +387,14 @@ fn text_pos(value: &Value) -> Option<TextPos> {
         value.get("line")?.as_u64()? as usize,
         value.get("character")?.as_u64()? as usize,
     ))
+}
+
+/// The `textDocument` + `position` parameters shared by most requests.
+fn position_params(path: &Path, line: usize, col: usize) -> Value {
+    json!({
+        "textDocument": { "uri": path_to_uri(path) },
+        "position": { "line": line, "character": col }
+    })
 }
 
 /// Encode a filesystem path as a `file://` URI, percent-encoding the bytes LSP
@@ -449,6 +527,7 @@ cat >/dev/null
                 match event {
                     ServerEvent::Ready => ready = true,
                     ServerEvent::Diagnostics { diagnostics: d, .. } => diagnostics = Some(d),
+                    ServerEvent::Response { .. } => {}
                     ServerEvent::Failed(_) => {}
                 }
             }

@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   providers. With no server installed Koda keeps its heuristics, so offline
   editing is unaffected. Completion, hover, navigation, rename and code actions
   over LSP come next.
+- Language-server **completion, hover, go-to-definition and references** now
+  flow through the connection. Completion merges the server's candidates with
+  the instant local ones; hover upgrades the built-in popup when the server
+  answers; definition and references jump across files. The UI is identical
+  whether an answer came from a server or a built-in provider.
 
 ### Fixed
 

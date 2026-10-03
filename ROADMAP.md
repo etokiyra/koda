@@ -87,9 +87,10 @@ The highest-value work. These turn Koda from an editor into an IDE.
       keeps documents in sync and shows server diagnostics through the existing
       diagnostics UI. It falls back to the built-in heuristics when no server is
       available. See the next section for the features still to run over LSP.
-- [ ] **LSP-backed completion, hover, go-to-definition, references, rename and
-      code actions.** The connection is in place; these features will reuse it
-      instead of the heuristics.
+- [x] **LSP-backed completion, hover, go-to-definition and references.** When a
+      server is attached these features come from it; the built-in providers
+      remain as fallbacks. Rename and code actions are next.
+- [ ] **Rename and code actions** over LSP.
 
 The abstraction is already in place: providers declare `Capability`s, and the
 command palette already reports which are available. Filling them in is additive.

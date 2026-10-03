@@ -284,6 +284,20 @@ impl CompletionState {
         }
     }
 
+    /// Merge additional candidates (e.g. from a language server) and re-filter.
+    pub fn extend(&mut self, items: Vec<Completion>) {
+        for item in items {
+            if !self
+                .pool
+                .iter()
+                .any(|existing| existing.label == item.label)
+            {
+                self.pool.push(item);
+            }
+        }
+        self.refilter();
+    }
+
     pub fn set_prefix(&mut self, prefix: String) {
         self.prefix = prefix;
         self.selected = 0;
