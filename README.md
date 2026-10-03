@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-442%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-489%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -145,6 +145,14 @@ channel, so provenance and integrity stay with the package manager:
 | `omnisharp` | C# language server | a managed .NET SDK + OmniSharp |
 | `phpactor` | PHP language server | detected if installed (`composer global require phpactor/phpactor`) |
 | `lua-language-server` | Lua language server | a self-contained download managed by Koda |
+| `kotlin-language-server` | Kotlin language server | a managed Adoptium JDK 21 + the pinned server release |
+| `sqls` | SQL language server | `go install github.com/sqls-server/sqls@latest` |
+| `solargraph` | Ruby language server | `gem install solargraph` |
+| `asm-lsp` | Assembly language server | `cargo install asm-lsp` |
+| `sourcekit-lsp` | Swift language server | detected if installed (ships with the Swift toolchain) |
+| `dart` analysis server | Dart/Flutter language server | detected if installed (ships with the Dart SDK) |
+| `elixir-ls` | Elixir language server | detected if installed (needs Erlang/Elixir) |
+| `perl-language-server` | Perl language server | detected if installed (`cpan Perl::LanguageServer`) |
 | `vscode-html-language-server` | HTML language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
 | `vscode-css-language-server` | CSS language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
 | `rustfmt` | Rust formatting | `rustup component add rustfmt` |
@@ -182,9 +190,17 @@ managed prefix.
 | **Java** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **C#** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **PHP** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
+| **Kotlin** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **HTML** | built-in | built-in + LSP | built-in (ids) | built-in | built-in | LSP | LSP |
 | **CSS** | built-in | built-in + LSP | built-in (selectors) | built-in | built-in | LSP | LSP |
 | **Lua** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
+| **Ruby** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
+| **SQL** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
+| **Perl** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
+| **Dart** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
+| **Elixir** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
+| **Swift** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
+| **Assembly** | built-in | — | built-in (labels) | built-in | built-in | built-in | — |
 | **Shell** | built-in | LSP | built-in (functions) | built-in | built-in | built-in | — |
 | **Markdown** | built-in | — | built-in (headings) | — | — | — | — |
 | **JSON** | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — |
@@ -194,12 +210,13 @@ managed prefix.
 Prose and configuration files are first-class too. Markdown, JSON, TOML and YAML
 get syntax highlighting, structural diagnostics where they make sense, and a
 symbol outline, all offline and with no setup. **Python**, **Shell**,
-**TypeScript**, **JavaScript**, **C**, **C++**, **Java**, **C#**, **HTML** and
-**CSS** work offline through Koda's built-in intelligence (highlighting,
-diagnostics where available, symbols, completion, hover, navigation) and gain
-richer server-backed features when Koda installs or finds a managed language
-server. Adding a language means implementing one trait and registering it — no
-changes to the editor or the UI.
+**TypeScript**, **JavaScript**, **C**, **C++**, **Java**, **C#**, **PHP**,
+**Kotlin**, **Lua**, **Ruby**, **SQL**, **Perl**, **Dart**, **Elixir**,
+**Swift**, **Assembly**, **HTML** and **CSS** work offline through Koda's
+built-in intelligence (highlighting, diagnostics where available, symbols,
+completion, hover, navigation) and gain richer server-backed features when Koda
+installs or finds a managed language server. Adding a language means implementing
+one trait and registering it — no changes to the editor or the UI.
 
 ## ❯ Editing & workflow
 
@@ -342,8 +359,9 @@ the home screen back.
 2. **Name it** — the name is validated for your platform and checked against
    the chosen folder so an existing project is never overwritten.
 3. **Pick a language** — Rust, Go, Python, TypeScript, JavaScript, Java, C#,
-   PHP, Lua, HTML, Shell, C or C++, each shown with what Koda will generate.
-   `Esc` steps back at any point.
+   PHP, Kotlin, Lua, Ruby, Elixir, Dart, Swift, Perl, SQL, Assembly, HTML,
+   Shell, C or C++, each shown with what Koda will generate. `Esc` steps back
+   at any point.
 
 Koda then scaffolds the project without a network connection or a toolchain and
 opens it, ready to edit:
@@ -359,6 +377,14 @@ opens it, ready to edit:
 | **C#** | a `*.csproj`, `Program.cs`, `.gitignore` |
 | **PHP** | `composer.json`, `index.php`, `.gitignore` |
 | **Lua** | `init.lua`, `.luarc.json`, `.gitignore` |
+| **Kotlin** | `settings.gradle.kts`, `build.gradle.kts`, `src/main/kotlin/Main.kt`, `.gitignore` |
+| **Ruby** | `Gemfile`, `lib/<name>.rb`, `.gitignore` |
+| **Elixir** | `mix.exs`, `lib/<name>.ex`, `.gitignore` |
+| **Dart** | `pubspec.yaml`, `bin/main.dart`, `.gitignore` |
+| **Swift** | `Package.swift`, `Sources/<name>/main.swift`, `.gitignore` |
+| **Perl** | an executable `<name>.pl` (plus a `README.md`) |
+| **SQL** | `schema.sql`, `README.md` |
+| **Assembly** | `main.asm`, `Makefile`, `.gitignore` |
 | **HTML** | `index.html` and `style.css` |
 | **Shell** | an executable `<name>.sh` (plus a `README.md`) |
 | **C** | `CMakeLists.txt`, `src/main.c`, `.gitignore` |
@@ -467,9 +493,17 @@ src/
 │   ├── java/       # Java provider (built-in, offline)
 │   ├── csharp/     # C# provider (built-in, offline)
 │   ├── php/        # PHP provider (built-in, offline)
+│   ├── kotlin/     # Kotlin provider (managed JDK 21 LSP)
+│   ├── lua/        # Lua provider (managed self-contained LSP)
+│   ├── sql/        # SQL provider (dialect-neutral)
+│   ├── ruby/       # Ruby provider
+│   ├── perl/       # Perl provider
+│   ├── asm/        # Assembly provider (x86/AArch64 baseline)
+│   ├── dart/       # Dart provider
+│   ├── elixir/     # Elixir provider
+│   ├── swift/      # Swift provider
 │   ├── html/       # HTML provider (tags, ids)
 │   ├── css/        # CSS provider (selectors, properties)
-│   ├── lua/        # Lua provider (built-in, offline)
 │   ├── markdown/   # Markdown provider (headings as symbols)
 │   └── json|toml|yaml/  # configuration-data providers
 ├── project/      # workspace, project detection, file tree, templates

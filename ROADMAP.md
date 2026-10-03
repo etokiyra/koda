@@ -29,6 +29,10 @@ Java → built-in, offline (managed Eclipse JDT)
 C# → built-in, offline (managed OmniSharp)
 PHP → built-in, offline (phpactor when present)
 Lua → built-in, offline (managed lua-language-server)
+Kotlin → built-in, offline (managed JDK 21 + kotlin-language-server)
+Ruby / SQL → built-in, offline (solargraph / sqls installed when possible)
+Perl / Dart / Elixir / Swift → built-in, offline (server discovered when present)
+Assembly → built-in, offline (asm-lsp installed when possible)
 HTML / CSS → built-in, offline (npm servers)
 then expand
 ```
@@ -231,6 +235,18 @@ command palette already reports which are available. Filling them in is additive
       functions and methods as symbols, offline completion/hover/navigation, and
       a fully managed, self-contained `lua-language-server` for the full LSP
       feature set with no runtime to install.
+- [x] Kotlin support: comments, regular/raw strings and templates, annotations,
+      keywords, modifiers and operators; structural diagnostics; classes,
+      interfaces, objects, functions, properties, type aliases and packages as
+      symbols; completion, hover and within-file navigation. The full LSP runs on
+      a dedicated, checksum-verified managed JDK 21 plus the pinned
+      `kotlin-language-server`, so no system Java or Gradle is required.
+- [x] Swift, Ruby, SQL, Assembly, Perl, Dart and Elixir: built-in highlighting,
+      structural diagnostics where meaningful, symbols, completion and within-file
+      navigation, plus detection, project markers and scaffolding. `solargraph`
+      (Ruby), `sqls` (SQL) and `asm-lsp` (Assembly) install automatically through
+      their own package managers; the Dart, Elixir, Swift and Perl servers are
+      discovered when their toolchain is present.
 - [x] HTML and CSS built-in support: tag/attribute and selector/property
       highlighting, tag- and brace-balance diagnostics, id/selector symbols,
       completion and hover, with `vscode-langservers-extracted` provisioned for
@@ -307,12 +323,16 @@ command palette already reports which are available. Filling them in is additive
 
 ## Known limitations
 
-- **Kotlin is deferred.** `kotlin-language-server` 1.3.x bundles a Kotlin
-  compiler whose `JavaVersion` parser rejects the four-part version string of
-  Koda's managed Eclipse Adoptium JDK 25 (`25.0.4.1`) and exits immediately. A
-  Kotlin provider therefore needs a *second*, pinned managed JDK (21 LTS) rather
-  than the one shared with `jdtls`; the investigation and download/launch shape
-  are otherwise identical to the Lua and Java managed servers.
+- **Kotlin runs on its own JDK 21.** `kotlin-language-server`'s bundled compiler
+  rejects the four-part version string of Koda's managed JDK 25, so Koda
+  provisions an isolated, checksum-verified JDK 21 under `tools/kotlin-jdk` and
+  launches the server with it; the JDK 25 used by `jdtls` is untouched. A live
+  test guards the JDK 21 + server + LSP handshake path.
+- **Some language servers are discovery-only.** The Dart, Elixir, Swift and Perl
+  servers need a toolchain Koda does not manage (the Dart SDK, Erlang/Elixir, the
+  Swift toolchain, a Perl with `Perl::LanguageServer`). Koda finds and launches
+  them when present and keeps built-in editing otherwise; it never promises an
+  install it cannot perform.
 - `.gitignore` discovery is capped (256 nested files, 4096 directories) so
   opening a huge monorepo stays predictable; a rule beyond the cap is not
   applied.

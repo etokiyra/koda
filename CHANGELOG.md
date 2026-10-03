@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Kotlin and seven more languages
+
+- **Kotlin.** A built-in, offline provider (comments, regular/raw strings,
+  templates, annotations, keywords, modifiers, numbers, operators; structural
+  diagnostics; classes, interfaces, objects, functions, properties, type aliases
+  and packages as symbols; completion, hover and within-file navigation).
+  Detection covers `.kt`/`.kts`; Gradle Kotlin-DSL markers
+  (`build.gradle.kts`, `settings.gradle.kts`) are their own project kind while
+  the Groovy DSL stays Java. Projects scaffold a Gradle Kotlin build.
+- **Kotlin is fully automatic.** `kotlin-language-server`'s bundled compiler
+  rejects the four-part version string of Koda's managed JDK 25, so Koda
+  provisions a **separate, checksum-verified Eclipse Adoptium JDK 21** under
+  `tools/kotlin-jdk` and launches the server with `JAVA_HOME` pointed at it,
+  leaving the JDK 25 used by `jdtls` untouched. The pinned server release is
+  downloaded, verified by launching it, and its `bin` directory is searched. A
+  live test proves the pair completes the LSP handshake.
+- **Seven more languages** — Swift, Ruby, SQL, Assembly, Perl, Dart and Elixir —
+  each with built-in highlighting, structural diagnostics where meaningful,
+  symbols, completion and within-file navigation, plus detection, project
+  markers and scaffolding. SQL state/table symbols, Ruby classes/modules/methods,
+  Assembly labels, Perl packages/subs, Dart classes/mixins/enums, Elixir
+  modules/defs and Swift types/functions are all recognised.
+- **Tooling for the new languages** follows the zero-configuration rule:
+  `sqls` installs through `go install`, `solargraph` through `gem install` and
+  `asm-lsp` through `cargo install` without user setup. Dart, Elixir, Swift and
+  Perl servers need a toolchain Koda does not manage, so they are discovered
+  when present and reported honestly rather than advertised as installable.
+- **Archive extraction fix.** `unzip` has no `--strip-components`, so a stripped
+  zip is now unpacked to a scratch directory and its single root moved up — the
+  Kotlin server previously landed under `server/`.
+
 ### Lua support
 
 - Added **Lua** as a built-in, offline language: `--` line comments,

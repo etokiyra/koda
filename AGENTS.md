@@ -58,6 +58,14 @@ src/
 │   ├── java/mod.rs       # Java provider
 │   ├── csharp/mod.rs     # C# provider
 │   ├── php/mod.rs        # PHP provider
+│   ├── kotlin/mod.rs     # Kotlin provider
+│   ├── sql/mod.rs        # SQL provider
+│   ├── ruby/mod.rs       # Ruby provider
+│   ├── perl/mod.rs       # Perl provider
+│   ├── asm/mod.rs        # Assembly provider
+│   ├── dart/mod.rs       # Dart provider
+│   ├── elixir/mod.rs     # Elixir provider
+│   ├── swift/mod.rs      # Swift provider
 │   ├── html/mod.rs       # HTML provider
 │   ├── css/mod.rs        # CSS provider
 │   ├── lua/mod.rs        # Lua provider
@@ -132,7 +140,7 @@ These are separate concerns and must stay separate:
   `LanguageDescriptor`s and combines signals into a `DetectionResult`
   (`language`, `confidence`, `reasons`). It never imports provider
   implementations.
-- **Providers** (`language/provider` + `language/{rust,go,python,shell,web,c,java,csharp,php,lua,html,css,markdown,json,toml,yaml}`)
+- **Providers** (`language/provider` + `language/{rust,go,python,shell,web,c,java,csharp,php,kotlin,sql,ruby,perl,asm,dart,elixir,swift,html,css,lua,markdown,json,toml,yaml}`)
   implement the `LanguageProvider` trait and *produce* those descriptors via
   `descriptor()`.
 
