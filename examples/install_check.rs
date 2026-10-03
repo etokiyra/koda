@@ -15,8 +15,12 @@ fn main() {
         Some("css") => koda::language::tools::Tool::CssLs,
         Some("lua") => koda::language::tools::Tool::LuaLs,
         Some("kotlin") => koda::language::tools::Tool::KotlinLs,
+        Some("sql") => koda::language::tools::Tool::Sqls,
+        Some("asm") => koda::language::tools::Tool::AsmLsp,
         other => {
-            eprintln!("usage: install_check <omnisharp|jdtls|html|css|lua|kotlin> (got {other:?})");
+            eprintln!(
+                "usage: install_check <omnisharp|jdtls|html|css|lua|kotlin|sql|asm> (got {other:?})"
+            );
             std::process::exit(2);
         }
     };

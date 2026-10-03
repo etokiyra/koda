@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accurate availability reason. Prettier and `shfmt` have trusted one-action
   installs (`npm`, `go install`); `clang-format` and `perltidy` ship with their
   toolchains.
+- **Assembly server probe fix.** `asm-lsp` rejects `--version`, so it is now
+  verified by starting its stdio server (like the HTML/CSS, Kotlin and SQL
+  servers). The SQL (`sqls`, via `go install`) and Assembly (`asm-lsp`, via
+  `cargo install`) install paths were live-verified end to end, including the
+  LSP handshake.
 - **Broader toolchain discovery.** Koda now also searches ElixirLS escripts
   (`~/.mix/escripts`), asdf shims, `local::lib` Perl, Swift toolchains
   (`~/.swiftly`, `/usr/local/swift/usr/bin`, `/usr/lib/swift/bin`), a

@@ -340,6 +340,7 @@ impl Tool {
                 | Tool::PerlLs
                 | Tool::ElixirLs
                 | Tool::SwiftLs
+                | Tool::AsmLsp
         )
     }
 
@@ -2587,7 +2588,7 @@ mod tests {
     fn html_and_css_are_probed_by_starting_their_server() {
         // Regression: the extracted VS Code servers reject `--version`, so a
         // version probe reported a successful install as missing.
-        for tool in [Tool::HtmlLs, Tool::CssLs] {
+        for tool in [Tool::HtmlLs, Tool::CssLs, Tool::KotlinLs, Tool::AsmLsp] {
             assert!(
                 tool.probe_as_server(),
                 "{tool:?} must be probed by launching its stdio server"
