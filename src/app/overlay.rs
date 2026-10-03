@@ -238,6 +238,10 @@ pub struct Search {
     pub field: SearchField,
     pub query: String,
     pub replacement: String,
+    /// Match case exactly rather than case-insensitively.
+    pub case_sensitive: bool,
+    /// Match whole words only.
+    pub whole_word: bool,
     pub matches: Vec<(Position, Position)>,
     pub current: Option<usize>,
 }
@@ -250,6 +254,8 @@ impl Default for Search {
             field: SearchField::Query,
             query: String::new(),
             replacement: String::new(),
+            case_sensitive: false,
+            whole_word: false,
             matches: Vec::new(),
             current: None,
         }

@@ -110,7 +110,9 @@ command palette already reports which are available. Filling them in is additive
 - [ ] Multiple cursors.
 - [ ] Indentation guides and a more complete tokenizer (strings, lifetimes,
       generics) for both providers.
-- [ ] Incremental search options (case sensitivity, whole word, regex).
+- [x] Case-sensitive and whole-word search options (`Alt+C` / `Alt+W`),
+      case-insensitive by default and shown in the find bar.
+- [ ] Regular-expression search.
 - [x] Undo grouping for consecutive typing.
 - [ ] Soft wrap and a configurable tab width.
 - [x] Persist cursor position, open tabs and expanded directories per project.
@@ -134,7 +136,8 @@ command palette already reports which are available. Filling them in is additive
 - [ ] File operations: create, rename, delete, move.
 - [x] Save all and external-change detection: clean files reload from disk and
       dirty files are preserved with a warning.
-- [ ] Revert the active file to its on-disk version.
+- [x] Revert the active file to its on-disk version (**Revert File** in the
+      palette).
 
 ---
 

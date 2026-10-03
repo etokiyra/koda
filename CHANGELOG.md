@@ -193,6 +193,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Editing & UX
 
+- Find is case-insensitive by default and gains two toggles while the find bar
+  is open: **Alt+C** for case sensitivity and **Alt+W** for whole-word matching.
+  The active options are shown in the bar.
+- Added **Revert File** to the command palette: it discards local edits and
+  reloads the active file from disk.
+
 - Undo grouping: consecutive typing, backspacing and forward-deletes coalesce
   into one undo step; moving the cursor breaks the group.
 - Auto-pairing for brackets and double quotes, with skip-over, empty-pair

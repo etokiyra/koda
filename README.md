@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-175%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-178%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -151,7 +151,8 @@ The editor is the heart of Koda, and it is built for real projects.
 - Grouped undo, auto-pairing, smart newline, selection-aware indent/outdent,
   line move/duplicate and matching-bracket highlighting.
 - Quick open (`Ctrl+P`), inline fuzzy file filtering in the sidebar (`/`),
-  find/replace and go-to-line.
+  find/replace with case and whole-word toggles, go-to-line, and **Revert File**
+  to discard local edits.
 - Project-wide symbol search, session persistence (open files, cursors and
   expanded folders come back next launch) and external-change detection.
 - A background worker keeps detection, diagnostics, formatting and git off the
@@ -223,6 +224,7 @@ establishes the language context automatically.
 | `Ctrl+Shift+P` | Command palette |
 | `F1` | Keyboard-shortcuts cheatsheet |
 | `Ctrl+F` / `Ctrl+H` | Find / replace |
+| `Alt+C` / `Alt+W` (in find) | Toggle case sensitivity / whole word |
 | `Ctrl+G` | Go to line |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |

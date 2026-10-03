@@ -730,6 +730,20 @@ impl App {
     fn handle_search_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        if alt {
+            match key.code {
+                KeyCode::Char(c) => match c.to_ascii_lowercase() {
+                    'c' => self.search.case_sensitive = !self.search.case_sensitive,
+                    'w' => self.search.whole_word = !self.search.whole_word,
+                    _ => return,
+                },
+                _ => return,
+            }
+            self.refresh_search_matches();
+            self.jump_to_first_from_cursor();
+            return;
+        }
         match key.code {
             KeyCode::Esc => self.search.close(),
             KeyCode::Enter => {
@@ -970,6 +984,7 @@ impl App {
             ids::QUICK_OPEN => self.open_quick_open(),
             ids::CLOSE_TAB => self.close_tab(),
             ids::CLOSE_ALL => self.close_all(),
+            ids::REVERT => self.revert_file(),
             ids::QUIT => self.request_quit(),
             ids::UNDO => self.with_doc(|d| d.undo()),
             ids::REDO => self.with_doc(|d| d.redo()),
@@ -1365,6 +1380,26 @@ impl App {
         self.editor.close_all();
         self.close_armed = None;
         self.set_status("All tabs closed");
+    }
+
+    /// Discard the active file's edits and reload it from disk.
+    fn revert_file(&mut self) {
+        let Some(doc) = self.editor.active_document_mut() else {
+            return;
+        };
+        if !doc.is_dirty() {
+            self.set_status("No changes to revert");
+            return;
+        }
+        match doc.reload_from_disk() {
+            Ok(true) => {
+                self.close_armed = None;
+                self.after_edit();
+                self.set_status("Reverted to the version on disk");
+            }
+            Ok(false) => self.set_status("This file is not on disk"),
+            Err(err) => self.set_error(format!("Revert failed: {err}")),
+        }
     }
 
     fn save_all(&mut self) {
@@ -2458,7 +2493,9 @@ impl App {
         } else {
             self.editor
                 .active_document()
-                .map(|doc| doc.find_all(&query))
+                .map(|doc| {
+                    doc.find_all_with(&query, self.search.case_sensitive, self.search.whole_word)
+                })
                 .unwrap_or_default()
         };
         self.search.matches = matches;
@@ -2594,6 +2631,9 @@ impl App {
             }
             ids::CLOSE_TAB | ids::CLOSE_ALL | ids::SAVE_ALL if self.editor.is_empty() => {
                 (false, Some("no files open".to_string()))
+            }
+            ids::REVERT if !document.is_some_and(|doc| doc.is_dirty()) => {
+                (false, Some("no changes to revert".to_string()))
             }
             ids::DIAGNOSTICS_NEXT | ids::DIAGNOSTICS_PREV
                 if !document.is_some_and(|doc| !doc.diagnostics().is_empty()) =>
@@ -2984,6 +3024,25 @@ mod tests {
     }
 
     #[test]
+    fn revert_discards_edits_and_reloads_from_disk() {
+        let dir = temp_project("revert");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .insert_text("// changed\n");
+        assert!(app.editor.active_document().unwrap().is_dirty());
+
+        app.execute_command(ids::REVERT);
+        let doc = app.editor.active_document().unwrap();
+        assert!(!doc.is_dirty());
+        assert!(!doc.buffer.text().contains("// changed"));
+        assert!(doc.buffer.text().contains("fn main"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn toggle_comment_adds_prefix() {
         let dir = temp_project("comment");
         let file = dir.join("src/main.rs");
@@ -3144,6 +3203,31 @@ mod tests {
         app.execute_command(ids::FIND);
         assert_eq!(app.search.query, "fn");
         assert!(!app.search.matches.is_empty());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn search_options_change_the_matches() {
+        let dir = temp_project("search-options");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "Foo foo food foo\n").unwrap();
+        let mut app = App::new(Some(&file)).unwrap();
+
+        app.execute_command(ids::FIND);
+        app.search.query = "foo".to_string();
+        app.refresh_search_matches();
+        assert_eq!(app.search.matches.len(), 4, "case-insensitive substring");
+
+        // Alt+C toggles case sensitivity.
+        app.handle_search_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::ALT));
+        assert!(app.search.case_sensitive);
+        assert_eq!(app.search.matches.len(), 3);
+
+        // Alt+W toggles whole-word matching.
+        app.handle_search_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::ALT));
+        assert!(app.search.whole_word);
+        assert_eq!(app.search.matches.len(), 2);
+
         fs::remove_dir_all(&dir).ok();
     }
 

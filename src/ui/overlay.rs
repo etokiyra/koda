@@ -490,6 +490,12 @@ pub fn render_search(frame: &mut Frame, area: Rect, search: &Search) {
     if !counter.is_empty() {
         query_spans.push(Span::styled(counter, theme::muted()));
     }
+    if search.case_sensitive {
+        query_spans.push(Span::styled("  Aa", theme::accent_bold()));
+    }
+    if search.whole_word {
+        query_spans.push(Span::styled("  |ab|", theme::accent_bold()));
+    }
     pad_line(&mut query_spans, area.width);
     lines.push(Line::from(query_spans));
 

@@ -909,8 +909,21 @@ impl Document {
 
     /// All occurrences of `query` in the buffer, as `(start, end)` positions.
     ///
-    /// Searches line by line so a keystroke never copies the whole file.
+    /// Searches line by line so a keystroke never copies the whole file. This is
+    /// a case-sensitive substring search; the find bar uses
+    /// [`Self::find_all_with`] for its options.
     pub fn find_all(&self, query: &str) -> Vec<(Position, Position)> {
+        self.find_all_with(query, true, false)
+    }
+
+    /// All occurrences of `query`, honouring case sensitivity and whole-word
+    /// matching.
+    pub fn find_all_with(
+        &self,
+        query: &str,
+        case_sensitive: bool,
+        whole_word: bool,
+    ) -> Vec<(Position, Position)> {
         let needle: Vec<char> = query.chars().collect();
         if needle.is_empty() {
             return Vec::new();
@@ -924,7 +937,9 @@ impl Document {
             }
             let mut offset = 0usize;
             while offset + needle.len() <= hay.len() {
-                if hay[offset..offset + needle.len()] == needle[..] {
+                if matches_at(&hay, offset, &needle, case_sensitive)
+                    && (!whole_word || is_word_boundary(&hay, offset, needle.len()))
+                {
                     matches.push((
                         Position::new(row, offset),
                         Position::new(row, offset + needle.len()),
@@ -1075,6 +1090,27 @@ fn is_word_char(c: char) -> bool {
     c == '_' || c.is_alphanumeric()
 }
 
+/// Whether `needle` matches `hay` at `offset`, honouring case sensitivity.
+fn matches_at(hay: &[char], offset: usize, needle: &[char], case_sensitive: bool) -> bool {
+    let window = &hay[offset..offset + needle.len()];
+    if case_sensitive {
+        window == needle
+    } else {
+        window
+            .iter()
+            .zip(needle)
+            .all(|(a, b)| a == b || a.to_lowercase().eq(b.to_lowercase()))
+    }
+}
+
+/// Whether the match at `offset` of length `len` is a whole word.
+fn is_word_boundary(hay: &[char], offset: usize, len: usize) -> bool {
+    let before_ok = offset == 0 || !is_word_char(hay[offset - 1]);
+    let after = offset + len;
+    let after_ok = after >= hay.len() || !is_word_char(hay[after]);
+    before_ok && after_ok
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1128,6 +1164,26 @@ mod tests {
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0], (Position::new(0, 0), Position::new(0, 3)));
         assert_eq!(matches[1], (Position::new(0, 8), Position::new(0, 11)));
+    }
+
+    #[test]
+    fn find_all_honours_case_and_whole_word() {
+        let d = doc("Foo foo food foo");
+
+        // Case-insensitive by default for the find bar.
+        assert_eq!(d.find_all_with("foo", false, false).len(), 4);
+        assert_eq!(d.find_all_with("foo", true, false).len(), 3);
+
+        // Whole word excludes `food`.
+        let whole = d.find_all_with("foo", false, true);
+        assert_eq!(
+            whole,
+            vec![
+                (Position::new(0, 0), Position::new(0, 3)),
+                (Position::new(0, 4), Position::new(0, 7)),
+                (Position::new(0, 13), Position::new(0, 16)),
+            ]
+        );
     }
 
     #[test]

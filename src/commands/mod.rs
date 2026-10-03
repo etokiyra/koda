@@ -14,6 +14,7 @@ pub mod ids {
     pub const QUICK_OPEN: &str = "file.quickOpen";
     pub const CLOSE_TAB: &str = "file.closeTab";
     pub const CLOSE_ALL: &str = "file.closeAll";
+    pub const REVERT: &str = "file.revert";
     pub const QUIT: &str = "app.quit";
 
     pub const UNDO: &str = "edit.undo";
@@ -138,6 +139,9 @@ impl CommandRegistry {
                 .needs_doc(),
             Command::new(CLOSE_ALL, "Close All Tabs", "File", None)
                 .describes("Close every open tab"),
+            Command::new(REVERT, "Revert File", "File", None)
+                .describes("Discard changes and reload the file from disk")
+                .needs_doc(),
             Command::new(QUIT, "Quit", "File", Some("Ctrl+Q")).describes("Leave Koda"),
             Command::new(UNDO, "Undo", "Edit", Some("Ctrl+Z"))
                 .describes("Undo the last change")
