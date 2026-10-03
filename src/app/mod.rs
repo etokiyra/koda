@@ -4367,9 +4367,9 @@ impl App {
                     );
                     applied += 1;
                 }
-            } else if let Ok(text) = std::fs::read_to_string(&file.path) {
+            } else if let Ok(text) = crate::editor::buffer::read_text(&file.path) {
                 let updated = apply_text_edits(&text, &file.edits);
-                if std::fs::write(&file.path, updated).is_ok() {
+                if crate::filesystem::write_atomic(&file.path, &updated).is_ok() {
                     applied += file.edits.len();
                 }
             }

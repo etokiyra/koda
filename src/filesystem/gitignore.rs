@@ -66,16 +66,19 @@ impl Gitignore {
             dirs += 1;
             let dir = root.join(&relative);
 
-            let ignore_file = dir.join(".gitignore");
-            if files < MAX_GITIGNORE_FILES && ignore_file.is_file() {
-                files += 1;
-                read_rules(&ignore_file, &relative, &mut rules);
-            }
+            // `.git/info/exclude` has lower priority than any `.gitignore`, so
+            // its rules are read first; last-match-wins then lets `.gitignore`
+            // (root or nested) override them, as git does.
             if relative.as_os_str().is_empty() {
                 let exclude = root.join(".git/info/exclude");
                 if exclude.is_file() {
                     read_rules(&exclude, &relative, &mut rules);
                 }
+            }
+            let ignore_file = dir.join(".gitignore");
+            if files < MAX_GITIGNORE_FILES && ignore_file.is_file() {
+                files += 1;
+                read_rules(&ignore_file, &relative, &mut rules);
             }
 
             let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -363,6 +366,19 @@ mod tests {
         let dir = project("comments", "# comment\n\n   \nreal\n");
         let matcher = Gitignore::load(&dir);
         assert_eq!(matcher.rules.len(), 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn gitignore_overrides_info_exclude() {
+        let dir = project("exclude", "*.log\n");
+        fs::create_dir_all(dir.join(".git/info")).unwrap();
+        fs::write(dir.join(".git/info/exclude"), "!keep.log\n").unwrap();
+        let matcher = Gitignore::load(&dir);
+        assert!(
+            ignored(&matcher, "keep.log", false),
+            "a .gitignore rule outranks .git/info/exclude"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
