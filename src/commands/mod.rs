@@ -66,6 +66,8 @@ pub mod ids {
     pub const TOGGLE_HIDDEN: &str = "view.toggleHidden";
     pub const TOGGLE_INLINE_DIAGNOSTICS: &str = "view.toggleInlineDiagnostics";
     pub const REFRESH: &str = "view.refresh";
+    pub const SPLIT: &str = "view.split";
+    pub const FOCUS_PANE: &str = "view.focusPane";
     pub const FILTER_TREE: &str = "view.filterTree";
     pub const NEXT_TAB: &str = "view.nextTab";
     pub const PREV_TAB: &str = "view.previousTab";
@@ -340,6 +342,11 @@ impl CommandRegistry {
             .describes("Show or hide diagnostic messages at the end of each line"),
             Command::new(REFRESH, "Refresh File Tree", "View", Some("F5"))
                 .describes("Re-read the project tree and git status"),
+            Command::new(SPLIT, "Split Editor", "View", Some("Alt+V"))
+                .describes("Show two files side by side"),
+            Command::new(FOCUS_PANE, "Focus Other Pane", "View", Some("Alt+O"))
+                .describes("Move editing focus between the two panes")
+                .needs_doc(),
             Command::new(FILTER_TREE, "Filter File Tree", "View", Some("/"))
                 .describes("Fuzzy-filter the project files from the sidebar"),
             Command::new(NEXT_TAB, "Next Tab", "View", Some("Ctrl+Tab"))

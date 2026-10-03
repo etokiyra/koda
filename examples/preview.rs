@@ -33,6 +33,12 @@ fn main() {
             app.execute_command(ids::QUICK_OPEN);
             app
         }
+        "split" => {
+            let mut app = App::new(Some(&root.join("src/main.rs"))).expect("app");
+            app.open_path(root.join("src/ui/mod.rs"));
+            app.execute_command(ids::SPLIT);
+            app
+        }
         "find" => {
             let mut app = App::new(Some(&root.join("src/main.rs"))).expect("app");
             app.execute_command(ids::FIND);

@@ -170,6 +170,8 @@ command palette already reports which are available. Filling them in is additive
 - [x] Keyboard-shortcuts overlay (`F1`), generated from the command registry.
 - [x] Overlay polish: pickers and prompts gained a result counter, a footer
       hint and a personable empty state.
+- [x] Split editor: two panes side by side (`Alt+V`) with focus switching
+      (`Alt+O`).
 - [x] Keymap audit: fixed the terminal-aliased `Ctrl+M` rebind to `Alt+M` and
       added `Ctrl+Shift+S`, `Ctrl+N`, `F3`/`Shift+F3`, `Ctrl+PageUp/Down` and
       `Ctrl+Shift+M`.
@@ -177,7 +179,6 @@ command palette already reports which are available. Filling them in is additive
 - [x] Inline diagnostic messages: an optional, severity-coloured note at the end
       of the affected line, folded into the existing diagnostics UI and
       toggleable from the palette.
-- [ ] Split editor.
 - [ ] A subtle, optional theme system (works with no config by default).
 - [ ] File iconography that respects monochrome terminals.
 - [ ] Better diff/merge view for git.

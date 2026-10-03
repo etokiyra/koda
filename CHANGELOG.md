@@ -243,6 +243,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   respects `.gitignore`, skips binary and oversized files, and reports at most
   one match per line. A single-line selection prefills the query.
 
+### View
+
+- Added a **split editor** (`Alt+V`): two documents render side by side with a
+  hairline rule, and `Alt+O` moves editing focus between the panes. The focused
+  pane owns the cursor, the active tab and search highlighting; tab switching
+  applies to the focused pane. Closing a split document collapses the view
+  cleanly, and the split is skipped on terminals too narrow for two panes.
+
 ### Keymap
 
 - Rebound **Go to Matching Bracket** from `Ctrl+M` to `Alt+M`: most terminals

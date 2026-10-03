@@ -193,6 +193,10 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
 - **Centralised Mellow theme + art.** All colour flows through `ui/theme.rs`;
   all ASCII personality through `ui/art.rs`. Widgets render semantic roles, not
   literal colours. This keeps Koda recognisable and easy to evolve.
+- **Split editor.** The editor keeps a single active document; a split stores
+  one document index per pane and `editor.active` follows the focused pane, so
+  every existing editing path keeps working unchanged. Panes share the tab
+  strip, and closing a pane's file collapses the split.
 
 ---
 

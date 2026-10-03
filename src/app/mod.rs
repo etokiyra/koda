@@ -49,6 +49,13 @@ pub enum Focus {
     FileTree,
 }
 
+/// Which editor pane owns the cursor when the editor is split.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pane {
+    Primary,
+    Secondary,
+}
+
 /// How long to wait after opening a file before starting a language server.
 ///
 /// Keeping this off the critical path means opening a file is instant and a
@@ -127,6 +134,14 @@ pub struct App {
     pub tree_visible: bool,
     /// Whether diagnostic messages are shown at the end of their line.
     pub inline_diagnostics: bool,
+    /// Whether the editor shows two panes side by side.
+    pub split: bool,
+    /// The document shown in the left (primary) pane.
+    pane_left: usize,
+    /// The document shown in the right pane, when split.
+    pane_right: Option<usize>,
+    /// Which pane receives editing.
+    pub focus_pane: Pane,
     pub focus: Focus,
     pub status: Status,
     /// Height of the editor viewport, updated during rendering.
@@ -224,6 +239,10 @@ impl App {
             cursor_screen: None,
             tree_visible: true,
             inline_diagnostics: true,
+            split: false,
+            pane_left: 0,
+            pane_right: None,
+            focus_pane: Pane::Primary,
             focus: Focus::Editor,
             status: Status::default(),
             viewport_height: 20,
@@ -500,6 +519,20 @@ impl App {
             }
             return true;
         }
+        // Pane shortcuts work from any surface.
+        if key.modifiers.contains(KeyModifiers::ALT) {
+            match key.code {
+                KeyCode::Char('v') | KeyCode::Char('V') => {
+                    self.execute_command(ids::SPLIT);
+                    return true;
+                }
+                KeyCode::Char('o') | KeyCode::Char('O') => {
+                    self.execute_command(ids::FOCUS_PANE);
+                    return true;
+                }
+                _ => {}
+            }
+        }
         if !ctrl {
             return false;
         }
@@ -536,18 +569,18 @@ impl App {
             }
             KeyCode::Tab => {
                 if shift {
-                    self.editor.previous_tab();
+                    self.previous_tab();
                 } else {
-                    self.editor.next_tab();
+                    self.next_tab();
                 }
                 true
             }
             KeyCode::PageUp => {
-                self.editor.previous_tab();
+                self.previous_tab();
                 true
             }
             KeyCode::PageDown => {
-                self.editor.next_tab();
+                self.next_tab();
                 true
             }
             _ => false,
@@ -1130,9 +1163,11 @@ impl App {
             ids::TOGGLE_HIDDEN => self.toggle_hidden(),
             ids::TOGGLE_INLINE_DIAGNOSTICS => self.toggle_inline_diagnostics(),
             ids::REFRESH => self.refresh_workspace(),
+            ids::SPLIT => self.toggle_split(),
+            ids::FOCUS_PANE => self.focus_other_pane(),
             ids::FILTER_TREE => self.open_tree_filter(),
-            ids::NEXT_TAB => self.editor.next_tab(),
-            ids::PREV_TAB => self.editor.previous_tab(),
+            ids::NEXT_TAB => self.next_tab(),
+            ids::PREV_TAB => self.previous_tab(),
             ids::PALETTE => self.open_command_palette(),
             ids::HELP => self.toggle_help(),
             ids::RENAME => self.rename_symbol(),
@@ -1511,7 +1546,10 @@ impl App {
     /// Open a file, focusing the editor and applying language detection.
     pub fn open_path(&mut self, path: PathBuf) {
         match self.editor.open_path(&path) {
-            Ok(_) => {
+            Ok(index) => {
+                // The focused pane adopts the newly opened document.
+                self.set_active_pane_index(index);
+                self.sync_active_pane();
                 self.request_detection_for_active();
                 self.workspace.tree.select_path(&path);
                 self.focus = Focus::Editor;
@@ -1585,6 +1623,10 @@ impl App {
         if !self.editor.is_empty() {
             let active = session.active.min(self.editor.len().saturating_sub(1));
             self.editor.set_active(active);
+            self.pane_left = active;
+            self.pane_right = None;
+            self.split = false;
+            self.focus_pane = Pane::Primary;
             self.request_detection_for_active();
             self.set_status(format!("Restored {} file(s)", self.editor.len()));
         }
@@ -1651,6 +1693,7 @@ impl App {
         }
         self.close_armed = None;
         self.editor.close(index);
+        self.remap_pane_indices(index);
         self.set_status("Tab closed");
     }
 
@@ -1660,6 +1703,10 @@ impl App {
             return;
         }
         self.editor.close_all();
+        self.pane_left = 0;
+        self.pane_right = None;
+        self.split = false;
+        self.focus_pane = Pane::Primary;
         self.close_armed = None;
         self.set_status("All tabs closed");
     }
@@ -1840,6 +1887,7 @@ impl App {
                         self.editor.close(index);
                     }
                 }
+                self.clamp_panes();
                 self.recent_files
                     .retain(|candidate| !candidate.starts_with(path));
                 self.workspace.tree.refresh();
@@ -3645,6 +3693,157 @@ impl App {
         self.set_status("Refreshed");
     }
 
+    /// The document index shown in the left pane.
+    pub fn pane_left_index(&self) -> usize {
+        self.pane_left
+    }
+
+    /// The document index shown in the right pane, when split.
+    pub fn pane_right_index(&self) -> Option<usize> {
+        self.pane_right
+    }
+
+    /// The document index shown by the focused pane.
+    fn active_pane_index(&self) -> usize {
+        match self.focus_pane {
+            Pane::Primary => self.pane_left,
+            Pane::Secondary => self.pane_right.unwrap_or(self.pane_left),
+        }
+    }
+
+    /// Record that the focused pane now shows `index`.
+    fn set_active_pane_index(&mut self, index: usize) {
+        match self.focus_pane {
+            Pane::Primary => self.pane_left = index,
+            Pane::Secondary => self.pane_right = Some(index),
+        }
+    }
+
+    /// Make `editor.active` follow the focused pane.
+    fn sync_active_pane(&mut self) {
+        let index = self.active_pane_index();
+        self.editor.set_active(index);
+    }
+
+    /// Activate the next tab within the focused pane.
+    fn next_tab(&mut self) {
+        if self.editor.is_empty() {
+            return;
+        }
+        self.editor.next_tab();
+        let index = self.editor.active_index();
+        self.set_active_pane_index(index);
+    }
+
+    /// Activate the previous tab within the focused pane.
+    fn previous_tab(&mut self) {
+        if self.editor.is_empty() {
+            return;
+        }
+        self.editor.previous_tab();
+        let index = self.editor.active_index();
+        self.set_active_pane_index(index);
+    }
+
+    /// Toggle the side-by-side editor split.
+    fn toggle_split(&mut self) {
+        if self.split {
+            self.split = false;
+            self.pane_right = None;
+            self.focus_pane = Pane::Primary;
+            self.editor.set_active(self.pane_left);
+            self.set_status("Split closed");
+            return;
+        }
+        if self.editor.len() < 2 {
+            self.set_status("Open another file to split");
+            return;
+        }
+        let active = self.editor.active_index();
+        self.pane_left = active;
+        self.pane_right = Some((active + 1) % self.editor.len());
+        self.split = true;
+        self.focus_pane = Pane::Primary;
+        self.editor.set_active(active);
+        self.set_status("Split · Alt+O switches panes");
+    }
+
+    /// Move editing focus to the other pane.
+    fn focus_other_pane(&mut self) {
+        if !self.split || self.pane_right.is_none() {
+            self.set_status("No split to focus");
+            return;
+        }
+        self.focus_pane = match self.focus_pane {
+            Pane::Primary => Pane::Secondary,
+            Pane::Secondary => Pane::Primary,
+        };
+        self.sync_active_pane();
+        if self.search.open {
+            self.refresh_search_matches();
+        }
+        let name = self
+            .editor
+            .active_document()
+            .map(|doc| doc.file_name())
+            .unwrap_or_default();
+        self.set_status(format!("Focused {name}"));
+    }
+
+    /// Keep pane indices valid after document `closed` was removed.
+    fn remap_pane_indices(&mut self, closed: usize) {
+        let len = self.editor.len();
+        // The right pane loses its document if that was the one closed.
+        if self.pane_right == Some(closed) {
+            self.pane_right = None;
+        } else if let Some(right) = self.pane_right
+            && right > closed
+        {
+            self.pane_right = Some(right - 1);
+        }
+        // When the left pane's document closes, the right pane takes its place
+        // and the split collapses.
+        if self.pane_left == closed {
+            self.pane_left = self.pane_right.take().unwrap_or(0);
+        } else if self.pane_left > closed {
+            self.pane_left -= 1;
+        }
+        self.pane_left = self.pane_left.min(len.saturating_sub(1));
+        if self.pane_right.is_some_and(|index| index >= len) {
+            self.pane_right = None;
+        }
+        if self.pane_right.is_none() {
+            self.split = false;
+            if self.focus_pane == Pane::Secondary {
+                self.focus_pane = Pane::Primary;
+            }
+        }
+        self.sync_active_pane();
+    }
+
+    /// Clamp pane indices after arbitrary document removals.
+    fn clamp_panes(&mut self) {
+        let len = self.editor.len();
+        if len == 0 {
+            self.pane_left = 0;
+            self.pane_right = None;
+            self.split = false;
+            self.focus_pane = Pane::Primary;
+            return;
+        }
+        self.pane_left = self.pane_left.min(len - 1);
+        if self.pane_right.is_some_and(|index| index >= len) {
+            self.pane_right = None;
+        }
+        if self.pane_right.is_none() {
+            self.split = false;
+            if self.focus_pane == Pane::Secondary {
+                self.focus_pane = Pane::Primary;
+            }
+        }
+        self.sync_active_pane();
+    }
+
     /// Move keyboard focus to the file tree, showing it first if needed. If the
     /// tree already has focus, return to the editor.
     fn focus_tree(&mut self) {
@@ -3956,6 +4155,87 @@ mod tests {
         let mut app = App::new(Some(&file)).unwrap();
         app.execute_command(ids::PALETTE);
         assert!(!app.overlay.is_none());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn split_shows_two_documents_and_focus_switches() {
+        let dir = temp_project("split");
+        let a = dir.join("src/main.rs");
+        let b = dir.join("src/lib.rs");
+        fs::write(&a, "fn main() {}\n").unwrap();
+        fs::write(&b, "pub fn lib() {}\n").unwrap();
+        let mut app = App::new(Some(&a)).unwrap();
+        app.open_path(b.clone());
+        assert_eq!(app.editor.len(), 2);
+        let active = app.editor.active_index();
+
+        app.execute_command(ids::SPLIT);
+        assert!(app.split);
+        assert_eq!(app.pane_left_index(), active);
+        assert_eq!(app.pane_right_index(), Some((active + 1) % 2));
+        assert_eq!(app.focus_pane, Pane::Primary);
+
+        app.execute_command(ids::FOCUS_PANE);
+        assert_eq!(app.focus_pane, Pane::Secondary);
+        assert_eq!(app.editor.active_index(), (active + 1) % 2);
+
+        // Typing edits only the focused (right) document.
+        app.with_doc(|doc| doc.insert_text("// right\n"));
+        let right = (active + 1) % 2;
+        assert!(
+            app.editor.documents[right]
+                .buffer
+                .text()
+                .contains("// right")
+        );
+        assert!(
+            !app.editor.documents[active]
+                .buffer
+                .text()
+                .contains("// right")
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn alt_v_splits_and_alt_o_switches_panes() {
+        let dir = temp_project("alt-split");
+        let a = dir.join("src/main.rs");
+        let b = dir.join("src/lib.rs");
+        fs::write(&b, "pub fn lib() {}\n").unwrap();
+        let mut app = App::new(Some(&a)).unwrap();
+        app.open_path(b.clone());
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::ALT));
+        assert!(app.split);
+
+        let before = app.editor.active_index();
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::ALT));
+        assert_ne!(app.editor.active_index(), before);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn closing_a_split_document_collapses_the_split() {
+        let dir = temp_project("split-close");
+        let a = dir.join("src/main.rs");
+        let b = dir.join("src/lib.rs");
+        fs::write(&a, "fn main() {}\n").unwrap();
+        fs::write(&b, "pub fn lib() {}\n").unwrap();
+        let mut app = App::new(Some(&a)).unwrap();
+        app.open_path(b.clone());
+        app.execute_command(ids::SPLIT);
+        assert!(app.split);
+
+        // Close the focused (left) document; the split collapses to one pane.
+        app.execute_command(ids::CLOSE_TAB);
+        assert_eq!(app.editor.len(), 1);
+        assert!(!app.split);
+        assert!(app.pane_right_index().is_none());
+        assert_eq!(app.editor.active_index(), app.pane_left_index());
+
         fs::remove_dir_all(&dir).ok();
     }
 

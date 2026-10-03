@@ -166,6 +166,28 @@ fn prompt_shows_confirm_hint() {
 }
 
 #[test]
+fn split_renders_both_documents() {
+    let dir = temp_project("split-render");
+    let a = dir.join("src/main.rs");
+    let b = dir.join("src/lib.rs");
+    fs::write(&a, "fn main() {}\n").unwrap();
+    fs::write(&b, "pub fn koda_split() {}\n").unwrap();
+    let mut app = App::new(Some(&a)).unwrap();
+    app.open_path(b.clone());
+    app.execute_command(ids::SPLIT);
+
+    let screen = draw(&mut app);
+    assert!(screen.contains("fn main"), "left pane missing:\n{screen}");
+    assert!(
+        screen.contains("koda_split"),
+        "right pane missing:\n{screen}"
+    );
+    assert!(screen.contains("│"), "separator missing:\n{screen}");
+
+    cleanup(&dir);
+}
+
+#[test]
 fn statusline_uses_mellow_panel_background() {
     let dir = temp_project("statusbg");
     let file = dir.join("src/main.rs");

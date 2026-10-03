@@ -12,10 +12,13 @@ pub mod welcome;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::Paragraph;
 
-use crate::app::overlay::Overlay;
-use crate::app::{App, Focus};
-use crate::language::LanguageId;
+use crate::app::overlay::{Overlay, Search};
+use crate::app::{App, Focus, Pane};
+use crate::editor::Document;
+use crate::language::LanguageService;
 
 /// Draw the whole application.
 pub fn render(frame: &mut Frame, app: &mut App) {
@@ -98,30 +101,106 @@ fn render_editor_area(frame: &mut Frame, area: Rect, app: &mut App) {
         .split(area);
 
     tabs::render(frame, chunks[0], &app.editor);
+    let body = chunks[1];
+    app.viewport_height = body.height.saturating_sub(2) as usize;
+    app.cursor_screen = None;
 
-    let index = app.editor.active_index();
-    let language = app
-        .editor
-        .documents
-        .get(index)
-        .map(|doc| doc.buffer.language)
-        .unwrap_or(LanguageId::Unknown);
-    let focused = app.focus == Focus::Editor;
-
-    if let Some(doc) = app.editor.documents.get_mut(index) {
-        let provider = app.language.provider(language);
-        app.cursor_screen = editor::render(
+    let editor_focused = app.focus == Focus::Editor;
+    if app.split && app.pane_right_index().is_some() && body.width >= 34 {
+        render_split(frame, body, app, editor_focused);
+    } else {
+        let index = app.editor.active_index();
+        app.cursor_screen = render_pane(
             frame,
-            chunks[1],
-            doc,
-            provider,
+            body,
+            &app.language,
+            &mut app.editor.documents,
             &app.search,
-            focused,
+            index,
+            editor_focused,
             app.inline_diagnostics,
         );
     }
+}
 
-    app.viewport_height = chunks[1].height.saturating_sub(2) as usize;
+/// Draw the two panes and the focused-pane rule between them.
+fn render_split(frame: &mut Frame, area: Rect, app: &mut App, editor_focused: bool) {
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Ratio(1, 2),
+            Constraint::Length(1),
+            Constraint::Ratio(1, 2),
+        ])
+        .split(area);
+
+    let rule: Vec<Line> = (0..columns[1].height)
+        .map(|_| Line::from(Span::styled("│", theme::border(false))))
+        .collect();
+    frame.render_widget(Paragraph::new(Text::from(rule)), columns[1]);
+
+    let idle = Search::default();
+    let left_focused = editor_focused && app.focus_pane == Pane::Primary;
+    let right_focused = editor_focused && app.focus_pane == Pane::Secondary;
+    let left_search = if left_focused { &app.search } else { &idle };
+    let right_search = if right_focused { &app.search } else { &idle };
+    let left_index = app.pane_left_index();
+    let right_index = app.pane_right_index().unwrap_or(left_index);
+
+    let left = render_pane(
+        frame,
+        columns[0],
+        &app.language,
+        &mut app.editor.documents,
+        left_search,
+        left_index,
+        left_focused,
+        app.inline_diagnostics,
+    );
+    if left_focused {
+        app.cursor_screen = left;
+    }
+
+    let right = render_pane(
+        frame,
+        columns[2],
+        &app.language,
+        &mut app.editor.documents,
+        right_search,
+        right_index,
+        right_focused,
+        app.inline_diagnostics,
+    );
+    if right_focused {
+        app.cursor_screen = right;
+    }
+}
+
+/// Render one document into a pane, returning the cursor screen position when
+/// the pane is focused and the cursor is visible.
+#[allow(clippy::too_many_arguments)]
+fn render_pane(
+    frame: &mut Frame,
+    area: Rect,
+    language: &LanguageService,
+    documents: &mut [Document],
+    search: &Search,
+    index: usize,
+    focused: bool,
+    inline_diagnostics: bool,
+) -> Option<(u16, u16)> {
+    let language_id = documents.get(index)?.buffer.language;
+    let provider = language.provider(language_id);
+    let doc = documents.get_mut(index)?;
+    editor::render(
+        frame,
+        area,
+        doc,
+        provider,
+        search,
+        focused,
+        inline_diagnostics,
+    )
 }
 
 /// Center a rectangle of the given size within `area`.
