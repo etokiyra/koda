@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the same file, and Find References (`Shift+F12`) lists every occurrence in
   the file. Providers own the resolution; cross-file resolution comes with the
   language-server backends.
+- Added completion. **Complete** (`Ctrl+Space`) opens a compact popup that merges
+  the provider's keywords, types and builtins with identifiers already in the
+  buffer. It filters as you type, navigates with the arrows and accepts with
+  `Enter`/`Tab` or dismisses with `Esc`. Buffer completion works for any
+  language; language servers can supply richer candidates later.
 
 ### Performance
 

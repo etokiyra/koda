@@ -22,6 +22,7 @@ pub mod ids {
     pub const COPY: &str = "edit.copy";
     pub const CUT: &str = "edit.cut";
     pub const PASTE: &str = "edit.paste";
+    pub const COMPLETE: &str = "edit.complete";
     pub const FIND: &str = "edit.find";
     pub const REPLACE: &str = "edit.replace";
     pub const GOTO_LINE: &str = "edit.gotoLine";
@@ -149,6 +150,9 @@ impl CommandRegistry {
                 .needs_doc(),
             Command::new(PASTE, "Paste", "Edit", Some("Ctrl+V"))
                 .describes("Paste the clipboard")
+                .needs_doc(),
+            Command::new(COMPLETE, "Complete", "Edit", Some("Ctrl+Space"))
+                .describes("Suggest completions for the word being typed")
                 .needs_doc(),
             Command::new(FIND, "Find", "Edit", Some("Ctrl+F"))
                 .describes("Search the active file")

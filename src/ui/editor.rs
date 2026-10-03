@@ -18,7 +18,8 @@ use crate::ui::{art, theme};
 
 const TAB_WIDTH: usize = 4;
 
-/// Render the active document.
+/// Render the active document, returning the screen position of the cursor when
+/// it is visible (used to anchor the completion popup).
 pub fn render(
     frame: &mut Frame,
     area: Rect,
@@ -26,14 +27,18 @@ pub fn render(
     provider: &dyn LanguageProvider,
     search: &Search,
     focused: bool,
-) {
+) -> Option<(u16, u16)> {
     if area.width == 0 || area.height == 0 {
-        return;
+        return None;
     }
 
     if doc.buffer.len_chars() == 0 {
         render_empty(frame, area, focused);
-        return;
+        return if focused {
+            Some((area.x, area.y))
+        } else {
+            None
+        };
     }
 
     let total_lines = doc.buffer.len_lines();
@@ -42,7 +47,7 @@ pub fn render(
     let gutter = (number_width + 2) as u16;
     let text_width = area.width.saturating_sub(gutter) as usize;
     if text_width == 0 {
-        return;
+        return None;
     }
     let view_height = area.height as usize;
 
@@ -76,14 +81,17 @@ pub fn render(
 
     frame.render_widget(Paragraph::new(Text::from(lines)), area);
 
-    // Place the terminal cursor.
+    // Place the terminal cursor and report where it landed.
+    let mut cursor_screen = None;
     if focused && cursor.row >= doc.scroll_top && cursor.row < doc.scroll_top + view_height {
         let x = area.x + gutter + (cursor_col.saturating_sub(doc.scroll_left)) as u16;
         let y = area.y + (cursor.row - doc.scroll_top) as u16;
         if x < area.x + area.width && y < area.y + area.height {
             frame.set_cursor_position((x, y));
+            cursor_screen = Some((x, y));
         }
     }
+    cursor_screen
 }
 
 fn render_empty(frame: &mut Frame, area: Rect, focused: bool) {

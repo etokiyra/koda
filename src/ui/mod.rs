@@ -48,6 +48,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Overlay::Picker(picker) => overlay::render_picker(frame, area, picker),
         Overlay::Prompt(prompt) => overlay::render_prompt(frame, area, prompt),
     }
+
+    if app.overlay.is_none()
+        && let Some(completion) = &app.completion
+    {
+        overlay::render_completion(frame, area, completion, app.cursor_screen);
+    }
 }
 
 fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -77,6 +83,7 @@ fn render_editor_area(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.editor.is_empty() {
         welcome::render(frame, area, app);
         app.viewport_height = area.height.saturating_sub(2) as usize;
+        app.cursor_screen = None;
         return;
     }
 
@@ -98,7 +105,7 @@ fn render_editor_area(frame: &mut Frame, area: Rect, app: &mut App) {
 
     if let Some(doc) = app.editor.documents.get_mut(index) {
         let provider = app.language.provider(language);
-        editor::render(frame, chunks[1], doc, provider, &app.search, focused);
+        app.cursor_screen = editor::render(frame, chunks[1], doc, provider, &app.search, focused);
     }
 
     app.viewport_height = chunks[1].height.saturating_sub(2) as usize;

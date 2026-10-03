@@ -54,8 +54,9 @@ The highest-value work. These turn Koda from an editor into an IDE.
       `Shift+F8`) and a diagnostics list. Rust and Go currently report lexical
       structural problems; richer, compiler-backed diagnostics arrive with the
       language-server backends below.
-- [ ] **Completion.** A completion popup driven by providers, with filtering and
-      acceptance via `Tab`/`Enter`.
+- [x] **Completion.** A compact popup merges provider keywords/types/builtins
+      with identifiers from the buffer, filters as you type and accepts with
+      `Enter`/`Tab`. Language-server candidates can extend the same popup.
 - [ ] **Hover information.** Show type/docs for the symbol under the cursor.
 - [x] **Go-to-definition and references (within file).** `F12` resolves the word
       under the cursor to its definition in the active file and `Shift+F12`

@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::editor::Position;
+use crate::language::completion::Completion;
 
 /// What happens when a picker item is chosen.
 #[derive(Clone, Debug)]
@@ -218,6 +219,82 @@ impl Search {
         self.field = SearchField::Query;
         self.matches.clear();
         self.current = None;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Completion
+// ---------------------------------------------------------------------------
+
+/// The completion popup's state: a candidate pool filtered by the typed prefix.
+pub struct CompletionState {
+    pool: Vec<Completion>,
+    pub prefix: String,
+    pub items: Vec<Completion>,
+    pub selected: usize,
+}
+
+impl CompletionState {
+    pub fn new(pool: Vec<Completion>, prefix: String) -> Self {
+        let mut state = CompletionState {
+            pool,
+            prefix,
+            items: Vec::new(),
+            selected: 0,
+        };
+        state.refilter();
+        state
+    }
+
+    /// Recompute `items` from the pool for the current prefix.
+    pub fn refilter(&mut self) {
+        let lower = self.prefix.to_lowercase();
+        self.items = self
+            .pool
+            .iter()
+            .filter(|item| lower.is_empty() || item.label.to_lowercase().starts_with(&lower))
+            .cloned()
+            .collect();
+        // Prefer short names, then alphabetical: `if` ranks above `impl`.
+        self.items.sort_by(|a, b| {
+            a.label
+                .len()
+                .cmp(&b.label.len())
+                .then_with(|| a.label.cmp(&b.label))
+        });
+        if self.selected >= self.items.len() {
+            self.selected = self.items.len().saturating_sub(1);
+        }
+    }
+
+    pub fn set_prefix(&mut self, prefix: String) {
+        self.prefix = prefix;
+        self.selected = 0;
+        self.refilter();
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if self.selected + 1 < self.items.len() {
+            self.selected += 1;
+        }
+    }
+
+    pub fn move_by(&mut self, delta: i32) {
+        if self.items.is_empty() {
+            return;
+        }
+        let last = self.items.len() as i32 - 1;
+        self.selected = (self.selected as i32 + delta).clamp(0, last) as usize;
+    }
+
+    pub fn selected_item(&self) -> Option<&Completion> {
+        self.items.get(self.selected)
     }
 }
 

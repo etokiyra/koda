@@ -345,3 +345,18 @@ fn diagnostics_underline_the_affected_characters() {
     );
     cleanup(&dir);
 }
+
+#[test]
+fn completion_popup_is_drawn() {
+    let dir = temp_project("completion-ui");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    app.execute_command(ids::COMPLETE);
+
+    let screen = draw_at(&mut app, 100, 24);
+    assert!(
+        screen.contains("complete"),
+        "the completion popup should be visible:\n{screen}"
+    );
+    cleanup(&dir);
+}

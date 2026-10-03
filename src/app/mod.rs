@@ -17,13 +17,16 @@ use crate::background::{Background, Event as BackgroundEvent};
 use crate::commands::{Command, CommandRegistry, ids};
 use crate::editor::{Document, Editor, Position, Selection};
 use crate::filesystem;
+use crate::language::completion::{Completion, CompletionKind};
 use crate::language::diagnostics::Severity;
+use crate::language::symbols::is_ident_char as is_word_char;
 use crate::language::{Capability, LanguageId, LanguageService};
 use crate::project::Workspace;
 use crate::terminal;
 use crate::ui;
 use overlay::{
-    Overlay, Picker, PickerAction, PickerItem, Prompt, PromptKind, Search, SearchField, TreeFilter,
+    CompletionState, Overlay, Picker, PickerAction, PickerItem, Prompt, PromptKind, Search,
+    SearchField, TreeFilter,
 };
 
 /// How long typing must pause before diagnostics are recomputed. Short enough to
@@ -58,6 +61,10 @@ pub struct App {
     pub recent_files: Vec<PathBuf>,
     /// Inline file-tree filter, when active.
     pub tree_filter: Option<TreeFilter>,
+    /// Completion popup, when open.
+    pub completion: Option<CompletionState>,
+    /// Screen position of the editor cursor, updated during rendering.
+    pub cursor_screen: Option<(u16, u16)>,
     pub tree_visible: bool,
     pub focus: Focus,
     pub status: Status,
@@ -100,6 +107,8 @@ impl App {
             clipboard: String::new(),
             recent_files: Vec::new(),
             tree_filter: None,
+            completion: None,
+            cursor_screen: None,
             tree_visible: true,
             focus: Focus::Editor,
             status: Status::default(),
@@ -164,11 +173,16 @@ impl App {
             return;
         }
         if !self.overlay.is_none() {
+            self.completion = None;
             self.handle_overlay_key(key);
             return;
         }
         if self.search.open {
+            self.completion = None;
             self.handle_search_key(key);
+            return;
+        }
+        if self.completion.is_some() && self.handle_completion_key(key) {
             return;
         }
         match self.focus {
@@ -182,15 +196,21 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         if key.code == KeyCode::F(8) {
+            self.completion = None;
             self.goto_diagnostic(if shift { -1 } else { 1 });
             return true;
         }
         if !ctrl {
             return false;
         }
+        // Any Ctrl chord other than the completion trigger dismisses completion.
+        if key.code != KeyCode::Char(' ') {
+            self.completion = None;
+        }
         match key.code {
             KeyCode::Char(c) => {
                 match (c.to_ascii_lowercase(), shift) {
+                    (' ', _) => self.execute_command(ids::COMPLETE),
                     ('q', _) => self.request_quit(),
                     ('s', _) => self.execute_command(ids::SAVE),
                     ('p', true) => self.open_command_palette(),
@@ -231,6 +251,7 @@ impl App {
             }
             Overlay::None => {}
         }
+        self.completion = None;
         if self.search.open {
             match self.search.field {
                 SearchField::Query => self.search.query.push_str(text),
@@ -511,6 +532,148 @@ impl App {
         }
     }
 
+    /// Handle a key while the completion popup is open. Returns `false` for keys
+    /// the popup does not claim, after dismissing it.
+    fn handle_completion_key(&mut self, key: KeyEvent) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Esc => {
+                self.completion = None;
+                true
+            }
+            KeyCode::Up => {
+                if let Some(state) = self.completion.as_mut() {
+                    state.move_up();
+                }
+                true
+            }
+            KeyCode::Down => {
+                if let Some(state) = self.completion.as_mut() {
+                    state.move_down();
+                }
+                true
+            }
+            KeyCode::PageUp => {
+                if let Some(state) = self.completion.as_mut() {
+                    state.move_by(-8);
+                }
+                true
+            }
+            KeyCode::PageDown => {
+                if let Some(state) = self.completion.as_mut() {
+                    state.move_by(8);
+                }
+                true
+            }
+            KeyCode::Enter | KeyCode::Tab => {
+                self.accept_completion();
+                true
+            }
+            KeyCode::Backspace => {
+                self.with_doc(|doc| doc.backspace());
+                self.refresh_completion();
+                true
+            }
+            KeyCode::Char(c) if !ctrl => {
+                self.with_doc(|doc| doc.type_char(c));
+                self.refresh_completion();
+                true
+            }
+            _ => {
+                self.completion = None;
+                false
+            }
+        }
+    }
+
+    /// Open completion for the word being typed.
+    fn open_completion(&mut self) {
+        let (language, text, cursor) = match self.editor.active_document() {
+            Some(doc) => (doc.buffer.language, doc.buffer.text(), doc.clamped_cursor()),
+            None => return,
+        };
+
+        let mut pool: Vec<Completion> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for item in self
+            .language
+            .provider(language)
+            .completions(&text, cursor.row, cursor.col)
+        {
+            if seen.insert(item.label.clone()) {
+                pool.push(item);
+            }
+        }
+        for item in document_words(&text) {
+            if seen.insert(item.label.clone()) {
+                pool.push(item);
+            }
+        }
+
+        let state = CompletionState::new(pool, self.completion_prefix());
+        if state.items.is_empty() {
+            self.set_status("No completions");
+            return;
+        }
+        self.completion = Some(state);
+    }
+
+    /// The identifier characters immediately before the cursor.
+    fn completion_prefix(&self) -> String {
+        let Some(doc) = self.editor.active_document() else {
+            return String::new();
+        };
+        let cursor = doc.clamped_cursor();
+        let line = doc.buffer.line_text(cursor.row);
+        let chars: Vec<char> = line.chars().collect();
+        let end = cursor.col.min(chars.len());
+        let mut start = end;
+        while start > 0 && is_word_char(chars[start - 1]) {
+            start -= 1;
+        }
+        chars[start..end].iter().collect()
+    }
+
+    /// Re-filter the open completion for the current prefix, closing it when
+    /// nothing matches.
+    fn refresh_completion(&mut self) {
+        let prefix = self.completion_prefix();
+        if let Some(state) = self.completion.as_mut() {
+            state.set_prefix(prefix);
+        }
+        if self
+            .completion
+            .as_ref()
+            .is_some_and(|state| state.items.is_empty())
+        {
+            self.completion = None;
+        }
+    }
+
+    /// Replace the typed prefix with the selected completion.
+    fn accept_completion(&mut self) {
+        let Some(state) = self.completion.take() else {
+            return;
+        };
+        let Some(item) = state.selected_item().cloned() else {
+            return;
+        };
+        let Some(doc) = self.editor.active_document() else {
+            return;
+        };
+        let cursor = doc.clamped_cursor();
+        let line = doc.buffer.line_text(cursor.row);
+        let chars: Vec<char> = line.chars().collect();
+        let end = cursor.col.min(chars.len());
+        let mut start = end;
+        while start > 0 && is_word_char(chars[start - 1]) {
+            start -= 1;
+        }
+        let start = Position::new(cursor.row, start);
+        let end = Position::new(cursor.row, end);
+        self.with_doc(|doc| doc.replace_range(start, end, &item.label));
+    }
+
     // ----------------------------------------------------------------------
     // Commands
     // ----------------------------------------------------------------------
@@ -531,6 +694,7 @@ impl App {
             ids::COPY => self.copy(),
             ids::CUT => self.cut(),
             ids::PASTE => self.paste(),
+            ids::COMPLETE => self.open_completion(),
             ids::FIND => self.open_search(false),
             ids::REPLACE => self.open_search(true),
             ids::GOTO_LINE => self.open_prompt(PromptKind::GotoLine, "Go to line", "42"),
@@ -1625,6 +1789,27 @@ fn same_file(a: Option<&Path>, b: &Path) -> bool {
     a == b
 }
 
+/// Identifier words already present in a document, deduplicated in order.
+///
+/// Buffer completion is language-agnostic and always useful; providers only add
+/// the parts a language knows (keywords, types, builtins).
+fn document_words(text: &str) -> Vec<Completion> {
+    let mut seen = std::collections::HashSet::new();
+    let mut words = Vec::new();
+    for word in text.split(|c: char| !is_word_char(c)) {
+        if word.chars().count() < 2 {
+            continue;
+        }
+        if seen.insert(word.to_string()) {
+            words.push(Completion::new(word.to_string(), CompletionKind::Variable));
+        }
+        if words.len() >= 2000 {
+            break;
+        }
+    }
+    words
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1954,6 +2139,44 @@ mod tests {
             panic!("expected the references list");
         };
         assert_eq!(picker.filtered.len(), 2);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn completion_accepts_the_selected_candidate() {
+        let dir = temp_project("complete");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "let counter = 0;\ncount\n").unwrap();
+
+        let mut app = App::new(Some(&file)).unwrap();
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .move_to(Position::new(1, 5));
+        app.execute_command(ids::COMPLETE);
+        assert!(app.completion.is_some(), "completion should open");
+
+        // Candidates are ordered shortest-first, so move to `counter`.
+        if let Some(state) = app.completion.as_mut() {
+            state.move_down();
+        }
+        app.accept_completion();
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.line_text(1),
+            "counter"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn completion_offers_language_keywords() {
+        let dir = temp_project("complete-keywords");
+        let file = dir.join("src/main.rs");
+
+        let mut app = App::new(Some(&file)).unwrap();
+        app.execute_command(ids::COMPLETE);
+        let state = app.completion.as_ref().expect("completion should open");
+        assert!(state.items.iter().any(|item| item.label == "fn"));
         fs::remove_dir_all(&dir).ok();
     }
 }

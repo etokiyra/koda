@@ -81,6 +81,7 @@ Implemented:
 - A document-symbol outline (`Ctrl+Shift+O`) for Rust and Go, with fuzzy
   filtering and jump-to-symbol, plus within-file go-to-definition (`F12`) and
   find-references (`Shift+F12`).
+- Completion (`Ctrl+Space`) merging provider keywords with buffer identifiers.
 - Lightweight git integration (branch + per-file status, via the `git` binary).
 - A distinctive Mellow-based visual identity: a semantic theme layer, an
   adaptive ASCII welcome scene, the Koda familiar and personality-rich empty
@@ -133,6 +134,7 @@ and establishes language context automatically.
 | `Ctrl+G` | Go to line |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
+| `Ctrl+Space` | Complete the word being typed |
 | `Ctrl+A` | Select all |
 | `Ctrl+B` | Toggle file tree |
 | `Ctrl+E` | Focus file tree / editor |

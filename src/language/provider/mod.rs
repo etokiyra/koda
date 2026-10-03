@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use crate::language::completion::Completion;
 use crate::language::detection::LanguageDescriptor;
 use crate::language::diagnostics::Diagnostic;
 use crate::language::id::LanguageId;
@@ -123,6 +124,14 @@ pub trait LanguageProvider: Send + Sync {
 
     /// Whole-word occurrences of the symbol at `(line, col)`.
     fn references(&self, _text: &str, _line: usize, _col: usize) -> Vec<Location> {
+        Vec::new()
+    }
+
+    /// Language-specific completion candidates, such as keywords and builtins.
+    ///
+    /// The app merges these with identifiers from the buffer, so providers only
+    /// need to contribute what is not already in the document.
+    fn completions(&self, _text: &str, _line: usize, _col: usize) -> Vec<Completion> {
         Vec::new()
     }
 

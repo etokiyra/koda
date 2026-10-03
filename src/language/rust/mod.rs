@@ -4,6 +4,7 @@
 //! It is intentionally conservative: it recognises the constructs that matter for
 //! readable code and stays fast and maintainable.
 
+use crate::language::completion::{Completion, CompletionKind};
 use crate::language::detection::LanguageDescriptor;
 use crate::language::diagnostics::Diagnostic;
 use crate::language::id::LanguageId;
@@ -55,6 +56,7 @@ impl LanguageProvider for RustProvider {
             Capability::DocumentSymbols,
             Capability::GotoDefinition,
             Capability::GotoReference,
+            Capability::Completion,
         ]
     }
 
@@ -88,6 +90,26 @@ impl LanguageProvider for RustProvider {
             Some(word) => crate::language::symbols::locations_of_word(text, &word),
             None => Vec::new(),
         }
+    }
+
+    fn completions(&self, _text: &str, _line: usize, _col: usize) -> Vec<Completion> {
+        let mut completions = Vec::new();
+        completions.extend(
+            KEYWORDS
+                .iter()
+                .map(|word| Completion::new(*word, CompletionKind::Keyword)),
+        );
+        completions.extend(
+            TYPES
+                .iter()
+                .map(|word| Completion::new(*word, CompletionKind::Type)),
+        );
+        completions.extend(
+            CONSTANTS
+                .iter()
+                .map(|word| Completion::new(*word, CompletionKind::Constant)),
+        );
+        completions
     }
 
     fn line_comment(&self) -> &'static str {

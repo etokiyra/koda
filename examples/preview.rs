@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! cargo run --example preview -- [width] [height] [mode]
-//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols
+//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols | completion
 //! ```
 
 use koda::app::App;
@@ -111,6 +111,14 @@ fn main() {
         "symbols" => {
             let mut app = App::new(Some(&root.join("src/ui/editor.rs"))).expect("app");
             app.execute_command(ids::SHOW_SYMBOLS);
+            app
+        }
+        "completion" => {
+            let mut app = App::new(Some(&root.join("src/app/mod.rs"))).expect("app");
+            app.execute_command(ids::COMPLETE);
+            if let Some(state) = app.completion.as_mut() {
+                state.set_prefix("ren".to_string());
+            }
             app
         }
         _ => App::new(Some(&root)).expect("app"),

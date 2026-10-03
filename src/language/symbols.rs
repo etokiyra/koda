@@ -274,7 +274,8 @@ fn go_line_symbol(line: &str, row: usize) -> Option<Symbol> {
     }
 }
 
-fn is_ident_char(c: char) -> bool {
+/// Whether `c` is part of an identifier.
+pub fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
