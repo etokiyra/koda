@@ -40,6 +40,7 @@ pub mod ids {
     pub const FORMAT: &str = "language.format";
     pub const HOVER: &str = "language.hover";
     pub const SETUP: &str = "language.setup";
+    pub const RESTART_SERVER: &str = "language.restartServer";
     pub const GOTO_DEFINITION: &str = "language.gotoDefinition";
     pub const FIND_REFERENCES: &str = "language.findReferences";
     pub const SHOW_SYMBOLS: &str = "language.symbols";
@@ -217,6 +218,9 @@ impl CommandRegistry {
                 .capability(Capability::Hover),
             Command::new(SETUP, "Language Setup…", "Language", None)
                 .describes("See which language tools Koda found"),
+            Command::new(RESTART_SERVER, "Restart Language Server", "Language", None)
+                .describes("Reconnect the language server for the active file")
+                .needs_doc(),
             Command::new(GOTO_DEFINITION, "Go to Definition", "Language", Some("F12"))
                 .describes("Jump to where the symbol is defined")
                 .needs_doc()

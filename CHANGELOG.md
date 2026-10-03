@@ -94,6 +94,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace symbols** (`Ctrl+T`) now also come from the server's
   `workspace/symbol` request when one is attached, merged with Koda's built-in
   project scan so results appear instantly and remain available offline.
+- **Reliability.** A server that never finishes its handshake is abandoned
+  after a timeout, and one that exits unexpectedly is retried automatically a
+  bounded number of times before Koda settles on its built-in intelligence.
+  **Restart Language Server** in the palette reconnects on demand. Every
+  failure falls back cleanly, so editing never depends on a server being up.
 
 ### Fixed
 

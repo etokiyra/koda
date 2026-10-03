@@ -76,7 +76,7 @@ The highest-value work. These turn Koda from an editor into an IDE.
       replaces the buffer as one undoable edit. Reuses system tools, detects
       whether they are installed and says so in the palette; automatic
       provisioning is still to come.
-- [ ] **Rename and code actions.**
+- [x] **Rename and code actions.**
 - [x] **Tool provisioning and lifecycle.** Discovery is implemented, and
       **Language Setup…** can install a missing tool through its official
       manager (`rustup`, `go install`). When a Rust/Go file is open and its
@@ -89,6 +89,10 @@ The highest-value work. These turn Koda from an editor into an IDE.
       keeps documents in sync and shows server diagnostics through the existing
       diagnostics UI. It falls back to the built-in heuristics when no server is
       available. See the next section for the features still to run over LSP.
+- [x] **Language-server reliability.** A handshake that never completes is
+      abandoned after a timeout, a server that exits is retried automatically a
+      bounded number of times, and **Restart Language Server** reconnects on
+      demand. Every failure falls back to the built-in providers.
 - [x] **LSP-backed completion, hover, go-to-definition and references.** When a
       server is attached these features come from it; the built-in providers
       remain as fallbacks. Rename and code actions are next.
