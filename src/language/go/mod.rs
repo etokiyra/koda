@@ -105,6 +105,7 @@ impl LanguageProvider for GoProvider {
             Capability::GotoReference,
             Capability::Completion,
             Capability::Formatting,
+            Capability::Hover,
         ]
     }
 
@@ -167,6 +168,11 @@ impl LanguageProvider for GoProvider {
 
     fn format(&self, _path: &Path, text: &str) -> FormatOutcome {
         gofmt(text)
+    }
+
+    fn hover(&self, text: &str, line: usize, col: usize) -> Option<crate::language::hover::Hover> {
+        let symbols = crate::language::symbols::go_symbols(text);
+        crate::language::hover::describe(text, line, col, &symbols)
     }
 
     fn line_comment(&self) -> &'static str {

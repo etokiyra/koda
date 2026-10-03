@@ -12,6 +12,7 @@ use crate::language::completion::Completion;
 use crate::language::detection::LanguageDescriptor;
 use crate::language::diagnostics::Diagnostic;
 use crate::language::format::FormatOutcome;
+use crate::language::hover::Hover;
 use crate::language::id::LanguageId;
 use crate::language::symbols::{Location, Symbol};
 
@@ -142,6 +143,11 @@ pub trait LanguageProvider: Send + Sync {
     /// Providers without a formatter return [`FormatOutcome::Unsupported`].
     fn format(&self, _path: &Path, _text: &str) -> FormatOutcome {
         FormatOutcome::Unsupported
+    }
+
+    /// Information about the symbol at `(line, col)`, for the hover popup.
+    fn hover(&self, _text: &str, _line: usize, _col: usize) -> Option<Hover> {
+        None
     }
 
     /// The comment marker used by "toggle comment" and friends.

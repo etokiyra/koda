@@ -9,7 +9,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 
-use crate::app::overlay::{CompletionState, Picker, Prompt, Search, SearchField};
+use crate::app::overlay::{CompletionState, HoverState, Picker, Prompt, Search, SearchField};
 use crate::ui::{centered, theme};
 
 /// Render a filterable list (command palette / quick open).
@@ -224,6 +224,64 @@ pub fn render_completion(
         }
         lines.push(line);
     }
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(theme::PANEL_BG)),
+        inner,
+    );
+}
+
+/// Render the hover popup, anchored just below the cursor.
+pub fn render_hover(frame: &mut Frame, area: Rect, hover: &HoverState, anchor: Option<(u16, u16)>) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let body_width = hover
+        .body
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
+    let width =
+        ((hover.title.chars().count().max(body_width) + 4).clamp(18, 64) as u16).min(area.width);
+    let rows = hover.body.len().max(1);
+    let height = ((rows + 2) as u16).min(area.height);
+
+    let (anchor_x, anchor_y) = anchor.unwrap_or((area.x, area.y));
+    let x = anchor_x.min(area.x + area.width.saturating_sub(width));
+    let below = anchor_y.saturating_add(1);
+    let y = if below + height <= area.y + area.height {
+        below
+    } else {
+        anchor_y.saturating_sub(height).max(area.y)
+    };
+    let rect = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+
+    frame.render_widget(Clear, rect);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme::accent())
+        .style(Style::default().bg(theme::PANEL_BG))
+        .title(Line::from(vec![
+            Span::styled("✦ ", theme::star()),
+            Span::styled(hover.title.clone(), theme::accent_bold()),
+        ]));
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+    if inner.height == 0 {
+        return;
+    }
+
+    let lines: Vec<Line> = hover
+        .body
+        .iter()
+        .take(inner.height as usize)
+        .map(|line| Line::from(Span::styled(line.clone(), theme::text())))
+        .collect();
     frame.render_widget(
         Paragraph::new(Text::from(lines)).style(Style::default().bg(theme::PANEL_BG)),
         inner,

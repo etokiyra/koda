@@ -34,6 +34,7 @@ pub mod ids {
     pub const DUPLICATE_LINE: &str = "edit.duplicateLine";
 
     pub const FORMAT: &str = "language.format";
+    pub const HOVER: &str = "language.hover";
     pub const GOTO_DEFINITION: &str = "language.gotoDefinition";
     pub const FIND_REFERENCES: &str = "language.findReferences";
     pub const SHOW_SYMBOLS: &str = "language.symbols";
@@ -190,6 +191,10 @@ impl CommandRegistry {
                 .describes("Format the active file with its language formatter")
                 .needs_doc()
                 .capability(Capability::Formatting),
+            Command::new(HOVER, "Hover", "Language", Some("Ctrl+Shift+H"))
+                .describes("Show information about the symbol under the cursor")
+                .needs_doc()
+                .capability(Capability::Hover),
             Command::new(GOTO_DEFINITION, "Go to Definition", "Language", Some("F12"))
                 .describes("Jump to where the symbol is defined")
                 .needs_doc()

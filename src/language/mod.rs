@@ -14,6 +14,7 @@ pub mod detection;
 pub mod diagnostics;
 pub mod format;
 pub mod go;
+pub mod hover;
 pub mod id;
 pub mod provider;
 pub mod rust;

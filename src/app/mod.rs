@@ -26,8 +26,8 @@ use crate::project::Workspace;
 use crate::terminal;
 use crate::ui;
 use overlay::{
-    CompletionState, Overlay, Picker, PickerAction, PickerItem, Prompt, PromptKind, Search,
-    SearchField, TreeFilter,
+    CompletionState, HoverState, Overlay, Picker, PickerAction, PickerItem, Prompt, PromptKind,
+    Search, SearchField, TreeFilter,
 };
 
 /// How long typing must pause before diagnostics are recomputed. Short enough to
@@ -64,6 +64,8 @@ pub struct App {
     pub tree_filter: Option<TreeFilter>,
     /// Completion popup, when open.
     pub completion: Option<CompletionState>,
+    /// Hover popup, when open.
+    pub hover: Option<HoverState>,
     /// Screen position of the editor cursor, updated during rendering.
     pub cursor_screen: Option<(u16, u16)>,
     pub tree_visible: bool,
@@ -113,6 +115,7 @@ impl App {
             recent_files: Vec::new(),
             tree_filter: None,
             completion: None,
+            hover: None,
             cursor_screen: None,
             tree_visible: true,
             focus: Focus::Editor,
@@ -176,6 +179,13 @@ impl App {
     // ----------------------------------------------------------------------
 
     fn handle_key(&mut self, key: KeyEvent) {
+        // A hover popup is informational; the next key dismisses it.
+        if self.hover.is_some() {
+            self.hover = None;
+            if key.code == KeyCode::Esc {
+                return;
+            }
+        }
         if self.handle_global_key(key) {
             return;
         }
@@ -224,7 +234,8 @@ impl App {
                     ('p', false) => self.open_quick_open(),
                     ('o', _) => self.execute_command(ids::OPEN),
                     ('f', _) => self.open_search(false),
-                    ('h', _) => self.open_search(true),
+                    ('h', true) => self.open_hover(),
+                    ('h', false) => self.open_search(true),
                     ('g', _) => self.execute_command(ids::GOTO_LINE),
                     ('b', _) => self.toggle_tree(),
                     ('e', _) => self.focus_tree(),
@@ -626,6 +637,28 @@ impl App {
         self.completion = Some(state);
     }
 
+    /// Show information about the symbol under the cursor.
+    fn open_hover(&mut self) {
+        let (language, text, cursor) = match self.editor.active_document() {
+            Some(doc) => (doc.buffer.language, doc.buffer.text(), doc.clamped_cursor()),
+            None => return,
+        };
+        let Some(hover) = self
+            .language
+            .provider(language)
+            .hover(&text, cursor.row, cursor.col)
+        else {
+            self.set_status("No symbol under the cursor");
+            return;
+        };
+        self.completion = None;
+        self.hover = Some(HoverState {
+            title: hover.title,
+            kind: hover.kind,
+            body: hover.body,
+        });
+    }
+
     /// The identifier characters immediately before the cursor.
     fn completion_prefix(&self) -> String {
         let Some(doc) = self.editor.active_document() else {
@@ -703,6 +736,7 @@ impl App {
             ids::CUT => self.cut(),
             ids::PASTE => self.paste(),
             ids::COMPLETE => self.open_completion(),
+            ids::HOVER => self.open_hover(),
             ids::FIND => self.open_search(false),
             ids::REPLACE => self.open_search(true),
             ids::GOTO_LINE => self.open_prompt(PromptKind::GotoLine, "Go to line", "42"),
@@ -2346,6 +2380,25 @@ mod tests {
             text.contains("fn main() {") && text.contains("    let x = 1;"),
             "expected formatted output, got:\n{text}"
         );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn hover_describes_the_symbol_under_the_cursor() {
+        let dir = temp_project("hover");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main() {\n    helper();\n}\n\nfn helper() {}\n").unwrap();
+
+        let mut app = App::new(Some(&file)).unwrap();
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .move_to(Position::new(1, 4));
+
+        app.execute_command(ids::HOVER);
+        let hover = app.hover.as_ref().expect("hover should open");
+        assert!(hover.title.contains("helper"), "title was {}", hover.title);
+        assert!(hover.body.iter().any(|line| line.contains("occurrence")));
         fs::remove_dir_all(&dir).ok();
     }
 }

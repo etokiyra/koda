@@ -360,3 +360,22 @@ fn completion_popup_is_drawn() {
     );
     cleanup(&dir);
 }
+
+#[test]
+fn hover_popup_is_drawn() {
+    let dir = temp_project("hover-ui");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    app.editor
+        .active_document_mut()
+        .unwrap()
+        .move_to(koda::editor::Position::new(0, 3));
+    app.execute_command(ids::HOVER);
+
+    let screen = draw_at(&mut app, 100, 24);
+    assert!(
+        screen.contains("fn main"),
+        "the hover popup should be visible:\n{screen}"
+    );
+    cleanup(&dir);
+}

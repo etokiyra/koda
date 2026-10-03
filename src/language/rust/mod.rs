@@ -61,6 +61,7 @@ impl LanguageProvider for RustProvider {
             Capability::GotoReference,
             Capability::Completion,
             Capability::Formatting,
+            Capability::Hover,
         ]
     }
 
@@ -118,6 +119,11 @@ impl LanguageProvider for RustProvider {
 
     fn format(&self, path: &Path, text: &str) -> FormatOutcome {
         rustfmt(path, text)
+    }
+
+    fn hover(&self, text: &str, line: usize, col: usize) -> Option<crate::language::hover::Hover> {
+        let symbols = crate::language::symbols::rust_symbols(text);
+        crate::language::hover::describe(text, line, col, &symbols)
     }
 
     fn line_comment(&self) -> &'static str {

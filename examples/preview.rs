@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! cargo run --example preview -- [width] [height] [mode]
-//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols | completion
+//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols | completion | hover
 //! ```
 
 use koda::app::App;
@@ -119,6 +119,21 @@ fn main() {
             if let Some(state) = app.completion.as_mut() {
                 state.set_prefix("ren".to_string());
             }
+            app
+        }
+        "hover" => {
+            let path = std::env::temp_dir().join("koda-preview-hover.rs");
+            std::fs::write(
+                &path,
+                "fn main() {\n    helper();\n    helper();\n}\n\nfn helper() {}\n",
+            )
+            .unwrap();
+            let mut app = App::new(Some(&path)).expect("app");
+            app.editor
+                .active_document_mut()
+                .unwrap()
+                .move_to(koda::editor::Position::new(1, 4));
+            app.execute_command(ids::HOVER);
             app
         }
         _ => App::new(Some(&root)).expect("app"),

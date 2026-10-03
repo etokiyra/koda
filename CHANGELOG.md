@@ -54,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reused from the system; if one is missing Koda says exactly what to install
   instead of failing silently. Automatic tool provisioning is not implemented
   yet.
+- Added hover. **Hover** (`Ctrl+Shift+H`) opens a dismissible popup anchored to
+  the cursor showing what the word is: its definition kind and source line when
+  it is defined in the file, plus how many times it occurs. The provider owns
+  the content, so language-server hover can replace it later.
 
 ### Performance
 

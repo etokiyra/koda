@@ -88,6 +88,8 @@ Implemented:
 - Completion (`Ctrl+Space`) merging provider keywords with buffer identifiers.
 - Formatting (`Ctrl+Shift+I`) through the language's own tool (`rustfmt`,
   `gofmt`), run off the UI thread.
+- Hover (`Ctrl+Shift+H`) showing a symbol's kind, definition line and usage
+  count.
 - Lightweight git integration (branch + per-file status, via the `git` binary).
 - A distinctive Mellow-based visual identity: a semantic theme layer, an
   adaptive ASCII welcome scene, the Koda familiar and personality-rich empty
@@ -142,6 +144,7 @@ and establishes language context automatically.
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
 | `Ctrl+Space` | Complete the word being typed |
 | `Ctrl+Shift+I` | Format the active file |
+| `Ctrl+Shift+H` | Hover: info about the symbol under the cursor |
 | `Ctrl+A` | Select all |
 | `Ctrl+B` | Toggle file tree |
 | `Ctrl+E` | Focus file tree / editor |

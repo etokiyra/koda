@@ -226,6 +226,13 @@ impl Search {
 // Completion
 // ---------------------------------------------------------------------------
 
+/// The hover popup's state.
+pub struct HoverState {
+    pub title: String,
+    pub kind: Option<crate::language::symbols::SymbolKind>,
+    pub body: Vec<String>,
+}
+
 /// The completion popup's state: a candidate pool filtered by the typed prefix.
 pub struct CompletionState {
     pool: Vec<Completion>,

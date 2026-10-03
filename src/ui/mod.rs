@@ -49,10 +49,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Overlay::Prompt(prompt) => overlay::render_prompt(frame, area, prompt),
     }
 
-    if app.overlay.is_none()
-        && let Some(completion) = &app.completion
-    {
-        overlay::render_completion(frame, area, completion, app.cursor_screen);
+    if app.overlay.is_none() {
+        if let Some(hover) = &app.hover {
+            overlay::render_hover(frame, area, hover, app.cursor_screen);
+        } else if let Some(completion) = &app.completion {
+            overlay::render_completion(frame, area, completion, app.cursor_screen);
+        }
     }
 }
 
