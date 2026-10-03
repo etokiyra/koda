@@ -243,9 +243,18 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   virtualenv.
 - **Managed runtimes.** Some language servers need a runtime, so Koda provisions
   one under its own data directory and launches the server with it: the .NET SDK
-  for OmniSharp (`DOTNET_ROOT`), and a checksum-verified Eclipse Adoptium JDK for
-  Eclipse JDT (`JAVA_HOME`). `Tool::launch_env` supplies the environment for both
-  probing and launching; the user's system environment is never modified.
+  for OmniSharp (`DOTNET_ROOT`), a checksum-verified Eclipse Adoptium JDK for
+  Eclipse JDT (`JAVA_HOME`), a dedicated JDK 21 for Kotlin (kept separate from
+  JDT's JDK 25), a checksum-verified Dart SDK for `dart language-server`, and a
+  `Perl::LanguageServer` installed into an isolated `local::lib` (`PERL5LIB`).
+  `Tool::launch_env` supplies the environment for both probing and launching; the
+  user's system environment is never modified. Downloads verify a published
+  checksum (Dart, Node) or GPG signature where one exists and fail closed
+  otherwise, and each install is bounded, locked and re-probed by launching the
+  real server. A platform without a verifiable distribution (for example Swift on
+  non-Ubuntu Linux, whose toolchain is a ~1 GB GPG-signed tarball) is
+  discovery-only and reports the limitation instead of shipping an unverified
+  toolchain.
 - **Split editor.** The editor keeps a single active document; a split stores
   one document index per pane and `editor.active` follows the focused pane, so
   every existing editing path keeps working unchanged. Panes share the tab

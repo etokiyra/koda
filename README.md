@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-498%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-503%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -121,14 +121,17 @@ The complexity lives inside Koda:
                               (and it stays out of your way when none exists)
 ```
 
-Missing something? Koda notices when a Rust, Go, Python, TypeScript,
-JavaScript, Java, C#, HTML, CSS, C, C++ or Shell file is open without its
+Missing something? Koda notices when a supported file is open without its
 language server and offers to install it, once, without blocking startup. Some
-servers have no portable, user-local installer — `clangd` ships with the C/C++
-toolchain — so Koda uses them when present and says so plainly when they are
-not. Others need a runtime, and Koda provisions that too: the **.NET SDK** for
-C# and a **checksum-verified Eclipse Adoptium JDK** for Java, both under Koda's
-own data directory.
+servers have no portable, user-local installer — `clangd` and `sourcekit-lsp`
+ship with their toolchains — so Koda uses them when present and says so plainly
+when they are not. Others need a runtime, and Koda provisions that too: the
+**.NET SDK** for C#, a **checksum-verified Eclipse Adoptium JDK** for Java, an
+isolated **JDK 21** for Kotlin, a **Dart SDK** for Dart, and a self-contained
+**lua-language-server**. `Perl::LanguageServer` installs into a Koda-managed
+`local::lib` with `cpanm`, and `sqls`, `solargraph`, `asm-lsp` and the npm-based
+servers use their own package managers. Everything lives under Koda's own data
+directory.
 **Language Setup…** in the command palette then lists every tool Koda knows
 about and installs a missing one with a single `Enter` — through the official
 channel, so provenance and integrity stay with the package manager:
@@ -150,9 +153,9 @@ channel, so provenance and integrity stay with the package manager:
 | `solargraph` | Ruby language server | `gem install solargraph` |
 | `asm-lsp` | Assembly language server | `cargo install asm-lsp` |
 | `sourcekit-lsp` | Swift language server | detected if installed (ships with the Swift toolchain) |
-| `dart` analysis server | Dart/Flutter language server | detected if installed (ships with the Dart SDK) |
-| `elixir-ls` | Elixir language server | detected if installed (needs Erlang/Elixir) |
-| `perl-language-server` | Perl language server | detected if installed (`cpan Perl::LanguageServer`) |
+| `dart` analysis server | Dart/Flutter language server | a **managed Dart SDK** (Google `dart-archive`, checksum-verified) |
+| `elixir-ls` / `language_server.sh` | Elixir language server | detected if installed (needs Erlang/Elixir) |
+| `Perl::LanguageServer` | Perl language server | `cpanm` into a Koda-managed `local::lib` (isolated from system Perl) |
 | `vscode-html-language-server` | HTML language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
 | `vscode-css-language-server` | CSS language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
 | `rustfmt` | Rust formatting | `rustup component add rustfmt` |
@@ -161,6 +164,7 @@ channel, so provenance and integrity stay with the package manager:
 | `clang-format` | C/C++ formatting | ships with the Clang/LLVM toolchain |
 | `shfmt` | Shell formatting | `go install mvdan.cc/sh/v3/cmd/shfmt@latest` |
 | `perltidy` | Perl formatting | `cpan Perl::Tidy` |
+| `dart format` | Dart formatting | ships with the managed Dart SDK (via a temporary-file contract) |
 
 Servers start lazily, recover automatically if they exit, and fall back to the
 built-in providers whenever one is unavailable, so editing never depends on

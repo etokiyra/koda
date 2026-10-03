@@ -31,7 +31,9 @@ PHP → built-in, offline (phpactor when present)
 Lua → built-in, offline (managed lua-language-server)
 Kotlin → built-in, offline (managed JDK 21 + kotlin-language-server)
 Ruby / SQL → built-in, offline (solargraph / sqls installed when possible)
-Perl / Dart / Elixir / Swift → built-in, offline (server discovered when present)
+Dart → built-in, offline (managed Dart SDK + analysis server)
+Perl → built-in, offline (Perl::LanguageServer in a managed local::lib)
+Elixir / Swift → built-in, offline (server discovered when present)
 Assembly → built-in, offline (asm-lsp installed when possible)
 HTML / CSS → built-in, offline (npm servers)
 then expand
@@ -334,11 +336,13 @@ command palette already reports which are available. Filling them in is additive
   provisions an isolated, checksum-verified JDK 21 under `tools/kotlin-jdk` and
   launches the server with it; the JDK 25 used by `jdtls` is untouched. A live
   test guards the JDK 21 + server + LSP handshake path.
-- **Some language servers are discovery-only.** The Dart, Elixir, Swift and Perl
-  servers need a toolchain Koda does not manage (the Dart SDK, Erlang/Elixir, the
-  Swift toolchain, a Perl with `Perl::LanguageServer`). Koda finds and launches
-  them when present and keeps built-in editing otherwise; it never promises an
-  install it cannot perform.
+- **Some language servers remain discovery-only.** ElixirLS needs a user
+  Erlang/Elixir toolchain, and Swift's SourceKit-LSP needs the Swift toolchain,
+  which swift.org publishes only for specific Linux distributions as ~1 GB
+  GPG-signed tarballs (no SHA-256). Koda finds and launches them when present,
+  keeps built-in editing otherwise, and never promises an install it cannot
+  perform. Dart and Perl are now managed (Google's checksum-verified Dart SDK;
+  `Perl::LanguageServer` into an isolated `local::lib` via `cpanm`).
 - `.gitignore` discovery is capped (256 nested files, 4096 directories) so
   opening a huge monorepo stays predictable; a rule beyond the cap is not
   applied.

@@ -18,8 +18,14 @@ use koda::language::tools::{Tool, ToolRegistry, launch_env};
 
 fn handshake(tool: Tool, language: LanguageId) {
     let registry = ToolRegistry::discover();
+    // A tool is usable only when its probe succeeds: `perl` may exist while
+    // `Perl::LanguageServer` is not installed, or `dart` may be absent.
+    if !registry.available(tool) {
+        eprintln!("skipping {tool:?}: not available");
+        return;
+    }
     let Some(path) = registry.program_path(tool).map(|p| p.to_path_buf()) else {
-        eprintln!("skipping {tool:?}: not installed");
+        eprintln!("skipping {tool:?}: no executable path");
         return;
     };
     let root = std::env::temp_dir().join("koda-live-optional");

@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Managed Dart SDK, isolated Perl server, and the Swift assessment
+
+- **Dart is now fully automatic.** Koda provisions its own Dart SDK on demand
+  from Google's official `dart-archive`, verifying the sibling `.sha256sum`
+  (fail-closed) and extracting under `tools/dart-sdk`. It is discovered through
+  the managed bin directory and launched as `dart language-server`, giving
+  diagnostics, completion, hover, navigation, symbols, rename and code actions.
+  Only Dart is downloaded — never Flutter, because the analysis server is part
+  of Dart. `dart format` is integrated through a **safe temporary-file contract**
+  (`--output=show --summary=none`, since it does not read stdin). **Live-verified
+  on this host**: checksum, extraction, discovery, LSP `initialize` handshake and
+  formatting.
+- **Perl has a real, isolated installer.** `Perl::LanguageServer` ships no
+  executable; the real launch is
+  `perl -MPerl::LanguageServer -e Perl::LanguageServer->run` over stdio. Koda
+  can install the module with `cpanm --local-lib <tools/perl5> --notest` into an
+  isolated `local::lib` (never the system Perl), and launches it with `PERL5LIB`
+  and `PATH` scoped to that library. `cpanm` is the only prerequisite; without
+  it Koda discovers an existing server and explains the requirement.
+- **ElixirLS discovery broadened.** The tool prober now tries alternate launcher
+  names, so an ElixirLS release's `language_server.sh` is found alongside the
+  `elixir-ls` binary packaged by Homebrew/Mason/AUR.
+- **Swift assessment (deferred, documented).** The official Linux toolchains are
+  large (Swift 6.4.0 Ubuntu 24.04 is ~1.12 GB compressed, ~2.5 GB extracted) and
+  are only published for specific Ubuntu/Debian/Fedora/Amazon/RHEL releases;
+  swift.org distributes GPG-signed tarballs (no SHA-256), and this host is an
+  unsupported Arch/tmpfs environment. Koda therefore keeps reliable discovery
+  (`sourcekit-lsp` on `PATH` and the common Swift bin directories), built-in
+  highlighting, and a clear capability message rather than shipping an
+  unverifiable multi-gigabyte installer. The official URL scheme and
+  `gpg --verify` against `https://www.swift.org/keys/all-keys.asc` were
+  confirmed and are recorded for a future managed implementation.
+
 ### Core web tokenizer and wider formatting
 
 - **JavaScript/TypeScript tokenizer.** Regex and JSX literals are now
