@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Zero configuration
+
+- **Language Setup…** can now install a missing tool with one action, using
+  only the official acquisition path: `rustup component add …` for Rust tooling
+  and `go install …@latest` for `gopls`. Koda runs no bespoke downloader, so
+  provenance and integrity remain the package managers' responsibility.
+- Installation runs on the background worker with a busy indicator; Koda
+  re-probes when it finishes and, if a server is now available, starts it.
+  Failures (for example, offline) are reported verbatim and editing continues.
+
 ### Reliability
 
 - External-change detection: Koda watches open files for on-disk changes
