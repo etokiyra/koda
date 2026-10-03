@@ -32,8 +32,9 @@ Lua → built-in, offline (managed lua-language-server)
 Kotlin → built-in, offline (managed JDK 21 + kotlin-language-server)
 Ruby / SQL → built-in, offline (solargraph / sqls installed when possible)
 Dart → built-in, offline (managed Dart SDK + analysis server)
-Perl → built-in, offline (Perl::LanguageServer in a managed local::lib)
-Elixir / Swift → built-in, offline (server discovered when present)
+Perl → built-in, offline (bootstrapped cpanm + managed local::lib)
+Elixir → built-in, offline (managed Erlang/OTP + Elixir + built ElixirLS)
+Swift → built-in, offline (GPG-verified toolchain on supported distributions)
 Assembly → built-in, offline (asm-lsp installed when possible)
 HTML / CSS → built-in, offline (npm servers)
 then expand
@@ -247,8 +248,15 @@ command palette already reports which are available. Filling them in is additive
       structural diagnostics where meaningful, symbols, completion and within-file
       navigation, plus detection, project markers and scaffolding. `solargraph`
       (Ruby), `sqls` (SQL) and `asm-lsp` (Assembly) install automatically through
-      their own package managers; the Dart, Elixir, Swift and Perl servers are
-      discovered when their toolchain is present.
+      their own package managers.
+- [x] First-class managed toolchains for the previously discovery-only languages.
+      **Dart** provisions a checksum-verified SDK; **Swift** downloads and
+      GPG-verifies the official toolchain on the distributions swift.org builds
+      for; **Elixir** installs a checksum-verified Erlang/OTP + Elixir pair and
+      builds the official ElixirLS into a private Mix home; **Perl** bootstraps a
+      checksum-verified `cpanm` and installs `Perl::LanguageServer` into an
+      isolated `local::lib`. Each runs the real server to verify the result, and
+      every unsupported platform is reported instead of attempted.
 - [x] Web tokenizer depth: regex literals (expression-position lookback) and
       single-line JSX tags, attributes, fragments and closing tags for
       JavaScript/TypeScript/JSX, with generics and comparisons kept as operators.
@@ -336,13 +344,16 @@ command palette already reports which are available. Filling them in is additive
   provisions an isolated, checksum-verified JDK 21 under `tools/kotlin-jdk` and
   launches the server with it; the JDK 25 used by `jdtls` is untouched. A live
   test guards the JDK 21 + server + LSP handshake path.
-- **Some language servers remain discovery-only.** ElixirLS needs a user
-  Erlang/Elixir toolchain, and Swift's SourceKit-LSP needs the Swift toolchain,
-  which swift.org publishes only for specific Linux distributions as ~1 GB
-  GPG-signed tarballs (no SHA-256). Koda finds and launches them when present,
-  keeps built-in editing otherwise, and never promises an install it cannot
-  perform. Dart and Perl are now managed (Google's checksum-verified Dart SDK;
-  `Perl::LanguageServer` into an isolated `local::lib` via `cpanm`).
+- **Managed Swift is limited to swift.org's platforms, and Perl to older Perls.**
+  The official Swift Linux toolchains link against the distribution's libraries,
+  so Koda installs one only where swift.org builds for the running release
+  (Ubuntu, Debian, Fedora, Amazon Linux); elsewhere it discovers an existing
+  toolchain and explains the limitation. `Perl::LanguageServer` depends on `Coro`,
+  whose latest release does not compile on Perl ≥ 5.41, so Koda bootstraps a
+  checksum-verified `cpanm` and installs into an isolated `local::lib` on the
+  Perls that can build it, and reports the failure clearly otherwise. Every other
+  language is genuinely provisioned (Dart SDK, Erlang/OTP + Elixir + ElixirLS,
+  JDK 21/25, .NET SDK, Node.js, Lua).
 - `.gitignore` discovery is capped (256 nested files, 4096 directories) so
   opening a huge monorepo stays predictable; a rule beyond the cap is not
   applied.

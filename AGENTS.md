@@ -241,20 +241,33 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   shared managed directory are guarded by an advisory lock (with stale-lock
   recovery) so concurrent Koda instances cannot corrupt the same npm prefix or
   virtualenv.
-- **Managed runtimes.** Some language servers need a runtime, so Koda provisions
-  one under its own data directory and launches the server with it: the .NET SDK
-  for OmniSharp (`DOTNET_ROOT`), a checksum-verified Eclipse Adoptium JDK for
-  Eclipse JDT (`JAVA_HOME`), a dedicated JDK 21 for Kotlin (kept separate from
-  JDT's JDK 25), a checksum-verified Dart SDK for `dart language-server`, and a
-  `Perl::LanguageServer` installed into an isolated `local::lib` (`PERL5LIB`).
-  `Tool::launch_env` supplies the environment for both probing and launching; the
-  user's system environment is never modified. Downloads verify a published
-  checksum (Dart, Node) or GPG signature where one exists and fail closed
-  otherwise, and each install is bounded, locked and re-probed by launching the
-  real server. A platform without a verifiable distribution (for example Swift on
-  non-Ubuntu Linux, whose toolchain is a ~1 GB GPG-signed tarball) is
-  discovery-only and reports the limitation instead of shipping an unverified
-  toolchain.
+- **Managed toolchains.** Some language servers need a whole toolchain, so Koda
+  provisions one under its own data directory and launches the server with it:
+  the .NET SDK for OmniSharp (`DOTNET_ROOT`), a checksum-verified Eclipse Adoptium
+  JDK for Eclipse JDT (`JAVA_HOME`), a dedicated JDK 21 for Kotlin (kept separate
+  from JDT's JDK 25), a checksum-verified Dart SDK for `dart language-server`, a
+  coordinated Erlang/OTP + Elixir + ElixirLS stack for Elixir, and the official
+  Swift toolchain for `sourcekit-lsp`. `Tool::launch_env` supplies the environment
+  for both probing and launching; the user's system environment is never modified.
+- **Every managed install is verified and fail-closed.** `InstallStep` grew the
+  shared mechanisms the new languages needed rather than four one-off installers:
+  `DownloadGpg` (detached signature against a private keyring), `GithubRelease`
+  (the SHA-256 digest GitHub reports for a release asset), and `BobBuild` (the
+  checksum `builds.hex.pm` publishes for an Erlang/Elixir runtime). Downloads use
+  a stall-detecting, long-transfer timeout; an `InstallCommand` may set its own
+  environment and working directory, which is how ElixirLS is built with a private
+  `MIX_HOME`/`HEX_HOME`. Each install is bounded, locked and re-probed by launching
+  the **real server**, and a verified download that still cannot run (a missing
+  shared library, a broken launcher) reports the real reason instead of a generic
+  failure.
+- **Platform support is resolved, never guessed.** `swift_platform` and
+  `bob_platform` map the running distribution from `/etc/os-release` (including
+  `ID_LIKE` derivatives) to the exact upstream artifact. A distribution upstream
+  does not build for is reported as unsupported — Koda does not download a
+  toolchain that cannot run there — while a glibc system with no explicit `bob`
+  build uses a best-effort target and still verifies the result. Perl bootstraps a
+  checksum-verified `cpanm` so an interactive, unconfigured `cpan` is never run,
+  and installs into an isolated `local::lib` (`PERL5LIB`).
 - **Split editor.** The editor keeps a single active document; a split stores
   one document index per pane and `editor.active` follows the focused pane, so
   every existing editing path keeps working unchanged. Panes share the tab
@@ -376,6 +389,18 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   prefer incremental updates.
 - **Non-UTF-8 paths in state.** Recent/session stores serialize paths lossily, so
   a non-UTF-8 path may not round-trip.
+- **Managed Swift is limited to swift.org's platforms.** The official Linux
+  toolchains link against the distribution's libraries, so Koda installs one only
+  where swift.org builds for the running release (Ubuntu, Debian, Fedora, Amazon
+  Linux, RHEL). Elsewhere it discovers an existing toolchain and explains the
+  limitation. Swift downloads are large (~1.1 GB; ~3.5 GB extracted) and need a
+  disk with room for both.
+- **`Perl::LanguageServer` cannot build on Perl ≥ 5.41.** Its `Coro` dependency
+  (latest release 6.57, 2020) does not compile against Perl 5.42's changed
+  `Time::HiRes` API. Koda bootstraps a checksum-verified `cpanm` and installs the
+  module into an isolated `local::lib`, which works on older Perls, and reports the
+  build failure when it cannot. A pre-installed server is still discovered on any
+  Perl.
 
 ---
 

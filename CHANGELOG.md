@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Managed Swift, Elixir and Perl — every discovery-only language made first-class
+
+- **Swift is now managed on supported systems.** On a distribution swift.org
+  builds for (Ubuntu 22.04/24.04/26.04, Debian 12/13, Fedora 39/41, Amazon Linux
+  2/2023, mapped through `/etc/os-release` including derivatives) Koda resolves
+  the exact toolchain artifact, downloads it, **verifies swift.org's detached GPG
+  signature against `https://www.swift.org/keys/all-keys.asc` in an isolated
+  keyring (fail-closed)**, and extracts it under `tools/swift`. `sourcekit-lsp`
+  is then discovered and launched with a scoped `PATH`. The download is large
+  (~1.1 GB, ~3.5 GB extracted) and Koda shows that estimate before offering it.
+  On a distribution swift.org does not build for (for example Arch, whose ABI
+  differs), Koda keeps discovery and built-in editing and explains the exact
+  limitation instead of downloading a toolchain that cannot run.
+- **Elixir is now a fully provisioned stack.** Koda installs a compatible
+  **Erlang/OTP + Elixir** pair from the Erlang Ecosystem Foundation's
+  `builds.hex.pm` (the service behind the official `setup-beam` action),
+  checksum-verified via its `builds.txt`, runs the OTP `Install -minimal` pass,
+  fetches the official **ElixirLS** release (GitHub asset digest verified) and
+  builds it once with the managed runtime and a **private `MIX_HOME`/`HEX_HOME`**
+  so `~/.mix` is never touched. ElixirLS's `language_server.sh` is discovered and
+  launched with the managed runtimes on a scoped `PATH`. Works on glibc systems
+  even where `bob` has no explicit build (best-effort Ubuntu 24.04 target,
+  excluded on musl). **Live-verified on this host**: OTP + Elixir runtime and the
+  ElixirLS language server.
+- **Perl now bootstraps its own installer.** Koda downloads a **checksum-verified
+  `App::cpanminus`** archive (so an interactive, unconfigured `cpan` is never run)
+  and installs `Perl::LanguageServer` with `--local-lib <tools/perl5>` — the
+  system Perl is never modified. The server is launched through its real module
+  invocation (`perl -MPerl::LanguageServer -e Perl::LanguageServer->run`) with
+  `PERL5LIB`/`PATH` scoped to the managed library. A known upstream limitation is
+  reported honestly: `Perl::LanguageServer` depends on `Coro`, whose latest
+  release (6.57, 2020) does not compile on Perl ≥ 5.41.
+- **Shared installer architecture.** New signature-verified (`DownloadGpg`) and
+  GitHub-digest (`GithubRelease`) download steps, a `BobBuild` step for
+  checksum-verified hex.pm runtimes, install commands with per-command environment
+  and working directory, resilient downloads (stall detection, long-transfer
+  timeout), a **private GPG keyring**, and a real failure reason when a verified
+  install does not run (for example a missing shared library).
+- **Setup UX.** Language Setup now distinguishes what Koda can install, what
+  needs a missing prerequisite, and what the platform does not support, and shows
+  an approximate download size before a large managed install.
+
 ### Managed Dart SDK, isolated Perl server, and the Swift assessment
 
 - **Dart is now fully automatic.** Koda provisions its own Dart SDK on demand
