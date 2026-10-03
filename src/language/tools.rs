@@ -72,6 +72,19 @@ const ELIXIR_VERSION: &str = "1.18.4";
 const CPANM_VERSION: &str = "1.7049";
 const CPANM_SHA256: &str = "b9ffb88e62a06aa91bd7d5a28ef6bdbb942608aea90e3969aa29b33640035214";
 
+/// The standalone `clangd` release Koda provisions. The clangd project publishes
+/// a small, self-contained bundle per platform (much smaller than a full LLVM
+/// toolchain), with a SHA-256 digest on the GitHub asset.
+const CLANGD_VERSION: &str = "23.1.0";
+
+/// The prebuilt `asm-lsp` release Koda provisions where one exists, with
+/// `cargo install` as the fallback.
+const ASM_LSP_VERSION: &str = "0.10.1";
+
+/// The `phpactor` release whose `phpactor.phar` Koda provisions. phpactor is a
+/// single executable phar, so Composer is not required.
+const PHPACTOR_VERSION: &str = "2026.06.23.0";
+
 /// The longest a single install command may run before it is killed. Package
 /// managers can legitimately take a while on a slow link, but a hung process
 /// must never wedge the background worker forever.
@@ -403,21 +416,19 @@ impl Tool {
     pub fn install_hint(self) -> &'static str {
         match self {
             Tool::RustAnalyzer => "install with `rustup component add rust-analyzer`",
-            Tool::Gopls => "install with `go install golang.org/x/tools/gopls@latest`",
+            Tool::Gopls => "Koda installs gopls with `go install`, provisioning Go if missing",
             Tool::Pylsp => "install `python-lsp-server` into a Koda-managed environment",
             Tool::BashLs => "install with npm — Koda provisions Node.js if missing",
             Tool::TypeScriptLs => "install with npm — Koda provisions Node.js if missing",
-            Tool::Clangd => {
-                "install clangd with your system package manager (it ships with most C/C++ toolchains)"
-            }
+            Tool::Clangd => "Koda can install the official clangd release",
             Tool::Jdtls => "Koda can install a managed JDK and Eclipse JDT",
             Tool::OmniSharp => "Koda can install the .NET SDK and OmniSharp",
             Tool::KotlinLs => "Koda can install a managed JDK 21 and kotlin-language-server",
-            Tool::Phpactor => "install phpactor with `composer global require phpactor/phpactor`",
+            Tool::Phpactor => "Koda can install phpactor.phar (needs a PHP runtime)",
             Tool::LuaLs => "Koda can install a self-contained lua-language-server",
-            Tool::Sqls => "install with `go install github.com/sqls-server/sqls@latest`",
-            Tool::RubyLs => "install with `gem install solargraph`",
-            Tool::AsmLsp => "install with `cargo install asm-lsp`",
+            Tool::Sqls => "Koda installs sqls with `go install`, provisioning Go if missing",
+            Tool::RubyLs => "Koda installs solargraph into an isolated gem home (needs Ruby)",
+            Tool::AsmLsp => "Koda can install the prebuilt asm-lsp release",
             Tool::PerlLs => {
                 "Koda bootstraps cpanm and installs Perl::LanguageServer into an isolated local::lib"
             }
@@ -450,6 +461,11 @@ impl Tool {
             Tool::Jdtls => Some(260_000_000),
             Tool::OmniSharp => Some(280_000_000),
             Tool::LuaLs => Some(15_000_000),
+            // clangd's self-contained bundle, including its clang resource
+            // headers, is about 120 MB per platform.
+            Tool::Clangd if clangd_asset().is_some() && !libc_is_musl() => Some(120_000_000),
+            // Go's official archive is about 70 MB.
+            Tool::Gopls | Tool::Sqls if go_platform().is_some() => Some(70_000_000),
             _ => None,
         }
     }
@@ -547,28 +563,25 @@ impl Tool {
         match self {
             Tool::RustAnalyzer => Some(("rustup", &["component", "add", "rust-analyzer"])),
             Tool::Rustfmt => Some(("rustup", &["component", "add", "rustfmt"])),
-            Tool::Gopls => Some(("go", &["install", "golang.org/x/tools/gopls@latest"])),
             Tool::Pylsp => Some(("pipx", &["install", "python-lsp-server"])),
             Tool::BashLs => Some(("npm", &["install", "-g", "bash-language-server"])),
             Tool::TypeScriptLs => Some((
                 "npm",
                 &["install", "-g", "typescript-language-server", "typescript"],
             )),
-            // `clangd` has no portable user-local installer; it ships with the
-            // C/C++ toolchain and is used when it is already present.
+            // `clangd`, `phpactor`, `lua-language-server`, Kotlin, Dart, Elixir,
+            // Swift and Go tooling are installed by Koda's own managed plans.
             Tool::Clangd => None,
-            // `phpactor` is a Composer package; Koda uses it when present
-            // rather than installing Composer and modifying the user's setup.
             Tool::Phpactor => None,
-            // `lua-language-server` is installed by Koda's own managed download
-            // plan rather than a package-manager command.
             Tool::LuaLs => None,
-            // `kotlin-language-server` plus a dedicated JDK 21 are installed by
-            // Koda's own managed download plan.
             Tool::KotlinLs => None,
-            Tool::Sqls => Some(("go", &["install", "github.com/sqls-server/sqls@latest"])),
-            Tool::RubyLs => Some(("gem", &["install", "solargraph"])),
-            Tool::AsmLsp => Some(("cargo", &["install", "asm-lsp"])),
+            // Go tooling is installed by Koda's managed plan, which provisions
+            // Go itself when it is missing.
+            Tool::Gopls | Tool::Sqls => None,
+            // `solargraph` installs into a Koda-private gem home.
+            Tool::RubyLs => None,
+            // `asm-lsp` uses a prebuilt release, falling back to `cargo`.
+            Tool::AsmLsp => None,
             // Perl, Dart, Elixir and Swift servers are installed by Koda's own
             // plans rather than a single package-manager command.
             Tool::PerlLs | Tool::Pls | Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => None,
@@ -580,7 +593,7 @@ impl Tool {
             }
             Tool::Gofmt => None,
             Tool::Prettier => Some(("npm", &["install", "-g", "prettier"])),
-            Tool::Shfmt => Some(("go", &["install", "mvdan.cc/sh/v3/cmd/shfmt@latest"])),
+            Tool::Shfmt => None,
             // `clang-format` and `perltidy` ship with their language toolchains.
             Tool::ClangFormat | Tool::PerlTidy => None,
         }
@@ -591,7 +604,9 @@ impl Tool {
     pub fn prerequisites(self) -> &'static [&'static str] {
         match self {
             Tool::RustAnalyzer | Tool::Rustfmt => &["rustup"],
-            Tool::Gopls | Tool::Gofmt => &["go"],
+            // `gopls`/`sqls`/`shfmt` are installed by Koda's own plan, which
+            // provisions the official Go toolchain when none is present.
+            Tool::Gopls | Tool::Gofmt | Tool::Sqls | Tool::Shfmt => &[],
             Tool::Pylsp => &["python3"],
             // Koda can provision Node.js itself, so npm is not a hard
             // prerequisite. The install plan checks for `curl` and an archive
@@ -600,23 +615,24 @@ impl Tool {
             Tool::HtmlLs | Tool::CssLs => &[],
             // `jdtls` is a Python launcher script.
             Tool::Jdtls => &["python3"],
-            Tool::Clangd | Tool::OmniSharp | Tool::Phpactor => &[],
+            // `clangd` uses a self-contained bundle; `phpactor` needs only a PHP
+            // runtime; `asm-lsp` uses a prebuilt release.
+            Tool::Clangd | Tool::OmniSharp => &[],
+            Tool::Phpactor => &["php"],
             Tool::LuaLs => &[],
             // The dedicated JDK 21 is provided by Koda's managed download plan,
             // so no system Java is required.
             Tool::KotlinLs => &[],
-            // These install through a toolchain the user provides, and are
-            // otherwise discovered when already present.
-            Tool::Sqls => &["go"],
+            // `solargraph` installs into a Koda-private gem home but still needs
+            // a system Ruby.
             Tool::RubyLs => &["gem"],
-            Tool::AsmLsp => &["cargo"],
+            Tool::AsmLsp => &[],
             Tool::PerlLs | Tool::Pls => &["perl"],
             // Dart, Erlang/Elixir and the Swift toolchain are provided by
             // Koda's managed download plans.
             Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => &[],
             // Formatters.
             Tool::Prettier => &[],
-            Tool::Shfmt => &["go"],
             Tool::ClangFormat | Tool::PerlTidy => &[],
         }
     }
@@ -642,37 +658,31 @@ impl Tool {
         match self {
             Tool::RustAnalyzer => component_attempts("rust-analyzer"),
             Tool::Rustfmt => component_attempts("rustfmt"),
-            Tool::Gopls => vec![InstallAttempt::one(
-                "go install",
-                InstallCommand::new("go", &["install", "golang.org/x/tools/gopls@latest"]),
-            )],
+            // Go tooling installs with `go install`, provisioning the official
+            // Go toolchain when none is present.
+            Tool::Gopls => go_attempts(&["golang.org/x/tools/gopls"]),
             Tool::Pylsp => python_attempts(),
             Tool::BashLs => npm_attempts(&["bash-language-server"]),
             Tool::TypeScriptLs => npm_attempts(&["typescript-language-server", "typescript"]),
-            // `clangd` ships with the C/C++ toolchain; there is no user-local
-            // installer to run, so Koda uses it when it is already present.
-            Tool::Clangd => Vec::new(),
-            // `phpactor` is discovered when installed; Koda does not install
-            // Composer or modify the user's global setup.
-            Tool::Phpactor => Vec::new(),
+            // The clangd project publishes a small, self-contained bundle, so
+            // Koda does not need a full LLVM toolchain.
+            Tool::Clangd => clangd_attempts(),
+            // `phpactor` is a single phar; Koda downloads it directly and only
+            // needs a PHP runtime, not Composer.
+            Tool::Phpactor => phpactor_attempts(),
             // `lua-language-server` ships a self-contained, runtime-free archive
             // per platform, so Koda manages it like the JDK and OmniSharp.
             Tool::LuaLs => lua_ls_attempts(),
             // `kotlin-language-server` needs a JDK whose version its bundled
             // compiler understands, so Koda installs a dedicated JDK 21.
             Tool::KotlinLs => kotlin_ls_attempts(),
-            Tool::Sqls => vec![InstallAttempt::one(
-                "go install",
-                InstallCommand::new("go", &["install", "github.com/sqls-server/sqls@latest"]),
-            )],
-            Tool::RubyLs => vec![InstallAttempt::one(
-                "gem install",
-                InstallCommand::new("gem", &["install", "solargraph"]),
-            )],
-            Tool::AsmLsp => vec![InstallAttempt::one(
-                "cargo install",
-                InstallCommand::new("cargo", &["install", "asm-lsp"]),
-            )],
+            Tool::Sqls => go_attempts(&["github.com/sqls-server/sqls"]),
+            // `solargraph` installs into a Koda-private gem home when a system
+            // Ruby is available.
+            Tool::RubyLs => ruby_attempts(),
+            // A prebuilt `asm-lsp` release where one exists, otherwise `cargo`
+            // (bootstrapping the Rust toolchain when needed).
+            Tool::AsmLsp => asm_lsp_attempts(),
             // The Dart SDK is self-contained and managed by Koda.
             Tool::DartAnalyzer => dart_sdk_attempts(),
             // `Perl::LanguageServer` bootstraps cpanm and installs into an
@@ -691,10 +701,7 @@ impl Tool {
             // `gofmt` ships with the Go toolchain; there is nothing to install.
             Tool::Gofmt => Vec::new(),
             Tool::Prettier => npm_attempts(&["prettier"]),
-            Tool::Shfmt => vec![InstallAttempt::one(
-                "go install",
-                InstallCommand::new("go", &["install", "mvdan.cc/sh/v3/cmd/shfmt@latest"]),
-            )],
+            Tool::Shfmt => go_attempts(&["mvdan.cc/sh/v3/cmd/shfmt"]),
             // `clang-format` and `perltidy` ship with their toolchains.
             Tool::ClangFormat | Tool::PerlTidy => Vec::new(),
         }
@@ -795,6 +802,13 @@ pub enum InstallStep {
     /// the system's wide library and a link to the system's `libxml2.so.2`,
     /// without modifying the system.
     SwiftCompat { dest: PathBuf },
+    /// Download and verify the latest stable official Go toolchain, whose
+    /// version and SHA-256 `go.dev/dl` publishes in one JSON document. The
+    /// archive still needs an [`InstallStep::Extract`].
+    GoToolchain { dest: PathBuf },
+    /// Mark a file executable. Used for a downloaded single-file program (a
+    /// `.phar`, a prebuilt binary) that must run directly.
+    MakeExecutable { path: PathBuf },
     /// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`, optionally
     /// dropping `strip` leading path components.
     Extract {
@@ -855,57 +869,296 @@ fn component_attempts(component: &'static str) -> Vec<InstallAttempt> {
         "rustup",
         InstallCommand::new("rustup", &["component", "add", component]),
     )];
-    if let Some(bootstrap) = rustup_bootstrap(component) {
-        attempts.push(bootstrap);
+    if let Some(home) = home_dir() {
+        let rustup = home.join(".cargo/bin/rustup");
+        if let Some(bootstrap) = rustup_bootstrap_with(InstallCommand::with_args(
+            rustup.to_string_lossy().into_owned(),
+            vec!["component".into(), "add".into(), component.into()],
+        )) {
+            attempts.push(bootstrap);
+        }
     }
     attempts
 }
 
-/// Bootstrap the Rust toolchain with the official `rustup` installer, then add
-/// the component. Skipped on Windows, where the installer is a binary.
-fn rustup_bootstrap(component: &'static str) -> Option<InstallAttempt> {
-    if cfg!(windows) {
+/// Install a Rust tool with `cargo`, bootstrapping the toolchain when absent.
+fn cargo_attempts(packages: &[&str]) -> Vec<InstallAttempt> {
+    let args = cargo_install_args(packages);
+    let mut attempts = vec![InstallAttempt::one(
+        "cargo install",
+        InstallCommand::with_args("cargo", args.clone()),
+    )];
+    if let Some(home) = home_dir() {
+        let cargo = home.join(".cargo/bin/cargo");
+        if let Some(bootstrap) = rustup_bootstrap_with(InstallCommand::with_args(
+            cargo.to_string_lossy().into_owned(),
+            args,
+        )) {
+            attempts.push(bootstrap);
+        }
+    }
+    attempts
+}
+
+/// The `cargo install <crate>` arguments for a set of packages.
+fn cargo_install_args(packages: &[&str]) -> Vec<String> {
+    let mut args = vec!["install".to_string()];
+    for package in packages {
+        args.push((*package).to_string());
+    }
+    args
+}
+
+fn home_dir() -> Option<PathBuf> {
+    Some(PathBuf::from(std::env::var_os("HOME")?))
+}
+
+/// The `curl` command that fetches the official `rustup` installer script.
+fn rustup_init_command() -> InstallCommand {
+    let script = tools_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("rustup-init.sh");
+    InstallCommand::with_args(
+        "curl",
+        vec![
+            "--proto".into(),
+            "=https".into(),
+            "--tlsv1.2".into(),
+            "-sSf".into(),
+            "--connect-timeout".into(),
+            "30".into(),
+            "--max-time".into(),
+            "120".into(),
+            "--max-filesize".into(),
+            (1024 * 1024).to_string(),
+            "https://sh.rustup.rs".into(),
+            "-o".into(),
+            script.to_string_lossy().into_owned(),
+        ],
+    )
+}
+
+/// The command that runs the fetched `rustup` installer without touching shell
+/// startup files.
+fn rustup_run_command() -> InstallCommand {
+    let script = tools_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("rustup-init.sh");
+    InstallCommand::with_args(
+        "sh",
+        vec![
+            script.to_string_lossy().into_owned(),
+            "-y".into(),
+            "--no-modify-path".into(),
+        ],
+    )
+}
+
+/// Bootstrap the Rust toolchain with the official `rustup` installer, then run
+/// `final_command`. Skipped on Windows, where the installer is a binary.
+fn rustup_bootstrap_with(final_command: InstallCommand) -> Option<InstallAttempt> {
+    if cfg!(windows) || home_dir().is_none() {
         return None;
     }
-    let tools = tools_dir()?;
-    let home = PathBuf::from(std::env::var_os("HOME")?);
-    let script = tools.join("rustup-init.sh");
-    let rustup = home.join(".cargo/bin/rustup");
     Some(InstallAttempt::sequence(
         "the official rustup installer",
-        vec![
-            InstallCommand::with_args(
-                "curl",
-                vec![
-                    "--proto".into(),
-                    "=https".into(),
-                    "--tlsv1.2".into(),
-                    "-sSf".into(),
-                    "--connect-timeout".into(),
-                    "30".into(),
-                    "--max-time".into(),
-                    "120".into(),
-                    "--max-filesize".into(),
-                    (1024 * 1024).to_string(),
-                    "https://sh.rustup.rs".into(),
-                    "-o".into(),
-                    script.to_string_lossy().into_owned(),
-                ],
-            ),
-            InstallCommand::with_args(
-                "sh",
-                vec![
-                    script.to_string_lossy().into_owned(),
-                    "-y".into(),
-                    "--no-modify-path".into(),
-                ],
-            ),
-            InstallCommand::with_args(
-                rustup.to_string_lossy().into_owned(),
-                vec!["component".into(), "add".into(), component.into()],
-            ),
-        ],
+        vec![rustup_init_command(), rustup_run_command(), final_command],
     ))
+}
+
+/// Install Go tooling with `go install`, provisioning Go itself when absent.
+///
+/// `go install` writes to a Koda-private `GOBIN`, so the tools never land in
+/// the user's `~/go` and never mix with a system Go's installations. The first
+/// attempt uses whatever `go` the user has; the second downloads the official
+/// Go toolchain into Koda's data directory.
+fn go_attempts(packages: &[&str]) -> Vec<InstallAttempt> {
+    let install = go_install_command(packages);
+    let mut attempts = vec![InstallAttempt::one("go install", install.clone())];
+    if go_platform().is_some()
+        && let (Some(downloads), Some(dest)) = (downloads_dir(), go_dir())
+    {
+        let archive = downloads.join("go.tar.gz");
+        attempts.push(InstallAttempt::managed(
+            "the official Go toolchain",
+            vec![
+                InstallStep::GoToolchain {
+                    dest: archive.clone(),
+                },
+                InstallStep::Extract {
+                    archive,
+                    dest,
+                    strip: 1,
+                },
+                InstallStep::Run(install),
+            ],
+        ));
+    }
+    attempts
+}
+
+/// The `go install` command for a set of packages, with a Koda-private
+/// `GOPATH`/`GOBIN` so installations stay isolated.
+fn go_install_command(packages: &[&str]) -> InstallCommand {
+    let mut args = vec!["install".to_string()];
+    for package in packages {
+        args.push(format!("{package}@latest"));
+    }
+    let mut command = InstallCommand::with_args("go", args);
+    if let (Some(gopath), Some(gobin)) = (go_path(), go_bin_dir()) {
+        command = command
+            .env("GOPATH", gopath.to_string_lossy().into_owned())
+            .env("GOBIN", gobin.to_string_lossy().into_owned())
+            .env("GOFLAGS", "-mod=mod");
+    }
+    // Only pin `GOROOT` to a managed Go that is actually present; an invalid
+    // `GOROOT` makes a perfectly good system `go` refuse to run, which would
+    // force a needless managed download.
+    if let Some(goroot) = go_dir().filter(|dir| dir.join("bin/go").is_file()) {
+        command = command.env("GOROOT", goroot.to_string_lossy().into_owned());
+    }
+    command
+}
+
+/// The standalone `clangd` bundle for this platform, or `None`.
+fn clangd_asset() -> Option<String> {
+    Some(match std::env::consts::OS {
+        "linux" => format!("clangd-linux-{CLANGD_VERSION}.zip"),
+        "macos" => format!("clangd-mac-{CLANGD_VERSION}.zip"),
+        "windows" => format!("clangd-windows-{CLANGD_VERSION}.zip"),
+        _ => return None,
+    })
+}
+
+/// Download the official, self-contained `clangd` release.
+fn clangd_attempts() -> Vec<InstallAttempt> {
+    let Some(asset) = clangd_asset() else {
+        return Vec::new();
+    };
+    // The prebuilt clangd bundles link against glibc and libstdc++, so they
+    // cannot run on musl systems.
+    if libc_is_musl() {
+        return Vec::new();
+    }
+    let (Some(downloads), Some(dest)) = (downloads_dir(), clangd_dir()) else {
+        return Vec::new();
+    };
+    let archive = downloads.join(&asset);
+    vec![InstallAttempt::managed(
+        "the official clangd release",
+        vec![
+            InstallStep::GithubRelease {
+                repo: "clangd/clangd".to_string(),
+                tag: CLANGD_VERSION.to_string(),
+                asset,
+                dest: archive.clone(),
+            },
+            // The archive root is `clangd_<version>/`.
+            InstallStep::Extract {
+                archive,
+                dest,
+                strip: 1,
+            },
+        ],
+    )]
+}
+
+/// The prebuilt `asm-lsp` archive for this platform, or `None` when the project
+/// publishes none (for example aarch64 Linux).
+fn asm_lsp_asset() -> Option<String> {
+    // The prebuilt binaries are glibc/macOS builds; musl uses the cargo plan.
+    if libc_is_musl() {
+        return None;
+    }
+    Some(match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "asm-lsp-x86_64-unknown-linux-gnu.tar.gz".to_string(),
+        ("macos", "x86_64") => "asm-lsp-x86_64-apple-darwin.tar.gz".to_string(),
+        ("macos", "aarch64") => "asm-lsp-aarch64-apple-darwin.tar.gz".to_string(),
+        _ => return None,
+    })
+}
+
+/// Install `asm-lsp`, preferring the prebuilt release over a `cargo` build.
+fn asm_lsp_attempts() -> Vec<InstallAttempt> {
+    let mut attempts = Vec::new();
+    if let Some(asset) = asm_lsp_asset()
+        && let (Some(downloads), Some(dest)) = (downloads_dir(), asm_lsp_dir())
+    {
+        let archive = downloads.join(&asset);
+        attempts.push(InstallAttempt::managed(
+            "the prebuilt asm-lsp release",
+            vec![
+                InstallStep::GithubRelease {
+                    repo: "bergercookie/asm-lsp".to_string(),
+                    tag: format!("v{ASM_LSP_VERSION}"),
+                    asset,
+                    dest: archive.clone(),
+                },
+                // The archive contains a single `asm-lsp` binary at its root.
+                InstallStep::Extract {
+                    archive,
+                    dest,
+                    strip: 0,
+                },
+            ],
+        ));
+    }
+    attempts.extend(cargo_attempts(&["asm-lsp"]));
+    attempts
+}
+
+/// Install `phpactor.phar`, which needs only a PHP runtime.
+fn phpactor_attempts() -> Vec<InstallAttempt> {
+    if locate("php").is_none() {
+        return Vec::new();
+    }
+    let Some(dest) = phpactor_dir() else {
+        return Vec::new();
+    };
+    let phar = dest.join("phpactor");
+    vec![InstallAttempt::managed(
+        "the official phpactor.phar",
+        vec![
+            InstallStep::GithubRelease {
+                repo: "phpactor/phpactor".to_string(),
+                tag: PHPACTOR_VERSION.to_string(),
+                asset: "phpactor.phar".to_string(),
+                dest: phar.clone(),
+            },
+            // The phar starts with `#!/usr/bin/env php`; make it runnable under
+            // the name `phpactor`.
+            InstallStep::MakeExecutable { path: phar },
+        ],
+    )]
+}
+
+/// Install `solargraph` into a Koda-private gem home.
+///
+/// A system Ruby is still required; Koda only isolates the gems so the user's
+/// global gem environment is untouched.
+fn ruby_attempts() -> Vec<InstallAttempt> {
+    if locate("gem").is_none() {
+        return Vec::new();
+    }
+    let Some(gems) = gem_home() else {
+        return Vec::new();
+    };
+    let bindir = gems.join("bin");
+    vec![InstallAttempt::one(
+        "gem install (isolated gem home)",
+        InstallCommand::with_args(
+            "gem",
+            vec![
+                "install".to_string(),
+                "--no-document".to_string(),
+                "--install-dir".to_string(),
+                gems.to_string_lossy().into_owned(),
+                "--bindir".to_string(),
+                bindir.to_string_lossy().into_owned(),
+                "solargraph".to_string(),
+            ],
+        ),
+    )]
 }
 
 /// Strategies for installing the Python language server, from most isolated to
@@ -1189,6 +1442,8 @@ fn run_step(step: &InstallStep) -> Result<(), String> {
             dest,
         } => github_release(repo, tag, asset, dest),
         InstallStep::SwiftCompat { dest } => swift_compat(dest),
+        InstallStep::GoToolchain { dest } => go_toolchain(dest),
+        InstallStep::MakeExecutable { path } => make_executable(path),
         InstallStep::Extract {
             archive,
             dest,
@@ -1231,6 +1486,12 @@ fn managed_path() -> Option<String> {
         dirs.push(tools.join("dart-sdk/bin"));
         dirs.push(tools.join("perl5/bin"));
         dirs.push(tools.join("swift/usr/bin"));
+        dirs.push(tools.join("go/bin"));
+        dirs.push(tools.join("gopath/bin"));
+        dirs.push(tools.join("clangd/bin"));
+        dirs.push(tools.join("asm-lsp"));
+        dirs.push(tools.join("phpactor"));
+        dirs.push(tools.join("gems/bin"));
         dirs.push(tools.join("kotlin-jdk/bin"));
         dirs.push(tools.join("jdk/bin"));
         dirs.push(tools.join("dotnet"));
@@ -1774,6 +2035,88 @@ fn link_into(_dir: &Path, _name: &str, _target: &Path) -> Result<(), String> {
     Err("the Swift compatibility layer is only used on Linux".to_string())
 }
 
+/// Mark a downloaded single-file program as executable.
+fn make_executable(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let metadata = std::fs::metadata(path)
+            .map_err(|err| format!("could not stat {}: {err}", path.display()))?;
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(permissions.mode() | 0o755);
+        std::fs::set_permissions(path, permissions)
+            .map_err(|err| format!("could not make {} executable: {err}", path.display()))?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+/// The `go.dev` target names for this host, if Go publishes a build for it.
+fn go_platform() -> Option<(&'static str, &'static str)> {
+    Some(match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => ("linux", "amd64"),
+        ("linux", "aarch64") => ("linux", "arm64"),
+        ("macos", "x86_64") => ("darwin", "amd64"),
+        ("macos", "aarch64") => ("darwin", "arm64"),
+        ("windows", "x86_64") => ("windows", "amd64"),
+        ("windows", "aarch64") => ("windows", "arm64"),
+        _ => return None,
+    })
+}
+
+/// Download the latest stable official Go toolchain.
+///
+/// `go.dev/dl/?mode=json` reports the current stable version and the SHA-256 of
+/// every archive together, so the download is verified even though the version
+/// moves. The archive root is `go/`, so a later [`InstallStep::Extract`] with
+/// `strip: 1` yields `go/bin/go`.
+fn go_toolchain(dest: &Path) -> Result<(), String> {
+    let (os, arch) = go_platform()
+        .ok_or_else(|| "no official Go build is published for this platform".to_string())?;
+    let body = curl_text("https://go.dev/dl/?mode=json")
+        .map_err(|err| format!("could not query the Go release metadata: {err}"))?;
+    let releases: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|err| format!("could not parse the Go release metadata: {err}"))?;
+    let latest = releases
+        .as_array()
+        .and_then(|list| list.first())
+        .ok_or_else(|| "go.dev published no releases".to_string())?;
+    let files = latest
+        .get("files")
+        .and_then(|files| files.as_array())
+        .ok_or_else(|| "the Go release has no files".to_string())?;
+    let mut filename = None;
+    let mut sha256 = None;
+    for file in files {
+        let matches = file.get("os").and_then(|v| v.as_str()) == Some(os)
+            && file.get("arch").and_then(|v| v.as_str()) == Some(arch)
+            && file.get("kind").and_then(|v| v.as_str()) == Some("archive");
+        if matches {
+            filename = file
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            sha256 = file
+                .get("sha256")
+                .and_then(|v| v.as_str())
+                .filter(|hash| hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()))
+                .map(str::to_string);
+        }
+    }
+    let filename = filename.ok_or_else(|| format!("Go published no {os}/{arch} archive"))?;
+    // Fail closed: Go runs Koda's tooling, so never install it unverified.
+    let sha256 = sha256.ok_or_else(|| format!("Go published no checksum for {filename}"))?;
+    download(
+        &format!("https://go.dev/dl/{filename}"),
+        dest,
+        Some(&sha256),
+    )
+}
+
 /// A sibling path with an extra extension appended (`a.tar.gz` → `a.tar.gz.sig`).
 fn append_extension(path: &Path, extension: &str) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
@@ -2261,6 +2604,11 @@ fn step_available(step: &InstallStep) -> bool {
         | InstallStep::NodeRuntime { .. }
         | InstallStep::DartSdk { .. }
         | InstallStep::GithubRelease { .. } => locate("curl").is_some(),
+        // The official Go toolchain is resolved from a published JSON document
+        // at install time; only `curl` and a known platform are needed here.
+        InstallStep::GoToolchain { .. } => locate("curl").is_some() && go_platform().is_some(),
+        // A file can always be marked executable on a Unix host.
+        InstallStep::MakeExecutable { .. } => cfg!(unix),
         // A `bob` build also needs a supported platform directory.
         InstallStep::BobBuild { .. } => locate("curl").is_some() && bob_platform().is_some(),
         // The compatibility layer can only be built when every library it needs
@@ -2292,7 +2640,10 @@ fn is_user_bin_program(program: &str) -> bool {
 /// An install attempt may run one of these after an earlier step has produced
 /// it, so a missing binary is not a reason to withhold the offer.
 fn is_koda_provided_program(program: &str) -> bool {
-    matches!(program, "elixir" | "mix" | "erl" | "escript")
+    matches!(
+        program,
+        "elixir" | "mix" | "erl" | "escript" | "go" | "cargo"
+    )
 }
 
 /// What Koda learned about one tool.
@@ -2613,6 +2964,12 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         dirs.push(tools.join("otp/bin"));
         dirs.push(tools.join("elixir/bin"));
         dirs.push(tools.join("elixir-ls"));
+        dirs.push(tools.join("go/bin"));
+        dirs.push(tools.join("gopath/bin"));
+        dirs.push(tools.join("clangd/bin"));
+        dirs.push(tools.join("asm-lsp"));
+        dirs.push(tools.join("phpactor"));
+        dirs.push(tools.join("gems/bin"));
         dirs.push(tools.join("jdk/bin"));
         dirs.push(tools.join("dotnet"));
         dirs.push(tools.join("bin"));
@@ -2777,6 +3134,42 @@ fn cpanm_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("cpanm"))
 }
 
+/// Koda's managed Go toolchain (`go/bin/go`), kept isolated from `/usr/local/go`.
+pub fn go_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("go"))
+}
+
+/// Koda's private `GOPATH`, so `go install` never writes to the user's `~/go`.
+pub fn go_path() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("gopath"))
+}
+
+/// The `GOBIN` inside Koda's private `GOPATH`, where `gopls`/`sqls`/`shfmt`
+/// are installed.
+fn go_bin_dir() -> Option<PathBuf> {
+    go_path().map(|dir| dir.join("bin"))
+}
+
+/// Koda's managed `clangd` directory (`bin/clangd` plus its resource headers).
+pub fn clangd_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("clangd"))
+}
+
+/// Koda's managed prebuilt `asm-lsp` directory.
+pub fn asm_lsp_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("asm-lsp"))
+}
+
+/// Koda's managed `phpactor.phar` directory.
+pub fn phpactor_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("phpactor"))
+}
+
+/// Koda's isolated Ruby gem home, so `solargraph` never pollutes the user's.
+pub fn gem_home() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("gems"))
+}
+
 /// Scratch space for downloaded archives.
 fn downloads_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("downloads"))
@@ -2861,6 +3254,37 @@ pub fn launch_env(tool: Tool) -> Vec<(String, String)> {
                 env.push((
                     "LD_LIBRARY_PATH".to_string(),
                     prepend_colon(&libs.join(":")),
+                ));
+            }
+        }
+        // `solargraph` is installed into a Koda-private gem home; its launcher
+        // needs that home and its bin directory on the environment.
+        Tool::RubyLs => {
+            if let Some(gems) = gem_home() {
+                let gems = gems.to_string_lossy().into_owned();
+                env.push(("GEM_HOME".to_string(), gems.clone()));
+                env.push(("GEM_PATH".to_string(), gems.clone()));
+                env.push(("PATH".to_string(), prepend_path(&format!("{gems}/bin"))));
+            }
+        }
+        // `phpactor`'s phar runs through `#!/usr/bin/env php`; put the managed
+        // phpactor directory on `PATH` so a bare `phpactor` also resolves.
+        Tool::Phpactor => {
+            if let Some(dir) = phpactor_dir() {
+                env.push(("PATH".to_string(), prepend_path(&dir.to_string_lossy())));
+            }
+        }
+        // Go-installed tools are launched by their resolved path; a Koda-managed
+        // Go only needs its bin directories when a child process invokes `go`.
+        Tool::Gopls | Tool::Sqls | Tool::Shfmt => {
+            if let Some(bin) = go_bin_dir() {
+                env.push(("PATH".to_string(), prepend_path(&bin.to_string_lossy())));
+            }
+            if let Some(goroot) = go_dir().filter(|dir| dir.is_dir()) {
+                env.push(("GOROOT".to_string(), goroot.to_string_lossy().into_owned()));
+                env.push((
+                    "PATH".to_string(),
+                    prepend_path(&goroot.join("bin").to_string_lossy()),
                 ));
             }
         }
@@ -3488,18 +3912,43 @@ mod tests {
 
     #[test]
     fn new_language_tools_use_trusted_managers() {
-        assert_eq!(
-            Tool::Sqls.install_command(),
-            Some(("go", &["install", "github.com/sqls-server/sqls@latest"][..]))
-        );
-        assert_eq!(
-            Tool::RubyLs.install_command(),
-            Some(("gem", &["install", "solargraph"][..]))
-        );
-        assert_eq!(
-            Tool::AsmLsp.install_command(),
-            Some(("cargo", &["install", "asm-lsp"][..]))
-        );
+        // Go tooling (`sqls`) is provisioned by Koda's managed Go plan.
+        assert_eq!(Tool::Sqls.install_command(), None);
+        if go_platform().is_some() && tools_dir().is_some() {
+            assert!(
+                Tool::Sqls.install_attempts().iter().any(|attempt| attempt
+                    .steps
+                    .iter()
+                    .any(|step| matches!(step, InstallStep::GoToolchain { .. }))),
+                "sqls must be able to provision Go"
+            );
+        }
+        // `solargraph` installs into an isolated gem home.
+        assert_eq!(Tool::RubyLs.install_command(), None);
+        if locate("gem").is_some() && tools_dir().is_some() {
+            assert!(
+                Tool::RubyLs.install_attempts().iter().any(|attempt| attempt
+                    .steps
+                    .iter()
+                    .any(|step| matches!(step, InstallStep::Run(command)
+                        if command.args.iter().any(|arg| arg == "--install-dir")))),
+                "solargraph must use an isolated gem home"
+            );
+        }
+        // `asm-lsp` uses the prebuilt release when one exists.
+        assert_eq!(Tool::AsmLsp.install_command(), None);
+        if asm_lsp_asset().is_some() && tools_dir().is_some() {
+            assert!(
+                Tool::AsmLsp
+                    .install_attempts()
+                    .iter()
+                    .any(|attempt| attempt.steps.iter().any(
+                        |step| matches!(step, InstallStep::GithubRelease { repo, .. }
+                        if repo == "bergercookie/asm-lsp")
+                    )),
+                "asm-lsp should prefer the prebuilt release"
+            );
+        }
         // The multi-component toolchains are managed, so they advertise no
         // single package-manager command; whether they can be installed depends
         // on the platform and on the base tools being present.
@@ -3508,6 +3957,8 @@ mod tests {
             Tool::SwiftLs,
             Tool::PerlLs,
             Tool::DartAnalyzer,
+            Tool::Clangd,
+            Tool::Phpactor,
         ] {
             assert!(
                 tool.install_command().is_none(),
@@ -3616,6 +4067,92 @@ mod tests {
             Some("ea864bc64df30a6b8bdf30b2e32550f7717d9a890de8f40293aeabb924fe232b")
         );
         assert_eq!(checksum_for(body, "missing.zip"), None);
+    }
+
+    #[test]
+    fn go_plan_provisions_the_official_toolchain() {
+        let attempts = Tool::Gopls.install_attempts();
+        assert!(!attempts.is_empty(), "gopls must have an install plan");
+        if go_platform().is_none() || tools_dir().is_none() {
+            return;
+        }
+        let managed = attempts
+            .iter()
+            .find(|attempt| {
+                attempt
+                    .steps
+                    .iter()
+                    .any(|step| matches!(step, InstallStep::GoToolchain { .. }))
+            })
+            .expect("a managed Go attempt");
+        assert!(
+            managed
+                .steps
+                .iter()
+                .any(|step| matches!(step, InstallStep::Extract { strip: 1, .. })),
+            "the Go archive root must be stripped: {:?}",
+            managed.steps
+        );
+        let run = managed
+            .steps
+            .iter()
+            .find_map(|step| match step {
+                InstallStep::Run(command) if command.program == "go" => Some(command),
+                _ => None,
+            })
+            .expect("a go install run");
+        assert!(
+            run.args.iter().any(|arg| arg.contains("gopls@latest")),
+            "the run must install gopls: {:?}",
+            run.args
+        );
+        // Tool installations stay inside Koda's private GOPATH/GOBIN.
+        if let Some(gobin) = go_bin_dir() {
+            assert!(
+                run.env
+                    .iter()
+                    .any(|(key, value)| key == "GOBIN"
+                        && value == &gobin.to_string_lossy().into_owned()),
+                "GOBIN must point at Koda's private bin directory: {:?}",
+                run.env
+            );
+        }
+    }
+
+    #[test]
+    fn go_install_pins_goroot_only_when_managed_go_exists() {
+        // Regression: a `GOROOT` pointing at a not-yet-downloaded managed Go
+        // makes a good system `go` refuse to run, forcing a needless download.
+        let command = go_install_command(&["golang.org/x/tools/gopls"]);
+        let managed = go_dir().is_some_and(|dir| dir.join("bin/go").is_file());
+        let has_goroot = command.env.iter().any(|(key, _)| key == "GOROOT");
+        assert_eq!(has_goroot, managed);
+        // Tool installs always stay inside Koda's private GOBIN.
+        assert!(command.env.iter().any(|(key, _)| key == "GOBIN"));
+    }
+
+    #[test]
+    fn phpactor_plan_is_a_verified_phar() {
+        let attempts = Tool::Phpactor.install_attempts();
+        if locate("php").is_none() || tools_dir().is_none() {
+            assert!(attempts.is_empty());
+            return;
+        }
+        let steps = &attempts.first().expect("a phpactor plan").steps;
+        assert!(
+            steps.iter().any(|step| matches!(
+                step,
+                InstallStep::GithubRelease { repo, asset, .. }
+                    if repo == "phpactor/phpactor" && asset == "phpactor.phar"
+            )),
+            "phpactor must come from the verified phar release: {steps:?}"
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| matches!(step, InstallStep::MakeExecutable { .. })),
+            "the phar must be made executable: {steps:?}"
+        );
     }
 
     #[test]
@@ -3981,10 +4518,25 @@ mod tests {
             Tool::Prettier.install_command(),
             Some(("npm", &["install", "-g", "prettier"][..]))
         );
-        assert_eq!(
-            Tool::Shfmt.install_command(),
-            Some(("go", &["install", "mvdan.cc/sh/v3/cmd/shfmt@latest"][..]))
-        );
+        // `shfmt` is installed by Koda's managed Go plan, not a package-manager
+        // command.
+        assert_eq!(Tool::Shfmt.install_command(), None);
+    }
+
+    #[test]
+    fn make_executable_sets_the_exec_bit() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = std::env::temp_dir().join(format!("koda-exec-{}", std::process::id()));
+            let _ = std::fs::remove_file(&path);
+            std::fs::write(&path, "#!/bin/sh\n").unwrap();
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644));
+            make_executable(&path).expect("chmod");
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_ne!(mode & 0o100, 0, "the owner exec bit must be set");
+            let _ = std::fs::remove_file(&path);
+        }
     }
 
     #[test]
@@ -4081,20 +4633,31 @@ mod tests {
     }
 
     #[test]
-    fn clangd_serves_c_and_cpp_without_provisioning() {
+    fn clangd_serves_c_and_cpp_and_provisions_the_official_bundle() {
         assert!(Tool::Clangd.serves(LanguageId::C));
         assert!(Tool::Clangd.serves(LanguageId::Cpp));
         assert_eq!(
             Tool::for_language(LanguageId::Cpp, ToolPurpose::LanguageServer),
             Some(Tool::Clangd)
         );
+        let attempts = Tool::Clangd.install_attempts();
+        if clangd_asset().is_none() || tools_dir().is_none() {
+            assert!(attempts.is_empty());
+            return;
+        }
+        let steps = &attempts.first().expect("a clangd plan").steps;
         assert!(
-            Tool::Clangd.install_attempts().is_empty(),
-            "clangd has no user-local installer"
+            steps.iter().any(|step| matches!(
+                step,
+                InstallStep::GithubRelease { repo, .. } if repo == "clangd/clangd"
+            )),
+            "clangd must come from the official clangd release: {steps:?}"
         );
         assert!(
-            !can_install(Tool::Clangd),
-            "Koda must not promise a clangd install"
+            steps
+                .iter()
+                .any(|step| matches!(step, InstallStep::Extract { strip: 1, .. })),
+            "the clangd bundle root must be stripped: {steps:?}"
         );
     }
 
@@ -4142,13 +4705,12 @@ mod tests {
             Some(("rustup", &["component", "add", "rust-analyzer"][..]))
         );
         assert_eq!(
-            Tool::Gopls.install_command(),
-            Some(("go", &["install", "golang.org/x/tools/gopls@latest"][..]))
-        );
-        assert_eq!(
             Tool::Pylsp.install_command(),
             Some(("pipx", &["install", "python-lsp-server"][..]))
         );
+        // Go tooling is provisioned by Koda's managed Go plan.
+        assert_eq!(Tool::Gopls.install_command(), None);
+        assert_eq!(Tool::Sqls.install_command(), None);
         assert_eq!(
             Tool::BashLs.install_command(),
             Some(("npm", &["install", "-g", "bash-language-server"][..]))

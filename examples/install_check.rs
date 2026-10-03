@@ -22,9 +22,14 @@ fn main() {
         Some("swift") => koda::language::tools::Tool::SwiftLs,
         Some("perl") => koda::language::tools::Tool::PerlLs,
         Some("pls") => koda::language::tools::Tool::Pls,
+        Some("gopls") => koda::language::tools::Tool::Gopls,
+        Some("shfmt") => koda::language::tools::Tool::Shfmt,
+        Some("clangd") => koda::language::tools::Tool::Clangd,
+        Some("phpactor") => koda::language::tools::Tool::Phpactor,
+        Some("ruby") => koda::language::tools::Tool::RubyLs,
         other => {
             eprintln!(
-                "usage: install_check <omnisharp|jdtls|html|css|lua|kotlin|sql|asm|dart|elixir|swift|perl|pls> (got {other:?})"
+                "usage: install_check <omnisharp|jdtls|html|css|lua|kotlin|sql|asm|dart|elixir|swift|perl|pls|gopls|shfmt|clangd|phpactor|ruby> (got {other:?})"
             );
             std::process::exit(2);
         }

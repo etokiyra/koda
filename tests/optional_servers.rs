@@ -120,3 +120,21 @@ fn perl_handshake() {
 fn pls_handshake() {
     handshake(Tool::Pls, LanguageId::Perl);
 }
+
+#[test]
+#[ignore = "requires clangd"]
+fn clangd_handshake() {
+    handshake(Tool::Clangd, LanguageId::C);
+}
+
+#[test]
+#[ignore = "requires gopls + Go"]
+fn gopls_handshake() {
+    handshake(Tool::Gopls, LanguageId::Go);
+}
+
+#[test]
+#[ignore = "requires phpactor + PHP"]
+fn phpactor_handshake() {
+    handshake(Tool::Phpactor, LanguageId::Php);
+}
