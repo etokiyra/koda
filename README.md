@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-241%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-264%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -227,13 +227,72 @@ cargo run -- src/main.rs       # open a file inside its detected project
 ## ❯ Usage
 
 ```bash
-koda              # open the current directory as a workspace
+koda              # start Koda in the current directory
 koda .            # same, explicitly
-koda src/main.rs  # open a file inside its detected project
+koda src/main.rs  # start beside the file's project
 ```
 
-Koda finds the project root (`Cargo.toml`, `go.mod`, or a `.git` directory) and
-establishes the language context automatically.
+Koda finds the project root (`Cargo.toml`, `go.mod`, or a `.git` directory),
+establishes the language context, and opens its welcome screen. A path you pass
+is offered there as an **Open <path>** action rather than being opened for you.
+
+## ✦ The welcome screen
+
+Koda always opens on its home screen. The Koda familiar sits above a small,
+keyboard-navigable menu — no file is opened automatically, and nothing you
+passed on the command line is thrown away.
+
+```text
+        ✦  ·  ☾  ·  ✦
+        /\___/\
+       ( ･ω･ )        ✦  K O D A  ✦
+        > ω <     your cozy little coding space
+       /|   |\
+
+       ❯ Open a file…                          Ctrl+O
+         Open a project…                choose a folder
+         Create a new project…   Rust · Go · Python · Shell
+         Resume “my-project”            3 file(s)
+         Keyboard shortcuts                       F1
+
+         ↑↓ choose  ·  Enter open  ·  Ctrl+Shift+P commands
+```
+
+- **Move** with `↑`/`↓` (or `Home`/`End`), **open** with `Enter`.
+- **Open a file…** or press `Ctrl+O`; **Open a project…** browses directories.
+- **Resume** restores the workspace's saved session; **recent projects and
+  files** reappear here once you have opened a few.
+- Any path given on the command line shows up as an **Open <path>** row.
+- **Keyboard shortcuts** (`F1`) opens the cheatsheet, and `Ctrl+Shift+P` opens
+  the command palette.
+
+Closing the last tab — or running **Welcome Screen** from the palette — brings
+the home screen back.
+
+### Create a new project
+
+**Create a new project…** is a guided, three-step flow:
+
+1. **Choose a folder** — browse with the arrows, `Enter` opens a directory or
+   confirms the highlighted one, `←` goes up, `Esc` cancels.
+2. **Name it** — the name is validated for your platform and checked against
+   the chosen folder so an existing project is never overwritten.
+3. **Pick a language** — Rust, Go, Python or Shell, each shown with what Koda
+   will generate. `Esc` steps back at any point.
+
+Koda then scaffolds the project without a network connection or a toolchain and
+opens it, ready to edit:
+
+| Language | Generated |
+| --- | --- |
+| **Rust** | `Cargo.toml`, `src/main.rs`, `.gitignore` |
+| **Go** | `go.mod`, `main.go` |
+| **Python** | `pyproject.toml`, `src/<package>/__init__.py` and `__main__.py` |
+| **Shell** | an executable `<name>.sh` (plus a `README.md`) |
+
+If generation fails partway through, the partial folder is left untouched and
+Koda reports what happened rather than deleting anything.
+
 
 ## ☾ Keyboard shortcuts
 
@@ -251,6 +310,8 @@ establishes the language context automatically.
 | `Ctrl+Shift+P` | Command palette |
 | `F1` | Keyboard-shortcuts cheatsheet |
 | `F5` | Refresh the file tree and git status |
+| `↑` / `↓` (welcome) | Choose a welcome-screen action |
+| `Enter` (welcome) | Open the chosen action |
 | `Ctrl+F` / `Ctrl+H` | Find / replace |
 | `F3` / `Shift+F3` | Find next / previous |
 | `Ctrl+Shift+F` | Search in the whole project |
@@ -320,7 +381,8 @@ src/
 │   ├── shell/      # Shell provider (bash/zsh/sh)
 │   ├── markdown/   # Markdown provider (headings as symbols)
 │   └── json|toml|yaml/  # configuration-data providers
-├── project/      # workspace, project detection, file tree
+├── project/      # workspace, project detection, file tree, templates
+├── recent.rs     # recent projects and files for the welcome screen
 ├── regex.rs      # a small regex engine for search
 ├── search.rs     # project-wide text search
 ├── session.rs    # per-project session persistence

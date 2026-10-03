@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Welcome screen
+
+- Koda now always opens on its **welcome screen** — an interactive home screen
+  built around the animated Koda familiar. Move with `↑`/`↓` and open with
+  `Enter`; it offers opening a file, opening a project, creating a new project,
+  resuming the workspace's saved session, reopening recent projects or files,
+  and the shortcuts cheatsheet.
+- A path passed on the command line is preserved as an **Open <path>** action
+  instead of being opened automatically, and a saved session is offered as
+  **Resume <project>** — neither is discarded.
+- Recent projects and files persist between launches in the user's state
+  directory (`recent.rs`).
+- Returning home is a palette command (**Welcome Screen**) and the natural
+  result of closing the last tab.
+- Session saving is gated on the user having engaged with a project, so
+  starting Koda and quitting does not overwrite an untouched session.
+
+### Project creation
+
+- Added a guided **Create New Project** flow: choose a parent folder, name the
+  project (validated for the platform and checked for collisions) and pick
+  Rust, Go, Python or Shell. `Esc` steps back at every stage and cancels from
+  the first.
+- Scaffolding is deterministic and offline. Koda writes conventional files
+  directly rather than invoking `cargo`, `go` or `pip`, so it works with no
+  network access and no toolchain: `Cargo.toml` + `src/main.rs`; `go.mod` +
+  `main.go`; `pyproject.toml` + a source package; or an executable shell
+  script.
+- Creation runs on the background worker with a busy indicator and a toast; on
+  success the project opens, its entry file loads and language tooling starts
+  automatically. If a write fails partway, the partial directory is left
+  untouched and Koda reports what happened.
+- New palette commands: **Open Project…** and **Create New Project…**, and a
+  directory browser used by both.
+
 ### License
 
 - Relicensed Koda under the **GNU General Public License v3.0** (previously

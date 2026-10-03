@@ -39,6 +39,13 @@ then expand
 - [x] Terminal-native, transparency-friendly UI.
 - [x] A strong visual identity: Mellow colours, original ASCII welcome scene,
       the Koda familiar and personality-rich empty states.
+- [x] A welcome **home screen** shown on every launch: an interactive,
+      keyboard-navigable menu (open file/project, create project, resume
+      session, recent projects and files) around the animated familiar, with
+      the command-line target preserved.
+- [x] Guided **project creation**: choose a folder, name and validate it, pick a
+      language, and scaffold a conventional project deterministically and
+      offline, then open it ready to code.
 
 ---
 

@@ -214,6 +214,52 @@ fn renders_toast_notification() {
 }
 
 #[test]
+fn welcome_menu_lists_home_actions() {
+    let dir = temp_project("welcome-menu");
+    let mut app = App::new(Some(&dir)).unwrap();
+
+    let screen = draw(&mut app);
+    assert!(screen.contains("Open a file"), "menu missing:\n{screen}");
+    assert!(
+        screen.contains("Create a new project"),
+        "create action missing:\n{screen}"
+    );
+    assert!(
+        screen.contains("↑↓ choose"),
+        "navigation hint missing:\n{screen}"
+    );
+
+    cleanup(&dir);
+}
+
+#[test]
+fn welcome_renders_on_a_small_terminal() {
+    let dir = temp_project("welcome-small");
+    let mut app = App::new(Some(&dir)).unwrap();
+
+    let screen = draw_at(&mut app, 40, 10);
+    assert!(screen.contains("K O D A"), "wordmark missing:\n{screen}");
+
+    cleanup(&dir);
+}
+
+#[test]
+fn new_project_overlay_renders_its_first_step() {
+    let dir = temp_project("new-project-overlay");
+    let mut app = App::new(Some(&dir)).unwrap();
+    app.execute_command(ids::NEW_PROJECT);
+
+    let screen = draw(&mut app);
+    assert!(screen.contains("New Project"), "title missing:\n{screen}");
+    assert!(
+        screen.contains("use this folder"),
+        "folder choice missing:\n{screen}"
+    );
+
+    cleanup(&dir);
+}
+
+#[test]
 fn statusline_uses_mellow_panel_background() {
     let dir = temp_project("statusbg");
     let file = dir.join("src/main.rs");

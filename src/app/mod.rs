@@ -1983,6 +1983,7 @@ impl App {
             return;
         }
         let root = crate::project::Project::detect(&path).root;
+        let root = root.canonicalize().unwrap_or(root);
         if root != self.workspace.root() && !self.open_workspace(root) {
             return;
         }
@@ -6510,7 +6511,7 @@ done
                 .any(|label| label.contains("Create a new project"))
         );
         assert!(
-            labels.iter().any(|label| label.starts_with("Open ")),
+            labels.iter().any(|label| label.contains("main.rs")),
             "the CLI target should be offered: {labels:?}"
         );
         fs::remove_dir_all(&dir).ok();

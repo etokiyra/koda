@@ -60,7 +60,9 @@ src/
 │   └── mod.rs            # LanguageService facade
 ├── project/
 │   ├── mod.rs            # Project detection + Workspace
+│   ├── create.rs         # deterministic, offline project templates
 │   └── file_tree.rs      # lazily loaded tree
+├── recent.rs             # recent projects and files for the welcome screen
 ├── search.rs             # project-wide text search
 ├── regex.rs              # a small regex engine for search
 ├── terminal/mod.rs       # init/restore, OSC 52 clipboard
@@ -72,8 +74,8 @@ src/
     ├── editor.rs         # gutter, syntax, cursorline, indent guides
     ├── file_tree.rs      # project sidebar
     ├── status_bar.rs     # the Mellow statusline
-    ├── overlay.rs        # palette, quick open, prompts, search bar
-    ├── welcome.rs        # adaptive welcome scene
+    ├── overlay.rs        # palette, quick open, prompts, directory picker, new-project flow
+    ├── welcome.rs        # the welcome home screen
     └── mod.rs            # layout + entry point
 ```
 
@@ -194,6 +196,16 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
 - **Centralised Mellow theme + art.** All colour flows through `ui/theme.rs`;
   all ASCII personality through `ui/art.rs`. Widgets render semantic roles, not
   literal colours. This keeps Koda recognisable and easy to evolve.
+- **Welcome-first startup.** Koda opens on the welcome home screen. A path from
+  the command line is offered as an action, a saved session as a resume action,
+  and recent projects/files are loaded from the state directory; nothing is
+  opened until the user chooses. Session saving is gated on the user engaging
+  with a project, so an untouched session is never overwritten.
+- **Deterministic project scaffolding.** `project/create.rs` writes conventional
+  project files directly instead of invoking `cargo`, `go` or `pip`, so
+  creation is instant, offline and toolchain-independent. It never deletes a
+  partial project: a failure returns the root so the UI can explain what
+  happened.
 - **Split editor.** The editor keeps a single active document; a split stores
   one document index per pane and `editor.active` follows the focused pane, so
   every existing editing path keeps working unchanged. Panes share the tab
