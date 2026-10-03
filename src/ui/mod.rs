@@ -70,7 +70,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 frame,
                 area,
                 &signature.help,
-                signature.anchor.or(app.cursor_screen),
+                app.cursor_screen.or(signature.anchor),
             );
         }
     }
