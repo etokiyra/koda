@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-310%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-335%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -122,13 +122,13 @@ The complexity lives inside Koda:
 ```
 
 Missing something? Koda notices when a Rust, Go, Python, TypeScript,
-JavaScript, Java, C#, C, C++ or Shell file is open without its language server
-and offers to install it, once, without blocking startup. Some servers have no
-portable, user-local installer — `clangd` ships with the C/C++ toolchain — so
-Koda uses them when present and says so plainly when they are not. Others need a
-runtime, and Koda provisions that too: the **.NET SDK** for C# and a
-**checksum-verified Eclipse Adoptium JDK** for Java, both under Koda's own data
-directory.
+JavaScript, Java, C#, HTML, CSS, C, C++ or Shell file is open without its
+language server and offers to install it, once, without blocking startup. Some
+servers have no portable, user-local installer — `clangd` ships with the C/C++
+toolchain — so Koda uses them when present and says so plainly when they are
+not. Others need a runtime, and Koda provisions that too: the **.NET SDK** for
+C# and a **checksum-verified Eclipse Adoptium JDK** for Java, both under Koda's
+own data directory.
 **Language Setup…** in the command palette then lists every tool Koda knows
 about and installs a missing one with a single `Enter` — through the official
 channel, so provenance and integrity stay with the package manager:
@@ -143,6 +143,8 @@ channel, so provenance and integrity stay with the package manager:
 | `clangd` | C/C++ language server | detected if installed (ships with the C/C++ toolchain) |
 | `jdtls` | Java language server | a managed Adoptium JDK 25 + Eclipse JDT |
 | `omnisharp` | C# language server | a managed .NET SDK + OmniSharp |
+| `vscode-html-language-server` | HTML language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
+| `vscode-css-language-server` | CSS language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
 | `rustfmt` | Rust formatting | `rustup component add rustfmt` |
 | `gofmt` | Go formatting | ships with the Go toolchain |
 
@@ -177,6 +179,8 @@ managed prefix.
 | **C++** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **Java** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **C#** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
+| **HTML** | built-in | built-in + LSP | built-in (ids) | built-in | built-in | LSP | LSP |
+| **CSS** | built-in | built-in + LSP | built-in (selectors) | built-in | built-in | LSP | LSP |
 | **Shell** | built-in | LSP | built-in (functions) | built-in | built-in | built-in | — |
 | **Markdown** | built-in | — | built-in (headings) | — | — | — | — |
 | **JSON** | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — |
@@ -186,11 +190,12 @@ managed prefix.
 Prose and configuration files are first-class too. Markdown, JSON, TOML and YAML
 get syntax highlighting, structural diagnostics where they make sense, and a
 symbol outline, all offline and with no setup. **Python**, **Shell**,
-**TypeScript**, **JavaScript**, **C**, **C++**, **Java** and **C#** work offline
-through Koda's built-in intelligence (highlighting, diagnostics where available,
-symbols, completion, hover, navigation) and gain richer server-backed features
-when Koda installs or finds a managed language server. Adding a language means
-implementing one trait and registering it — no changes to the editor or the UI.
+**TypeScript**, **JavaScript**, **C**, **C++**, **Java**, **C#**, **HTML** and
+**CSS** work offline through Koda's built-in intelligence (highlighting,
+diagnostics where available, symbols, completion, hover, navigation) and gain
+richer server-backed features when Koda installs or finds a managed language
+server. Adding a language means implementing one trait and registering it — no
+changes to the editor or the UI.
 
 ## ❯ Editing & workflow
 
@@ -328,8 +333,8 @@ the home screen back.
 2. **Name it** — the name is validated for your platform and checked against
    the chosen folder so an existing project is never overwritten.
 3. **Pick a language** — Rust, Go, Python, TypeScript, JavaScript, Java, C#,
-   Shell, C or C++, each shown with what Koda will generate. `Esc` steps back at
-   any point.
+   HTML, Shell, C or C++, each shown with what Koda will generate. `Esc` steps
+   back at any point.
 
 Koda then scaffolds the project without a network connection or a toolchain and
 opens it, ready to edit:
@@ -343,6 +348,7 @@ opens it, ready to edit:
 | **JavaScript** | `package.json`, `src/index.js`, `.gitignore` |
 | **Java** | `pom.xml`, `src/main/java/…/App.java`, `.gitignore` |
 | **C#** | a `*.csproj`, `Program.cs`, `.gitignore` |
+| **HTML** | `index.html` and `style.css` |
 | **Shell** | an executable `<name>.sh` (plus a `README.md`) |
 | **C** | `CMakeLists.txt`, `src/main.c`, `.gitignore` |
 | **C++** | `CMakeLists.txt`, `src/main.cpp`, `.gitignore` |
@@ -443,6 +449,10 @@ src/
 │   ├── shell/      # Shell provider (bash/zsh/sh)
 │   ├── web/        # TypeScript/JavaScript provider
 │   ├── c/          # C/C++ provider
+│   ├── java/       # Java provider (built-in, offline)
+│   ├── csharp/     # C# provider (built-in, offline)
+│   ├── html/       # HTML provider (tags, ids)
+│   ├── css/        # CSS provider (selectors, properties)
 │   ├── markdown/   # Markdown provider (headings as symbols)
 │   └── json|toml|yaml/  # configuration-data providers
 ├── project/      # workspace, project detection, file tree, templates

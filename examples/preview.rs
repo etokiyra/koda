@@ -60,6 +60,24 @@ fn main() {
             };
             app
         }
+        "html" => {
+            let path = std::env::temp_dir().join("koda-preview.html");
+            std::fs::write(
+                &path,
+                "<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <title>Koda</title>\n  </head>\n  <body>\n    <main id=\"app\" class=\"card\">\n      <h1>Hello</h1>\n    </main>\n  </body>\n</html>\n",
+            )
+            .unwrap();
+            file_app(&path)
+        }
+        "css" => {
+            let path = std::env::temp_dir().join("koda-preview.css");
+            std::fs::write(
+                &path,
+                ":root {\n  color-scheme: light dark;\n}\n\n.card {\n  color: #ffcc00;\n  padding: 2rem;\n  display: flex;\n}\n",
+            )
+            .unwrap();
+            file_app(&path)
+        }
         "cfile" => {
             let path = std::env::temp_dir().join("koda-preview.c");
             std::fs::write(

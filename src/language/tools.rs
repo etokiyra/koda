@@ -31,6 +31,8 @@ pub enum Tool {
     Clangd,
     Jdtls,
     OmniSharp,
+    HtmlLs,
+    CssLs,
     Rustfmt,
     Gofmt,
 }
@@ -53,6 +55,8 @@ impl Tool {
         Tool::Clangd,
         Tool::Jdtls,
         Tool::OmniSharp,
+        Tool::HtmlLs,
+        Tool::CssLs,
         Tool::Rustfmt,
         Tool::Gofmt,
     ];
@@ -67,6 +71,8 @@ impl Tool {
             Tool::Clangd => "clangd",
             Tool::Jdtls => "jdtls",
             Tool::OmniSharp => "OmniSharp",
+            Tool::HtmlLs => "vscode-html-language-server",
+            Tool::CssLs => "vscode-css-language-server",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
         }
@@ -82,6 +88,8 @@ impl Tool {
             Tool::Clangd => "clangd",
             Tool::Jdtls => "jdtls",
             Tool::OmniSharp => "omnisharp",
+            Tool::HtmlLs => "vscode-html-language-server",
+            Tool::CssLs => "vscode-css-language-server",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
         }
@@ -97,6 +105,8 @@ impl Tool {
             Tool::Clangd => LanguageId::C,
             Tool::Jdtls => LanguageId::Java,
             Tool::OmniSharp => LanguageId::CSharp,
+            Tool::HtmlLs => LanguageId::Html,
+            Tool::CssLs => LanguageId::Css,
         }
     }
 
@@ -117,7 +127,9 @@ impl Tool {
             | Tool::TypeScriptLs
             | Tool::Clangd
             | Tool::Jdtls
-            | Tool::OmniSharp => ToolPurpose::LanguageServer,
+            | Tool::OmniSharp
+            | Tool::HtmlLs
+            | Tool::CssLs => ToolPurpose::LanguageServer,
             Tool::Rustfmt | Tool::Gofmt => ToolPurpose::Formatter,
         }
     }
@@ -131,7 +143,9 @@ impl Tool {
             | Tool::Pylsp
             | Tool::BashLs
             | Tool::TypeScriptLs
-            | Tool::Clangd => &["--version"],
+            | Tool::Clangd
+            | Tool::HtmlLs
+            | Tool::CssLs => &["--version"],
             Tool::Gopls => &["version"],
             // `jdtls` and `OmniSharp` have no `--version`; `--help` proves they
             // launch (and, for OmniSharp, that the .NET runtime is present).
@@ -149,6 +163,8 @@ impl Tool {
             Tool::TypeScriptLs => &["--stdio"],
             // `OmniSharp` needs LSP mode and zero-based (LSP) positions.
             Tool::OmniSharp => &["-z", "--languageserver"],
+            // The extracted VS Code servers speak stdio.
+            Tool::HtmlLs | Tool::CssLs => &["--stdio"],
             _ => &[],
         }
     }
@@ -166,6 +182,7 @@ impl Tool {
             }
             Tool::Jdtls => "Koda can install a managed JDK and Eclipse JDT",
             Tool::OmniSharp => "Koda can install the .NET SDK and OmniSharp",
+            Tool::HtmlLs | Tool::CssLs => "install with `npm` — Koda uses a user-local prefix",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
         }
@@ -201,6 +218,9 @@ impl Tool {
             // `jdtls` and `OmniSharp` are installed by Koda's own managed
             // download plan rather than a single package-manager command.
             Tool::Jdtls | Tool::OmniSharp => None,
+            Tool::HtmlLs | Tool::CssLs => {
+                Some(("npm", &["install", "-g", "vscode-langservers-extracted"]))
+            }
             Tool::Gofmt => None,
         }
     }
@@ -213,6 +233,7 @@ impl Tool {
             Tool::Gopls | Tool::Gofmt => &["go"],
             Tool::Pylsp => &["python3"],
             Tool::BashLs | Tool::TypeScriptLs => &["npm"],
+            Tool::HtmlLs | Tool::CssLs => &["npm"],
             // `jdtls` is a Python launcher script.
             Tool::Jdtls => &["python3"],
             Tool::Clangd | Tool::OmniSharp => &[],
@@ -252,6 +273,7 @@ impl Tool {
             Tool::Clangd => Vec::new(),
             Tool::Jdtls => jdtls_attempts(),
             Tool::OmniSharp => omnisharp_attempts(),
+            Tool::HtmlLs | Tool::CssLs => npm_attempts(&["vscode-langservers-extracted"]),
             // `gofmt` ships with the Go toolchain; there is nothing to install.
             Tool::Gofmt => Vec::new(),
         }
@@ -1160,6 +1182,8 @@ mod tests {
                     | LanguageId::C
                     | LanguageId::Java
                     | LanguageId::CSharp
+                    | LanguageId::Html
+                    | LanguageId::Css
             ));
         }
     }

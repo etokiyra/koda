@@ -224,6 +224,8 @@ impl ProviderRegistry {
         registry.register(Box::new(crate::language::c::CProvider::cpp()));
         registry.register(Box::new(crate::language::java::JavaProvider));
         registry.register(Box::new(crate::language::csharp::CSharpProvider));
+        registry.register(Box::new(crate::language::html::HtmlProvider));
+        registry.register(Box::new(crate::language::css::CssProvider));
         registry
     }
 

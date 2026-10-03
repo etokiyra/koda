@@ -72,6 +72,8 @@ pub fn lsp_language_id(language: LanguageId) -> &'static str {
         LanguageId::Cpp => "cpp",
         LanguageId::Java => "java",
         LanguageId::CSharp => "csharp",
+        LanguageId::Html => "html",
+        LanguageId::Css => "css",
         _ => "plaintext",
     }
 }

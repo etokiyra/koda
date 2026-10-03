@@ -27,6 +27,7 @@ TypeScript / JavaScript → built-in, offline
 C / C++ → built-in, offline (clangd when present)
 Java → built-in, offline (managed Eclipse JDT)
 C# → built-in, offline (managed OmniSharp)
+HTML / CSS → built-in, offline (npm servers)
 then expand
 ```
 
@@ -199,6 +200,10 @@ command palette already reports which are available. Filling them in is additive
       (including C# verbatim/raw strings and Java text blocks), structural
       diagnostics, symbols (types, methods, fields, records, interfaces) and
       offline completion/hover/navigation.
+- [x] HTML and CSS built-in support: tag/attribute and selector/property
+      highlighting, tag- and brace-balance diagnostics, id/selector symbols,
+      completion and hover, with `vscode-langservers-extracted` provisioned for
+      formatting and richer intelligence.
 - [x] `.gitignore`-aware file tree and quick open. A dependency-free matcher
       reads root and nested `.gitignore` files plus `.git/info/exclude`, and
       hides ignored paths from the tree, quick open, the inline filter and

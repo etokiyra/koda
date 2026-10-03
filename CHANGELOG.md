@@ -155,6 +155,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Language support
 
+- Added **HTML** and **CSS** providers. HTML highlights tags, attributes and
+  entities, reports tags that are never closed or mismatch as diagnostics, and
+  exposes `id` values as symbols. CSS highlights selectors, properties, values,
+  at-rules, hex colours and units, reports unbalanced braces, and exposes
+  selectors as symbols. Both work offline for highlighting, diagnostics,
+  completion and hover, and gain formatting and richer intelligence from
+  `vscode-html-language-server`/`vscode-css-language-server`
+  (`vscode-langservers-extracted`), provisioned into Koda's npm prefix.
+- Added **Java** and **C#** built-in providers. Java highlights annotations,
+  primitive and common library types, strings and text blocks, line/block
+  comments, and extracts packages, types, methods and fields as symbols. C#
+  highlights attributes, regular/verbatim/interpolated/raw strings and
+  XML-doc comments, and extracts namespaces, classes, structs, interfaces,
+  records and enums. Both work fully offline for highlighting, structural
+  diagnostics, completion, hover and within-file navigation.
+- Project detection now understands **suffix markers** (`MyApp.csproj`,
+  `App.sln`) in addition to exact names, and recognises Java (`pom.xml`, Gradle
+  files) and C# (`global.json`, `*.csproj`/`*.sln`) projects.
+- Added deterministic, offline scaffolding for **Java** (a Maven layout:
+  `pom.xml` and `src/main/java/…/App.java`), **C#** (a `*.csproj` and
+  `Program.cs`) and **HTML** (`index.html` and `style.css`).
 - Added **C** and **C++** support. One built-in, offline scanner serves both:
   highlighting for preprocessor lines, line and block comments, strings and
   character literals, numbers, keywords, types and standard-library functions;

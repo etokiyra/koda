@@ -23,6 +23,7 @@ pub const CREATABLE: &[LanguageId] = &[
     LanguageId::JavaScript,
     LanguageId::Java,
     LanguageId::CSharp,
+    LanguageId::Html,
     LanguageId::Shell,
     LanguageId::C,
     LanguageId::Cpp,
@@ -43,6 +44,7 @@ pub fn describe(language: LanguageId) -> &'static str {
         LanguageId::JavaScript => "package.json + src/index.js",
         LanguageId::Java => "pom.xml + src/main/java/<package>",
         LanguageId::CSharp => "a .csproj + Program.cs",
+        LanguageId::Html => "index.html + style.css",
         LanguageId::Shell => "an executable <name>.sh",
         LanguageId::C => "CMakeLists.txt + src/main.c",
         LanguageId::Cpp => "CMakeLists.txt + src/main.cpp",
@@ -141,6 +143,7 @@ pub fn create(parent: &Path, name: &str, language: LanguageId) -> CreateOutcome 
         LanguageId::JavaScript => javascript(&root, name),
         LanguageId::Java => java(&root, name),
         LanguageId::CSharp => csharp(&root, name),
+        LanguageId::Html => html(&root, name),
         LanguageId::Shell => shell(&root, name),
         LanguageId::C => c(&root, name),
         LanguageId::Cpp => cpp(&root, name),
@@ -316,6 +319,17 @@ fn csharp(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         write(root, &format!("{project}.csproj"), csproj)?,
         write(root, "Program.cs", &program)?,
         write(root, ".gitignore", "bin/\nobj/\n")?,
+    ])
+}
+
+fn html(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let page = format!(
+        "<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <title>{name}</title>\n    <link rel=\"stylesheet\" href=\"style.css\" />\n  </head>\n  <body>\n    <main class=\"card\">\n      <h1>Hello from {name}!</h1>\n      <p>Edit <code>index.html</code> to get started.</p>\n    </main>\n  </body>\n</html>\n"
+    );
+    let stylesheet = ":root {\n  color-scheme: light dark;\n}\n\nbody {\n  margin: 0;\n  font-family: system-ui, sans-serif;\n  display: grid;\n  place-items: center;\n  min-height: 100vh;\n}\n\n.card {\n  padding: 2rem;\n  border-radius: 0.75rem;\n  border: 1px solid #8884;\n}\n";
+    Ok(vec![
+        write(root, "index.html", &page)?,
+        write(root, "style.css", stylesheet)?,
     ])
 }
 
@@ -576,6 +590,22 @@ mod tests {
         assert!(root.join("Program.cs").is_file());
         let csproj = std::fs::read_to_string(root.join("my-app.csproj")).unwrap();
         assert!(csproj.contains("<TargetFramework>net10.0</TargetFramework>"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scaffolds_html() {
+        let dir = scratch("html");
+        let parent = dir.join("parent");
+        std::fs::create_dir_all(&parent).unwrap();
+        let CreateOutcome::Created { root, .. } = create(&parent, "My Site", LanguageId::Html)
+        else {
+            panic!("expected HTML success");
+        };
+        assert!(root.join("index.html").is_file());
+        assert!(root.join("style.css").is_file());
+        let page = std::fs::read_to_string(root.join("index.html")).unwrap();
+        assert!(page.contains("<link rel=\"stylesheet\" href=\"style.css\""));
         std::fs::remove_dir_all(&dir).ok();
     }
 
