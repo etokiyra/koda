@@ -2348,7 +2348,15 @@ impl App {
         let Some(tool) = Tool::for_language(language, ToolPurpose::LanguageServer) else {
             return;
         };
-        self.start_lsp(language, tool.program(), &[]);
+        // Prefer the executable Koda discovered, which may live in a user bin
+        // directory outside the process PATH.
+        let program = self
+            .tools
+            .as_ref()
+            .and_then(|tools| tools.program_path(tool))
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| tool.program().to_string());
+        self.start_lsp(language, &program, &[]);
     }
 
     /// Start a language server, recording our attempt either way.

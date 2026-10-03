@@ -1,14 +1,16 @@
 //! Discovery of the external tools Koda can drive.
 //!
 //! Koda hides tool management: it probes for the language servers and
-//! formatters it knows about and reports what it finds. Discovery is the first
-//! half of the zero-configuration promise — the second half (fetching what is
-//! missing) is not implemented yet, so for now Koda explains what to install.
+//! formatters it knows about, installs missing ones through their official
+//! package managers, and reports what it finds.
 //!
-//! A probe checks that the program exists on `PATH` *and* that it runs, because
-//! a `rustup` shim can exist for a component that is not installed.
+//! A probe checks that the program exists *and* that it runs, because a
+//! `rustup` shim can exist for a component that is not installed. Lookups
+//! search `PATH` and then a handful of well-known user bin directories, so a
+//! tool installed by rustup or pip is found even when Koda was launched from a
+//! GUI or a non-login shell whose `PATH` omits them.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::language::id::LanguageId;
@@ -146,6 +148,9 @@ pub struct ToolStatus {
     pub available: bool,
     /// The first line of `--version`, when there was one.
     pub version: Option<String>,
+    /// The resolved executable path, when one was found. Tools installed in a
+    /// user bin directory may not be on the process `PATH`.
+    pub path: Option<PathBuf>,
 }
 
 impl ToolStatus {
@@ -189,6 +194,11 @@ impl ToolRegistry {
         self.status(tool).is_some_and(|status| status.available)
     }
 
+    /// The resolved executable path for `tool`, if it was found.
+    pub fn program_path(&self, tool: Tool) -> Option<&Path> {
+        self.status(tool).and_then(|status| status.path.as_deref())
+    }
+
     /// Whether any language server for `language` is available.
     pub fn has_language_server(&self, language: LanguageId) -> bool {
         self.statuses.iter().any(|status| {
@@ -200,7 +210,15 @@ impl ToolRegistry {
 }
 
 fn probe(tool: Tool) -> ToolStatus {
-    let mut command = Command::new(tool.program());
+    let Some(path) = locate(tool.program()) else {
+        return ToolStatus {
+            tool,
+            available: false,
+            version: None,
+            path: None,
+        };
+    };
+    let mut command = Command::new(&path);
     command.args(tool.version_args());
     // `output()` nulls stdin, so `gofmt` reads an empty document and exits.
     match command.output() {
@@ -214,29 +232,64 @@ fn probe(tool: Tool) -> ToolStatus {
                 tool,
                 available: true,
                 version,
+                path: Some(path),
             }
         }
         _ => ToolStatus {
             tool,
             available: false,
             version: None,
+            path: Some(path),
         },
     }
 }
 
-/// Whether `program` exists on `PATH`, returning its full path if so.
+/// Whether `program` can be found, returning its full path.
 ///
-/// This checks for a file rather than spawning the process, so it is cheap.
+/// `PATH` is searched first, then a handful of well-known user and system bin
+/// directories. The latter matters because Koda is often launched from a GUI or
+/// a non-login shell whose `PATH` omits `~/.cargo/bin` and `~/.local/bin` —
+/// exactly where rustup and pip put language tooling.
 pub fn locate(program: &str) -> Option<PathBuf> {
+    if let Some(found) = locate_on_path(program) {
+        return Some(found);
+    }
+    known_bin_dirs()
+        .into_iter()
+        .find_map(|dir| candidate_in(&dir, program))
+}
+
+/// Search only `PATH`.
+fn locate_on_path(program: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).find_map(|dir| {
-        let candidate = dir.join(program);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        let with_exe = dir.join(format!("{program}.exe"));
-        with_exe.is_file().then_some(with_exe)
-    })
+    std::env::split_paths(&path).find_map(|dir| candidate_in(&dir, program))
+}
+
+fn candidate_in(dir: &Path, program: &str) -> Option<PathBuf> {
+    let candidate = dir.join(program);
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+    let with_exe = dir.join(format!("{program}.exe"));
+    with_exe.is_file().then_some(with_exe)
+}
+
+/// Directories where language tooling commonly lives.
+fn known_bin_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        dirs.push(home.join(".cargo/bin"));
+        dirs.push(home.join(".local/bin"));
+        dirs.push(home.join("bin"));
+        dirs.push(home.join(".bun/bin"));
+        dirs.push(home.join(".deno/bin"));
+    }
+    dirs.push(PathBuf::from("/usr/local/bin"));
+    dirs.push(PathBuf::from("/opt/homebrew/bin"));
+    dirs.push(PathBuf::from("/usr/bin"));
+    dirs.push(PathBuf::from("/bin"));
+    dirs
 }
 
 #[cfg(test)]
@@ -291,6 +344,7 @@ mod tests {
             tool: Tool::Rustfmt,
             available: true,
             version: Some("rustfmt 1.8.0".to_string()),
+            path: None,
         };
         assert_eq!(available.summary(), "rustfmt 1.8.0");
 
@@ -298,7 +352,31 @@ mod tests {
             tool: Tool::Rustfmt,
             available: false,
             version: None,
+            path: None,
         };
         assert!(missing.summary().contains("rustup"));
+    }
+
+    #[test]
+    fn candidate_lookup_finds_a_file_in_a_directory() {
+        let dir = std::env::temp_dir().join(format!("koda-tools-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("koda-fake-tool"), "").unwrap();
+
+        assert_eq!(
+            candidate_in(&dir, "koda-fake-tool"),
+            Some(dir.join("koda-fake-tool"))
+        );
+        assert!(candidate_in(&dir, "koda-absent-tool").is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn known_bin_dirs_include_user_tool_locations() {
+        let dirs = known_bin_dirs();
+        assert!(dirs.iter().any(|dir| dir.ends_with(".cargo/bin")));
+        assert!(dirs.iter().any(|dir| dir.ends_with(".local/bin")));
     }
 }

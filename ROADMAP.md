@@ -83,6 +83,8 @@ The highest-value work. These turn Koda from an editor into an IDE.
       manager (`rustup`, `go install`). When a Rust/Go file is open and its
       server is missing, Koda offers to install it once per session. Koda
       re-probes afterwards and starts a server when one becomes available.
+      Discovery also searches well-known user bin directories, so a minimal
+      `PATH` no longer hides an installed tool.
       Editing works offline; version pinning beyond what the package managers
       provide is still to come.
 - [x] **Rust/Go intelligence backends (LSP client + diagnostics).** Koda now

@@ -6,7 +6,8 @@
 //! is missing, Koda says exactly what is missing instead of failing silently.
 //!
 //! This is the "reuse system tools" half of the zero-configuration promise;
-//! automatic provisioning is not implemented yet.
+//! missing tools are installed through their official package managers from
+//! **Language Setup…**.
 
 use std::io::Write;
 use std::path::Path;
@@ -58,7 +59,11 @@ pub fn gofmt(text: &str) -> FormatOutcome {
 }
 
 fn run(program: &str, args: &[&str], text: &str, tool: &str, hint: &str) -> FormatOutcome {
-    let mut child = match Command::new(program)
+    // Prefer a located executable: the process PATH may be minimal when Koda is
+    // launched from a GUI or a non-login shell.
+    let program_path = crate::language::tools::locate(program)
+        .unwrap_or_else(|| std::path::PathBuf::from(program));
+    let mut child = match Command::new(&program_path)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Zero configuration
 
+- Tool discovery now searches `PATH` and then a handful of well-known user bin
+  directories (`~/.cargo/bin`, `~/.local/bin`, `~/bin`, …). Koda is often
+  launched from a GUI or a non-login shell whose `PATH` omits exactly the
+  directories rustup and pip install into, so this makes automatic server
+  startup and formatting work without the user fixing their environment. The
+  resolved path is used to launch servers and formatters, not just to probe.
 - **Language Setup…** can now install a missing tool with one action, using
   only the official acquisition path: `rustup component add …` for Rust tooling
   and `go install …@latest` for `gopls`. Koda runs no bespoke downloader, so
