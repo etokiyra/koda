@@ -81,6 +81,17 @@ pub fn render(
 
     let mut lines: Vec<Line> = Vec::with_capacity(view_height);
     let brackets = doc.matching_brackets(provider);
+    // Secondary cursors: their selections share the selection background, and
+    // each caret gets a solid accent block (the terminal can only place one
+    // real cursor, so extra carets are drawn as cells).
+    let secondary_selections: Vec<(Position, Position)> = doc
+        .cursors
+        .iter()
+        .map(|cursor| cursor.range())
+        .filter(|(start, end)| start != end)
+        .collect();
+    let secondary_carets: std::collections::HashSet<Position> =
+        doc.cursors.iter().map(|cursor| cursor.cursor).collect();
     for row in doc.scroll_top..(doc.scroll_top + view_height).min(total_lines) {
         lines.push(render_line(
             doc,
@@ -92,6 +103,8 @@ pub fn render(
             area.width,
             brackets,
             inline_diagnostics,
+            &secondary_selections,
+            &secondary_carets,
         ));
     }
 
@@ -141,6 +154,8 @@ fn render_line(
     line_width: u16,
     brackets: Option<(Position, Position)>,
     inline_diagnostics: bool,
+    secondary_selections: &[(Position, Position)],
+    secondary_carets: &std::collections::HashSet<Position>,
 ) -> Line<'static> {
     let text = doc.buffer.line_text(row);
     let char_count = text.chars().count();
@@ -193,6 +208,23 @@ fn render_line(
             *flag = true;
         }
     }
+    for (start, end) in secondary_selections {
+        if row < start.row || row > end.row {
+            continue;
+        }
+        let from = if row == start.row { start.col } else { 0 };
+        let to = if row == end.row { end.col } else { char_count };
+        for flag in selected.iter_mut().take(to.min(char_count)).skip(from) {
+            *flag = true;
+        }
+    }
+    let mut secondary_caret = vec![false; char_count];
+    for caret in secondary_carets {
+        if caret.row == row && caret.col < char_count {
+            secondary_caret[caret.col] = true;
+        }
+    }
+    let trailing_caret = secondary_carets.contains(&Position::new(row, char_count));
     let mut matched = vec![false; char_count];
     let mut current_match = vec![false; char_count];
     for (index, (start, end)) in search.matches.iter().enumerate() {
@@ -276,6 +308,10 @@ fn render_line(
                 theme::SEARCH_BG
             });
         }
+        // A secondary caret is a solid accent block over whatever is beneath it.
+        if secondary_caret.get(original).copied().unwrap_or(false) {
+            style = style.bg(theme::MULTI_CURSOR).fg(theme::palette::BG_DARK);
+        }
 
         if run_style == Some(style) {
             run.push(ch);
@@ -289,6 +325,16 @@ fn render_line(
     }
     if let Some(style) = run_style {
         spans.push(Span::styled(run, style));
+    }
+
+    // A secondary caret sitting past the last character is drawn as a block.
+    if trailing_caret && end == layout.len {
+        spans.push(Span::styled(
+            " ",
+            Style::default()
+                .bg(theme::MULTI_CURSOR)
+                .fg(theme::palette::BG_DARK),
+        ));
     }
 
     // An inline note for the most severe diagnostic on this line. Shown only

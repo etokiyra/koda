@@ -55,3 +55,52 @@ impl Selection {
         }
     }
 }
+
+/// A secondary cursor, with its own optional selection (via `anchor`).
+///
+/// The primary cursor stays on [`Document`](crate::editor::Document) as
+/// `cursor`/`selection`; [`Cursor`] carries the additional ones. A caret has
+/// `anchor == cursor`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Cursor {
+    pub anchor: Position,
+    pub cursor: Position,
+}
+
+impl Cursor {
+    /// A plain caret at `position`.
+    pub const fn caret(position: Position) -> Self {
+        Cursor {
+            anchor: position,
+            cursor: position,
+        }
+    }
+
+    /// A cursor with a selection from `anchor` to `cursor`.
+    pub const fn selecting(anchor: Position, cursor: Position) -> Self {
+        Cursor { anchor, cursor }
+    }
+
+    /// The normalized `(start, end)` range.
+    pub fn range(self) -> (Position, Position) {
+        if self.anchor <= self.cursor {
+            (self.anchor, self.cursor)
+        } else {
+            (self.cursor, self.anchor)
+        }
+    }
+
+    /// The text range this cursor would replace.
+    pub fn is_caret(self) -> bool {
+        self.anchor == self.cursor
+    }
+}
+
+impl From<(Position, Position)> for Cursor {
+    fn from((start, end): (Position, Position)) -> Self {
+        Cursor {
+            anchor: start,
+            cursor: end,
+        }
+    }
+}

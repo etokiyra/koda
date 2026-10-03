@@ -19,22 +19,61 @@ pub enum Coalesce {
     DeleteForward,
 }
 
-/// A single reversible change.
-#[derive(Clone, Debug)]
-pub struct Edit {
-    /// A process-unique identity, used to compare against the save point even
-    /// after edits have been undone and re-applied.
-    pub id: u64,
+/// A single primitive replacement inside an [`Edit`].
+///
+/// One edit usually has one op, but a multi-cursor keystroke produces several
+/// and is undone/redone as a single step.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EditOp {
     /// Character offset where the change began.
     pub start: usize,
     /// Text removed by the change (re-inserted on undo).
     pub removed: String,
     /// Text inserted by the change (removed on undo).
     pub inserted: String,
+}
+
+/// A reversible change.
+#[derive(Clone, Debug)]
+pub struct Edit {
+    /// A process-unique identity, used to compare against the save point even
+    /// after edits have been undone and re-applied.
+    pub id: u64,
+    /// The primitive replacements, in the order they were applied.
+    pub ops: Vec<EditOp>,
     pub cursor_before: Position,
     pub cursor_after: Position,
     /// Whether this edit may merge with the one before it.
     pub coalesce: Option<Coalesce>,
+}
+
+impl Edit {
+    /// A single-op edit.
+    pub fn single(
+        start: usize,
+        removed: String,
+        inserted: String,
+        cursor_before: Position,
+        cursor_after: Position,
+        coalesce: Option<Coalesce>,
+    ) -> Self {
+        Edit {
+            id: 0,
+            ops: vec![EditOp {
+                start,
+                removed,
+                inserted,
+            }],
+            cursor_before,
+            cursor_after,
+            coalesce,
+        }
+    }
+
+    /// Whether this edit consists of exactly one primitive op.
+    fn is_single(&self) -> bool {
+        self.ops.len() == 1
+    }
 }
 
 /// A bounded undo/redo stack.
@@ -142,27 +181,33 @@ impl History {
 }
 
 fn merge(last: &mut Edit, edit: &Edit, kind: Coalesce) -> bool {
+    // Only single-op edits coalesce; a multi-cursor group is always its own step.
+    if !last.is_single() || !edit.is_single() {
+        return false;
+    }
+    let last_op = &mut last.ops[0];
+    let edit_op = &edit.ops[0];
     match kind {
         Coalesce::Insert => {
-            if !last.removed.is_empty() || !edit.removed.is_empty() {
+            if !last_op.removed.is_empty() || !edit_op.removed.is_empty() {
                 return false;
             }
-            if last.start + last.inserted.chars().count() != edit.start {
+            if last_op.start + last_op.inserted.chars().count() != edit_op.start {
                 return false;
             }
-            last.inserted.push_str(&edit.inserted);
+            last_op.inserted.push_str(&edit_op.inserted);
             last.cursor_after = edit.cursor_after;
             true
         }
         Coalesce::DeleteBackward => {
-            if !last.inserted.is_empty() || !edit.inserted.is_empty() {
+            if !last_op.inserted.is_empty() || !edit_op.inserted.is_empty() {
                 return false;
             }
-            if edit.start + edit.removed.chars().count() != last.start {
+            if edit_op.start + edit_op.removed.chars().count() != last_op.start {
                 return false;
             }
-            last.removed = format!("{}{}", edit.removed, last.removed);
-            last.start = edit.start;
+            last_op.removed = format!("{}{}", edit_op.removed, last_op.removed);
+            last_op.start = edit_op.start;
             // `cursor_before` must stay at the *first* deletion's right edge,
             // while `cursor_after` follows the most recent deletion's left edge,
             // so both undo and redo land where the user left off.
@@ -170,13 +215,13 @@ fn merge(last: &mut Edit, edit: &Edit, kind: Coalesce) -> bool {
             true
         }
         Coalesce::DeleteForward => {
-            if !last.inserted.is_empty() || !edit.inserted.is_empty() {
+            if !last_op.inserted.is_empty() || !edit_op.inserted.is_empty() {
                 return false;
             }
-            if edit.start != last.start {
+            if edit_op.start != last_op.start {
                 return false;
             }
-            last.removed.push_str(&edit.removed);
+            last_op.removed.push_str(&edit_op.removed);
             last.cursor_after = edit.cursor_after;
             true
         }

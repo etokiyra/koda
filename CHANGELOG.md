@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Multiple cursors
+
+- **Multi-cursor editing.** `Ctrl+D` now adds a cursor at the next whole-word
+  occurrence instead of moving a single selection, and `Ctrl+Shift+L` puts a
+  cursor on *every* occurrence of the current word or selection. `Ctrl+Alt+↓`
+  and `Ctrl+Alt+↑` stack carets on the lines below/above (the same commands are
+  in the palette, so they are reachable even where the terminal does not report
+  the chord). `Esc` ends the session, and any navigation collapses back to the
+  single primary cursor.
+- Typing, auto-pairing, newline (with per-line indentation), backspace, forward
+  delete, paste, indent and outdent all apply at every cursor. The whole
+  keystroke is recorded as **one undo step**, so a single `Ctrl+Z` restores the
+  file exactly. Rows are made unique before indentation, so two cursors on one
+  line cannot indent it twice.
+- Secondary carets render as solid accent blocks, secondary selections share the
+  selection background, and the statusline reports the cursor count.
+
 ### HTML/CSS tooling and a crash fix
 
 - **The HTML provider no longer crashes on non-ASCII documents.** The tag-balance

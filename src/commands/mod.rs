@@ -28,6 +28,9 @@ pub mod ids {
     pub const REDO: &str = "edit.redo";
     pub const SELECT_ALL: &str = "edit.selectAll";
     pub const SELECT_NEXT: &str = "edit.selectNext";
+    pub const SELECT_ALL_OCCURRENCES: &str = "edit.selectAllOccurrences";
+    pub const ADD_CURSOR_BELOW: &str = "edit.addCursorBelow";
+    pub const ADD_CURSOR_ABOVE: &str = "edit.addCursorAbove";
     pub const COPY: &str = "edit.copy";
     pub const CUT: &str = "edit.cut";
     pub const PASTE: &str = "edit.paste";
@@ -202,7 +205,31 @@ impl CommandRegistry {
                 "Edit",
                 Some("Ctrl+D"),
             )
-            .describes("Select the word, then its next occurrence")
+            .describes("Add a cursor at the next occurrence of the selection")
+            .needs_doc(),
+            Command::new(
+                SELECT_ALL_OCCURRENCES,
+                "Select All Occurrences",
+                "Edit",
+                Some("Ctrl+Shift+L"),
+            )
+            .describes("Put a cursor on every occurrence of the selection")
+            .needs_doc(),
+            Command::new(
+                ADD_CURSOR_BELOW,
+                "Add Cursor Below",
+                "Edit",
+                Some("Ctrl+Alt+↓"),
+            )
+            .describes("Add a caret on the line below each cursor")
+            .needs_doc(),
+            Command::new(
+                ADD_CURSOR_ABOVE,
+                "Add Cursor Above",
+                "Edit",
+                Some("Ctrl+Alt+↑"),
+            )
+            .describes("Add a caret on the line above each cursor")
             .needs_doc(),
             Command::new(COPY, "Copy", "Edit", Some("Ctrl+C"))
                 .describes("Copy the selection")

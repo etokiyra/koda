@@ -98,6 +98,9 @@ pub const HINT: Color = palette::BRIGHT_CYAN;
 
 /// Text selection background — Mellow `ui.selection` (`gray03`).
 pub const SELECTION_BG: Color = palette::GRAY03;
+/// Secondary multi-cursor block, drawn in the accent blue so it stands apart
+/// from the terminal's own primary cursor.
+pub const MULTI_CURSOR: Color = palette::BLUE;
 /// Selected list rows and the active tab — Mellow `ui.menu.selected` (`gray03`).
 pub const MENU_SELECTED_BG: Color = palette::GRAY03;
 /// Selected file-tree row — Mellow `ui.selection` (`gray03`).

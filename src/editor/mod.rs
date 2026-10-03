@@ -12,7 +12,7 @@ use std::path::Path;
 
 pub use buffer::{Buffer, LineEnding};
 pub use document::Document;
-pub use position::{Position, Selection};
+pub use position::{Cursor, Position, Selection};
 
 /// The set of open documents and the active tab.
 #[derive(Default)]

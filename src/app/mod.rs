@@ -867,6 +867,7 @@ impl App {
                         'v' => self.paste(),
                         'd' if shift => self.with_doc(|d| d.duplicate_line()),
                         'd' => self.with_doc(|d| d.select_next_occurrence()),
+                        'l' if shift => self.with_doc(|d| d.select_all_occurrences()),
                         'k' if shift => self.with_doc(|d| d.delete_line()),
                         'm' => self.goto_matching_bracket(),
                         '/' => self.toggle_comment(),
@@ -904,14 +905,18 @@ impl App {
                 }
             }),
             KeyCode::Up => {
-                if alt {
+                if ctrl && alt {
+                    self.with_doc(|d| d.add_cursor_above());
+                } else if alt {
                     self.with_doc(|d| d.move_line_up());
                 } else {
                     self.with_doc(|d| d.move_up(shift));
                 }
             }
             KeyCode::Down => {
-                if alt {
+                if ctrl && alt {
+                    self.with_doc(|d| d.add_cursor_below());
+                } else if alt {
                     if shift {
                         self.with_doc(|d| d.duplicate_line());
                     } else {
@@ -1795,6 +1800,9 @@ impl App {
             ids::REDO => self.with_doc(|d| d.redo()),
             ids::SELECT_ALL => self.with_doc(|d| d.select_all()),
             ids::SELECT_NEXT => self.with_doc(|d| d.select_next_occurrence()),
+            ids::SELECT_ALL_OCCURRENCES => self.with_doc(|d| d.select_all_occurrences()),
+            ids::ADD_CURSOR_BELOW => self.with_doc(|d| d.add_cursor_below()),
+            ids::ADD_CURSOR_ABOVE => self.with_doc(|d| d.add_cursor_above()),
             ids::COPY => self.copy(),
             ids::CUT => self.cut(),
             ids::PASTE => self.paste(),

@@ -40,7 +40,7 @@ src/
 │   ├── buffer.rs         # rope-backed text buffer
 │   ├── document.rs       # buffer + cursor + selection + undo + highlight cache
 │   ├── history.rs        # undo/redo edits
-│   ├── position.rs       # Position / Selection
+│   ├── position.rs       # Position / Selection / Cursor
 │   └── mod.rs            # Editor (open documents / tabs)
 ├── filesystem/mod.rs     # fs helpers (sorted reads, file walking)
 ├── git/mod.rs            # branch + file status via the `git` binary
@@ -249,6 +249,16 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   auto-indent, `Tab` and indent/outdent. This is zero-configuration and keeps
   the editor core language-agnostic: the width is a property of the file, not a
   per-language branch.
+- **Multiple cursors are a small, explicit model.** The primary stays on
+  `Document` as `cursor`/`selection`; `Document::cursors` holds the secondary
+  `Cursor`s (anchor + cursor), kept sorted, unique and distinct from the
+  primary. Edits are planned per cursor against the pre-edit text and applied
+  bottom-up, then recorded as one `Edit` whose `ops` list makes the whole
+  keystroke a single undo step. `apply_multi_edit` is the only path that mutates
+  several ranges, and it moves cursors even for a zero-op keystroke so bracket
+  skip-over works everywhere. Navigation deliberately collapses to the primary;
+  every other single-point edit clears the extras so a stale cursor can never
+  survive an unrelated operation.
 - **Scenes are drawn on a canvas.** `ui/art.rs` composes each welcome scene by
   placing glyphs at coordinates on a small `Canvas`, then turning runs of equal
   style into spans. This keeps the art symmetric and lets one element animate

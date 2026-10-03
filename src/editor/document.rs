@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::editor::buffer::{Buffer, LineEnding};
-use crate::editor::history::{Coalesce, Edit, History};
-use crate::editor::position::{Position, Selection};
+use crate::editor::history::{Coalesce, Edit, EditOp, History};
+use crate::editor::position::{Cursor, Position, Selection};
 use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::id::LanguageId;
 use crate::language::provider::{HighlightSpan, HighlightState, LanguageProvider, TokenKind};
@@ -15,11 +15,23 @@ use crate::language::provider::{HighlightSpan, HighlightState, LanguageProvider,
 /// discernible style.
 pub const INDENT_WIDTH: usize = 4;
 
+/// A planned replacement at one cursor, used by multi-cursor edits.
+#[derive(Clone, Debug)]
+struct MultiEdit {
+    start: Position,
+    end: Position,
+    inserted: String,
+}
+
 /// One open file.
 pub struct Document {
     pub buffer: Buffer,
     pub cursor: Position,
     pub selection: Option<Selection>,
+    /// Additional cursors beyond the primary one. Each carries its own anchor
+    /// (and therefore its own selection). Kept sorted by start position and
+    /// free of duplicates and of the primary cursor.
+    pub cursors: Vec<Cursor>,
     /// Remembered column for vertical movement.
     pub preferred_col: Option<usize>,
     /// First visible line.
@@ -55,6 +67,7 @@ impl Document {
             buffer,
             cursor: Position::zero(),
             selection: None,
+            cursors: Vec::new(),
             preferred_col: None,
             scroll_top: 0,
             scroll_left: 0,
@@ -149,6 +162,7 @@ impl Document {
         self.mark_saved();
         self.indent_width = detect_indent_width(&text);
         self.selection = None;
+        self.cursors.clear();
         self.preferred_col = None;
         self.cursor = self.buffer.clamp_position(cursor);
         self.invalidate_highlight(0);
@@ -314,23 +328,412 @@ impl Document {
             self.buffer.insert(start_char, &inserted);
         }
         let cursor_after = a.advanced_by(&inserted);
-        self.history.push(Edit {
-            id: 0,
-            start: start_char,
+        self.history.push(Edit::single(
+            start_char,
             removed,
             inserted,
-            cursor_before: self.cursor,
+            self.cursor,
             cursor_after,
             coalesce,
-        });
+        ));
         self.cursor = cursor_after;
         self.selection = None;
+        // A single-point edit collapses any multi-cursor session.
+        self.cursors.clear();
         self.preferred_col = None;
         self.buffer.mark_dirty();
         self.invalidate_highlight(a.row);
         // Diagnostics describe the previous text; drop them until recomputed.
         self.diagnostics.clear();
         self.diagnostics_dirty = true;
+    }
+
+    // ----------------------------------------------------------------------
+    // Multiple cursors
+    // ----------------------------------------------------------------------
+
+    /// Whether there is more than one cursor.
+    pub fn has_multiple_cursors(&self) -> bool {
+        !self.cursors.is_empty()
+    }
+
+    /// Drop every secondary cursor, keeping the primary in place.
+    pub fn clear_extra_cursors(&mut self) {
+        self.cursors.clear();
+    }
+
+    /// The primary cursor's range (a zero-width caret when nothing is selected).
+    pub fn primary_range(&self) -> (Position, Position) {
+        self.selection_range().unwrap_or((self.cursor, self.cursor))
+    }
+
+    /// Every cursor as `(start, end, caret)`, primary first, ranges normalized.
+    fn all_cursor_specs(&self) -> Vec<(Position, Position, Position)> {
+        let mut specs = Vec::with_capacity(self.cursors.len() + 1);
+        let (start, end) = self.primary_range();
+        specs.push((start, end, self.cursor));
+        for cursor in &self.cursors {
+            let (start, end) = cursor.range();
+            specs.push((start, end, cursor.cursor));
+        }
+        specs
+    }
+
+    /// The text inside a normalized range.
+    fn range_text(&self, start: Position, end: Position) -> String {
+        let s = self.buffer.position_to_char(start);
+        let e = self.buffer.position_to_char(end);
+        if e <= s {
+            String::new()
+        } else {
+            self.buffer.as_rope().slice(s..e).to_string()
+        }
+    }
+
+    /// Keep secondary cursors sorted, unique and distinct from the primary.
+    fn normalize_extra_cursors(&mut self) {
+        let primary = self.primary_range();
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(primary);
+        let mut kept: Vec<Cursor> = Vec::new();
+        for cursor in self.cursors.drain(..) {
+            let range = cursor.range();
+            if seen.insert(range) {
+                kept.push(Cursor::from(range));
+            }
+        }
+        kept.sort_by_key(|cursor| cursor.range());
+        self.cursors = kept;
+    }
+
+    /// Apply replacements at every cursor as a single undoable edit.
+    ///
+    /// `edits` are normalized and applied from the bottom of the buffer upward
+    /// so earlier edits stay valid; `cursors` holds the resulting cursors with
+    /// the primary first. A zero-op call still moves the cursors, which is what
+    /// makes bracket skip-over work at every cursor.
+    fn apply_multi_edit(
+        &mut self,
+        mut edits: Vec<MultiEdit>,
+        cursors: Vec<Cursor>,
+        coalesce: Option<Coalesce>,
+    ) {
+        if edits.is_empty() || cursors.is_empty() {
+            return;
+        }
+        // A genuine single cursor keeps the exact existing single-cursor path
+        // (and its coalescing).
+        if edits.len() == 1 && self.cursors.is_empty() {
+            let edit = edits.remove(0);
+            self.apply_edit_coalesced(edit.start, edit.end, &edit.inserted, coalesce);
+            return;
+        }
+
+        let primary = cursors[0];
+        let cursor_before = self.cursor;
+
+        for edit in &mut edits {
+            if edit.start > edit.end {
+                std::mem::swap(&mut edit.start, &mut edit.end);
+            }
+        }
+        let mut application = edits.clone();
+        application.sort_by(|a, b| b.start.cmp(&a.start).then(b.end.cmp(&a.end)));
+
+        let mut ops = Vec::new();
+        let mut min_row = usize::MAX;
+        for edit in &application {
+            let start = self.buffer.clamp_position(edit.start);
+            let end = self.buffer.clamp_position(edit.end);
+            let start_char = self.buffer.position_to_char(start);
+            let end_char = self.buffer.position_to_char(end);
+            let removed = if end_char > start_char {
+                self.buffer.remove(start_char..end_char)
+            } else {
+                String::new()
+            };
+            let inserted = self.normalize_newlines(&edit.inserted);
+            if removed.is_empty() && inserted.is_empty() {
+                continue;
+            }
+            if !inserted.is_empty() {
+                self.buffer.insert(start_char, &inserted);
+            }
+            min_row = min_row.min(start.row);
+            ops.push(EditOp {
+                start: start_char,
+                removed,
+                inserted,
+            });
+        }
+
+        // Move every cursor even when the keystroke produced no text (a
+        // skip-over), so all cursors stay coherent.
+        self.cursor = self.buffer.clamp_position(primary.cursor);
+        self.selection = if primary.anchor == primary.cursor {
+            None
+        } else {
+            Some(Selection::new(primary.anchor))
+        };
+        self.cursors = cursors.into_iter().skip(1).collect();
+        self.preferred_col = None;
+        self.normalize_extra_cursors();
+
+        if ops.is_empty() {
+            return;
+        }
+        self.history.push(Edit {
+            id: 0,
+            ops,
+            cursor_before,
+            cursor_after: self.cursor,
+            coalesce,
+        });
+        self.buffer.mark_dirty();
+        if min_row != usize::MAX {
+            self.invalidate_highlight(min_row);
+        }
+        self.diagnostics.clear();
+        self.diagnostics_dirty = true;
+    }
+
+    /// Plan a newline at one cursor (`start`/`end` normalized, `caret` actual).
+    fn plan_newline(&self, start: Position, end: Position, caret: Position) -> (MultiEdit, Cursor) {
+        let line = self.buffer.line_text(caret.row);
+        let leading: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+        let before: String = line.chars().take(caret.col).collect();
+        let after = self.char_at(caret);
+
+        // Expanding an empty pair: `{|}` becomes a three-line indented block.
+        if let Some(open) = before.chars().last().filter(|c| is_open_bracket(*c))
+            && after == matching_close(open)
+        {
+            let outer = leading;
+            let inner = format!("{outer}{}", " ".repeat(self.indent_width));
+            let text = format!("\n{inner}\n{outer}");
+            let cursor = start.advanced_by(&text);
+            let cursor = Position::new(cursor.row.saturating_sub(1), inner.chars().count());
+            return (
+                MultiEdit {
+                    start,
+                    end,
+                    inserted: text,
+                },
+                Cursor::caret(cursor),
+            );
+        }
+
+        let mut indent = if line.trim().is_empty() && caret.row > 0 {
+            self.buffer
+                .line_text(caret.row - 1)
+                .chars()
+                .take_while(|c| c.is_whitespace())
+                .collect::<String>()
+        } else {
+            leading
+        };
+        if before.trim_end().ends_with(['{', '(', '[']) {
+            indent.push_str(&" ".repeat(self.indent_width));
+        }
+        let text = format!("\n{indent}");
+        let cursor = start.advanced_by(&text);
+        (
+            MultiEdit {
+                start,
+                end,
+                inserted: text,
+            },
+            Cursor::caret(cursor),
+        )
+    }
+
+    /// Plan a backspace at one cursor.
+    fn plan_backspace(
+        &self,
+        start: Position,
+        end: Position,
+        caret: Position,
+    ) -> (MultiEdit, Cursor) {
+        if start != end {
+            return (
+                MultiEdit {
+                    start,
+                    end,
+                    inserted: String::new(),
+                },
+                Cursor::caret(start),
+            );
+        }
+        if caret.col > 0 {
+            let before = self.char_at(Position::new(caret.row, caret.col - 1));
+            let at = self.char_at(caret);
+            // Deleting into an empty pair removes both halves.
+            if let (Some(open), Some(close)) = (before, at)
+                && matching_close(open) == Some(close)
+            {
+                let s = Position::new(caret.row, caret.col - 1);
+                let e = Position::new(caret.row, caret.col + 1);
+                return (
+                    MultiEdit {
+                        start: s,
+                        end: e,
+                        inserted: String::new(),
+                    },
+                    Cursor::caret(s),
+                );
+            }
+            let s = Position::new(caret.row, caret.col - 1);
+            return (
+                MultiEdit {
+                    start: s,
+                    end: caret,
+                    inserted: String::new(),
+                },
+                Cursor::caret(s),
+            );
+        }
+        if caret.row > 0 {
+            let prev = caret.row - 1;
+            let s = Position::new(prev, self.buffer.line_char_len(prev));
+            return (
+                MultiEdit {
+                    start: s,
+                    end: caret,
+                    inserted: String::new(),
+                },
+                Cursor::caret(s),
+            );
+        }
+        (
+            MultiEdit {
+                start,
+                end,
+                inserted: String::new(),
+            },
+            Cursor::caret(caret),
+        )
+    }
+
+    /// Plan a forward delete at one cursor.
+    fn plan_delete_forward(
+        &self,
+        start: Position,
+        end: Position,
+        caret: Position,
+    ) -> (MultiEdit, Cursor) {
+        if start != end {
+            return (
+                MultiEdit {
+                    start,
+                    end,
+                    inserted: String::new(),
+                },
+                Cursor::caret(start),
+            );
+        }
+        let line_len = self.buffer.line_char_len(caret.row);
+        if caret.col < line_len {
+            let e = Position::new(caret.row, caret.col + 1);
+            return (
+                MultiEdit {
+                    start: caret,
+                    end: e,
+                    inserted: String::new(),
+                },
+                Cursor::caret(caret),
+            );
+        }
+        if caret.row + 1 < self.buffer.len_lines() {
+            let e = Position::new(caret.row + 1, 0);
+            return (
+                MultiEdit {
+                    start: caret,
+                    end: e,
+                    inserted: String::new(),
+                },
+                Cursor::caret(caret),
+            );
+        }
+        (
+            MultiEdit {
+                start,
+                end,
+                inserted: String::new(),
+            },
+            Cursor::caret(caret),
+        )
+    }
+
+    /// Add a caret one row below every current cursor.
+    pub fn add_cursor_below(&mut self) {
+        self.add_cursor_vertical(1);
+    }
+
+    /// Add a caret one row above every current cursor.
+    pub fn add_cursor_above(&mut self) {
+        self.add_cursor_vertical(-1);
+    }
+
+    fn add_cursor_vertical(&mut self, direction: isize) {
+        let last = self.buffer.len_lines().saturating_sub(1);
+        let specs = self.all_cursor_specs();
+        let mut added: Vec<Cursor> = Vec::new();
+        for (_, _, caret) in specs {
+            let row = match caret.row.checked_add_signed(direction) {
+                Some(row) if row <= last => row,
+                _ => continue,
+            };
+            let col = caret.col.min(self.buffer.line_char_len(row));
+            added.push(Cursor::caret(Position::new(row, col)));
+        }
+        if added.is_empty() {
+            return;
+        }
+        // Fold the primary's caret into place and append the new ones.
+        self.selection = None;
+        let mut cursors: Vec<Cursor> = self.cursors.clone();
+        cursors.push(Cursor::caret(self.cursor));
+        cursors.extend(added);
+        // The primary stays where it is; everything else is normalized below.
+        self.cursors = cursors;
+        self.normalize_extra_cursors();
+        self.preferred_col = None;
+        self.history.break_coalesce();
+    }
+
+    /// Select every occurrence of the current word/selection and add a cursor
+    /// at each, as Visual Studio Code's "Select All Occurrences".
+    pub fn select_all_occurrences(&mut self) {
+        let query = match self.selection_range() {
+            Some((start, end)) => {
+                let text = self.range_text(start, end);
+                if text.is_empty() || text.contains('\n') {
+                    return;
+                }
+                text
+            }
+            None => {
+                let cursor = self.clamped_cursor();
+                match self.word_bounds(cursor.row, cursor.col) {
+                    Some((start, end)) => self.range_text(start, end),
+                    None => return,
+                }
+            }
+        };
+        if query.is_empty() {
+            return;
+        }
+        let matches = self.find_all_with(&query, true, true);
+        if matches.len() < 2 {
+            return;
+        }
+        // Primary takes the first match; the rest become secondary cursors.
+        self.selection = Some(Selection::new(matches[0].0));
+        self.cursor = matches[0].1;
+        self.cursors = matches.into_iter().skip(1).map(Cursor::from).collect();
+        self.preferred_col = None;
+        self.normalize_extra_cursors();
+        self.history.break_coalesce();
     }
 
     /// Replace the text between `start` and `end` with `text`, as a single edit.
@@ -345,9 +748,26 @@ impl Document {
 
     /// Type a character, applying automatic pairing where it helps.
     ///
-    /// Typing a closing bracket or double quote that is already under the cursor
-    /// skips over it rather than inserting a duplicate.
+    /// With multiple cursors, every cursor types independently and the whole
+    /// keystroke is one undo step.
     pub fn type_char(&mut self, c: char) {
+        if self.cursors.is_empty() {
+            self.type_char_single(c);
+            return;
+        }
+        let specs = self.all_cursor_specs();
+        let mut edits = Vec::with_capacity(specs.len());
+        let mut cursors = Vec::with_capacity(specs.len());
+        for (start, end, caret) in specs {
+            let (edit, cursor) = self.plan_type_char(c, start, end, caret);
+            edits.push(edit);
+            cursors.push(cursor);
+        }
+        self.apply_multi_edit(edits, cursors, Some(Coalesce::Insert));
+    }
+
+    /// Type a character on a single cursor, applying automatic pairing.
+    fn type_char_single(&mut self, c: char) {
         if (is_close_bracket(c) || c == '"') && self.char_at(self.cursor) == Some(c) {
             if let Some(next) = self.next_pos(self.cursor) {
                 self.set_cursor(next, false);
@@ -385,12 +805,106 @@ impl Document {
         self.insert_char(c);
     }
 
+    /// Plan typing `c` at one cursor range `(start, end)` whose caret is `caret`.
+    fn plan_type_char(
+        &self,
+        c: char,
+        start: Position,
+        end: Position,
+        caret: Position,
+    ) -> (MultiEdit, Cursor) {
+        // Skip over an already-inserted partner (no edit, just move).
+        if (is_close_bracket(c) || c == '"') && start == end && self.char_at(caret) == Some(c) {
+            let next = self.next_pos(caret).unwrap_or(caret);
+            return (
+                MultiEdit {
+                    start,
+                    end,
+                    inserted: String::new(),
+                },
+                Cursor::caret(next),
+            );
+        }
+        if let Some(close) = matching_close(c) {
+            if start != end {
+                let selected = self.range_text(start, end);
+                let text = format!("{c}{selected}{close}");
+                let inside = Position::new(start.row, start.col + 1);
+                return (
+                    MultiEdit {
+                        start,
+                        end,
+                        inserted: text,
+                    },
+                    Cursor::caret(inside),
+                );
+            }
+            let boundary = self.char_at(caret).is_none_or(|next| {
+                next.is_whitespace() || is_close_bracket(next) || next == ';' || next == ','
+            });
+            if boundary {
+                let text = format!("{c}{close}");
+                let inside = Position::new(start.row, start.col + 1);
+                return (
+                    MultiEdit {
+                        start,
+                        end,
+                        inserted: text,
+                    },
+                    Cursor::caret(inside),
+                );
+            }
+        }
+        let text = c.to_string();
+        let after = start.advanced_by(&text);
+        (
+            MultiEdit {
+                start,
+                end,
+                inserted: text,
+            },
+            Cursor::caret(after),
+        )
+    }
+
     pub fn insert_text(&mut self, text: &str) {
-        let (start, end) = self.selection_range().unwrap_or((self.cursor, self.cursor));
-        self.apply_edit(start, end, text);
+        if self.cursors.is_empty() {
+            let (start, end) = self.selection_range().unwrap_or((self.cursor, self.cursor));
+            self.apply_edit(start, end, text);
+            return;
+        }
+        let specs = self.all_cursor_specs();
+        let mut edits = Vec::with_capacity(specs.len());
+        let mut cursors = Vec::with_capacity(specs.len());
+        for (start, end, _) in specs {
+            let after = start.advanced_by(text);
+            edits.push(MultiEdit {
+                start,
+                end,
+                inserted: text.to_string(),
+            });
+            cursors.push(Cursor::caret(after));
+        }
+        self.apply_multi_edit(edits, cursors, None);
     }
 
     pub fn insert_newline(&mut self) {
+        if self.cursors.is_empty() {
+            self.insert_newline_single();
+            return;
+        }
+        let specs = self.all_cursor_specs();
+        let mut edits = Vec::with_capacity(specs.len());
+        let mut cursors = Vec::with_capacity(specs.len());
+        for (start, end, caret) in specs {
+            let (edit, cursor) = self.plan_newline(start, end, caret);
+            edits.push(edit);
+            cursors.push(cursor);
+        }
+        self.apply_multi_edit(edits, cursors, None);
+    }
+
+    fn insert_newline_single(&mut self) {
         let line = self.buffer.line_text(self.cursor.row);
         let leading: String = line.chars().take_while(|c| c.is_whitespace()).collect();
         let before: String = line.chars().take(self.cursor.col).collect();
@@ -427,7 +941,23 @@ impl Document {
     }
 
     pub fn backspace(&mut self) {
-        if self.delete_selection() {
+        if self.cursors.is_empty() {
+            self.backspace_single();
+            return;
+        }
+        let specs = self.all_cursor_specs();
+        let mut edits = Vec::with_capacity(specs.len());
+        let mut cursors = Vec::with_capacity(specs.len());
+        for (start, end, caret) in specs {
+            let (edit, cursor) = self.plan_backspace(start, end, caret);
+            edits.push(edit);
+            cursors.push(cursor);
+        }
+        self.apply_multi_edit(edits, cursors, None);
+    }
+
+    fn backspace_single(&mut self) {
+        if self.delete_selection_single() {
             return;
         }
         if self.cursor.col > 0 {
@@ -452,7 +982,23 @@ impl Document {
     }
 
     pub fn delete_forward(&mut self) {
-        if self.delete_selection() {
+        if self.cursors.is_empty() {
+            self.delete_forward_single();
+            return;
+        }
+        let specs = self.all_cursor_specs();
+        let mut edits = Vec::with_capacity(specs.len());
+        let mut cursors = Vec::with_capacity(specs.len());
+        for (start, end, caret) in specs {
+            let (edit, cursor) = self.plan_delete_forward(start, end, caret);
+            edits.push(edit);
+            cursors.push(cursor);
+        }
+        self.apply_multi_edit(edits, cursors, None);
+    }
+
+    fn delete_forward_single(&mut self) {
+        if self.delete_selection_single() {
             return;
         }
         let line_len = self.buffer.line_char_len(self.cursor.row);
@@ -465,8 +1011,31 @@ impl Document {
         }
     }
 
-    /// Delete the active selection, returning `true` if anything was removed.
+    /// Delete the active selection (every cursor's selection), returning `true`
+    /// if anything was removed.
     pub fn delete_selection(&mut self) -> bool {
+        if self.cursors.is_empty() {
+            return self.delete_selection_single();
+        }
+        let specs = self.all_cursor_specs();
+        if !specs.iter().any(|(start, end, _)| start != end) {
+            return false;
+        }
+        let mut edits = Vec::with_capacity(specs.len());
+        let mut cursors = Vec::with_capacity(specs.len());
+        for (start, end, _) in specs {
+            edits.push(MultiEdit {
+                start,
+                end,
+                inserted: String::new(),
+            });
+            cursors.push(Cursor::caret(start));
+        }
+        self.apply_multi_edit(edits, cursors, None);
+        true
+    }
+
+    fn delete_selection_single(&mut self) -> bool {
         match self.selection_range() {
             Some((start, end)) => {
                 self.apply_edit(start, end, "");
@@ -482,6 +1051,10 @@ impl Document {
 
     /// Indent the selected lines, or insert one indentation step at the cursor.
     pub fn indent(&mut self) {
+        if !self.cursors.is_empty() {
+            self.indent_multi(true);
+            return;
+        }
         match self.selected_rows() {
             Some((start, end)) => self.reindent_lines(start, end, true),
             None => self.insert_tab(),
@@ -490,10 +1063,93 @@ impl Document {
 
     /// Outdent the selected lines, or one step on the current line.
     pub fn outdent(&mut self) {
+        if !self.cursors.is_empty() {
+            self.indent_multi(false);
+            return;
+        }
         let (start, end) = self
             .selected_rows()
             .unwrap_or((self.cursor.row, self.cursor.row));
         self.reindent_lines(start, end, false);
+    }
+
+    /// Indent or outdent every cursor's line as one undoable edit.
+    ///
+    /// Rows are made unique first, so overlapping cursors on the same line
+    /// cannot indent it twice. Cursors shift with the whitespace they gained or
+    /// lost, and selections are preserved.
+    fn indent_multi(&mut self, increase: bool) {
+        let specs = self.all_cursor_specs();
+        let width = self.indent_width.max(1);
+        let mut rows: Vec<usize> = Vec::new();
+        for (start, end, caret) in &specs {
+            if start != end {
+                let last = if end.col == 0 && end.row > start.row {
+                    end.row - 1
+                } else {
+                    end.row
+                };
+                rows.extend(start.row..=last);
+            } else {
+                rows.push(caret.row);
+            }
+        }
+        rows.sort_unstable();
+        rows.dedup();
+
+        let mut edits = Vec::new();
+        let mut deltas: Vec<(usize, isize)> = Vec::new();
+        for &row in &rows {
+            let line = self.buffer.line_text(row);
+            if increase {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                edits.push(MultiEdit {
+                    start: Position::new(row, 0),
+                    end: Position::new(row, 0),
+                    inserted: " ".repeat(width),
+                });
+                deltas.push((row, width as isize));
+            } else {
+                let remove = leading_outdent(&line, width);
+                if remove == 0 {
+                    continue;
+                }
+                edits.push(MultiEdit {
+                    start: Position::new(row, 0),
+                    end: Position::new(row, remove),
+                    inserted: String::new(),
+                });
+                deltas.push((row, -(remove as isize)));
+            }
+        }
+        if edits.is_empty() {
+            return;
+        }
+
+        let shift = |pos: Position| -> Position {
+            match deltas.iter().find(|(row, _)| *row == pos.row) {
+                Some((_, delta)) => {
+                    let col = (pos.col as isize + delta).max(0) as usize;
+                    Position::new(pos.row, col)
+                }
+                None => pos,
+            }
+        };
+        let mut cursors = Vec::with_capacity(specs.len());
+        for (start, end, caret) in &specs {
+            let new_caret = shift(*caret);
+            let anchor = if start == end {
+                None
+            } else if caret == start {
+                Some(shift(*end))
+            } else {
+                Some(shift(*start))
+            };
+            cursors.push(Cursor::selecting(anchor.unwrap_or(new_caret), new_caret));
+        }
+        self.apply_multi_edit(edits, cursors, None);
     }
 
     fn insert_tab(&mut self) {
@@ -654,16 +1310,20 @@ impl Document {
 
     pub fn undo(&mut self) {
         if let Some(edit) = self.history.undo() {
-            let start = edit.start;
-            let inserted_len = edit.inserted.chars().count();
-            if inserted_len > 0 {
-                self.buffer.remove(start..start + inserted_len);
-            }
-            if !edit.removed.is_empty() {
-                self.buffer.insert(start, &edit.removed);
+            // Undo the primitive ops in reverse application order so earlier
+            // (lower) offsets are restored first.
+            for op in edit.ops.iter().rev() {
+                let inserted_len = op.inserted.chars().count();
+                if inserted_len > 0 {
+                    self.buffer.remove(op.start..op.start + inserted_len);
+                }
+                if !op.removed.is_empty() {
+                    self.buffer.insert(op.start, &op.removed);
+                }
             }
             self.cursor = self.buffer.clamp_position(edit.cursor_before);
             self.selection = None;
+            self.cursors.clear();
             self.preferred_col = None;
             self.invalidate_highlight(self.cursor.row);
             self.refresh_dirty();
@@ -674,16 +1334,18 @@ impl Document {
 
     pub fn redo(&mut self) {
         if let Some(edit) = self.history.redo() {
-            let start = edit.start;
-            let removed_len = edit.removed.chars().count();
-            if removed_len > 0 {
-                self.buffer.remove(start..start + removed_len);
-            }
-            if !edit.inserted.is_empty() {
-                self.buffer.insert(start, &edit.inserted);
+            for op in &edit.ops {
+                let removed_len = op.removed.chars().count();
+                if removed_len > 0 {
+                    self.buffer.remove(op.start..op.start + removed_len);
+                }
+                if !op.inserted.is_empty() {
+                    self.buffer.insert(op.start, &op.inserted);
+                }
             }
             self.cursor = self.buffer.clamp_position(edit.cursor_after);
             self.selection = None;
+            self.cursors.clear();
             self.preferred_col = None;
             self.invalidate_highlight(self.cursor.row);
             self.refresh_dirty();
@@ -758,9 +1420,13 @@ impl Document {
         self.history.break_coalesce();
     }
 
-    /// Select the word under the cursor, or extend to the next occurrence of the
-    /// selected text. Repeated calls cycle through the document, wrapping at the
-    /// end. This is the single-cursor basis for multi-cursor editing.
+    /// Select the word under the cursor, then add a cursor at the next
+    /// occurrence on each further call. This is Visual Studio Code's `Ctrl+D`.
+    ///
+    /// The primary selection moves to the newest occurrence and each earlier
+    /// one becomes a secondary cursor, so the whole set can be edited at once.
+    /// Once every occurrence is selected, further calls wrap to the first
+    /// occurrence that is not already a cursor.
     pub fn select_next_occurrence(&mut self) {
         let (query, from) = match self.selection_range() {
             Some((_, end)) => {
@@ -787,14 +1453,34 @@ impl Document {
         if matches.is_empty() {
             return;
         }
+        // Everything already selected: the primary plus the secondaries.
+        let mut taken: Vec<(Position, Position)> =
+            self.cursors.iter().map(|cursor| cursor.range()).collect();
+        let Some((primary_start, primary_end)) = self.selection_range() else {
+            return;
+        };
+        taken.push((primary_start, primary_end));
+
+        // The next occurrence strictly after the primary, wrapping at the end,
+        // skipping anything already selected.
         let next = matches
             .iter()
-            .find(|(start, _)| *start >= from)
+            .find(|m| **m >= (from, from) && !taken.contains(m))
             .copied()
+            .or_else(|| matches.iter().copied().find(|m| !taken.contains(m)))
             .unwrap_or(matches[0]);
+
+        // If nothing new can be added, stop growing (as VS Code does).
+        if taken.contains(&next) {
+            return;
+        }
+        // The previous primary becomes a secondary; the new match becomes primary.
+        self.cursors
+            .push(Cursor::from((primary_start, primary_end)));
         self.selection = Some(Selection::new(next.0));
         self.cursor = next.1;
         self.preferred_col = None;
+        self.normalize_extra_cursors();
         self.history.break_coalesce();
     }
 
@@ -824,6 +1510,11 @@ impl Document {
     }
 
     pub fn clear_selection(&mut self) {
+        // `Esc` first ends a multi-cursor session, then clears a selection.
+        if !self.cursors.is_empty() {
+            self.cursors.clear();
+            return;
+        }
         self.selection = None;
     }
 
@@ -838,6 +1529,9 @@ impl Document {
     fn set_cursor_inner(&mut self, pos: Position, shift: bool, reset_preferred: bool) {
         let pos = self.buffer.clamp_position(pos);
         self.history.break_coalesce();
+        // Navigating collapses a multi-cursor session onto the primary; that is
+        // predictable, and a new session starts with `Ctrl+D`/`Ctrl+Alt+Arrow`.
+        self.cursors.clear();
         if shift {
             if self.selection.is_none() {
                 self.selection = Some(Selection::new(self.cursor));
@@ -855,6 +1549,7 @@ impl Document {
         if !shift && let Some(sel) = self.selection.take() {
             let (start, _) = sel.range(self.cursor);
             self.cursor = self.buffer.clamp_position(start);
+            self.cursors.clear();
             self.preferred_col = None;
             return;
         }
@@ -868,6 +1563,7 @@ impl Document {
         if !shift && let Some(sel) = self.selection.take() {
             let (_, end) = sel.range(self.cursor);
             self.cursor = self.buffer.clamp_position(end);
+            self.cursors.clear();
             self.preferred_col = None;
             return;
         }
@@ -1243,6 +1939,7 @@ impl Document {
         if let Some((_, partner)) = self.matching_brackets(provider) {
             self.cursor = self.buffer.clamp_position(partner);
             self.selection = None;
+            self.cursors.clear();
             self.preferred_col = None;
         }
     }
@@ -1388,20 +2085,30 @@ mod tests {
     }
 
     #[test]
-    fn select_next_occurrence_walks_the_document() {
+    fn select_next_occurrence_adds_a_cursor_each_time() {
         let mut d = doc("let foo = foo + foo;");
         d.move_to(Position::new(0, 4));
+
+        // First press selects the word under the cursor.
         d.select_next_occurrence();
         assert_eq!(d.selected_text().as_deref(), Some("foo"));
         assert_eq!(
             d.selection_range(),
             Some((Position::new(0, 4), Position::new(0, 7)))
         );
+        assert!(!d.has_multiple_cursors());
 
+        // Each further press keeps the previous occurrence as a secondary cursor
+        // and moves the primary to the next one.
         d.select_next_occurrence();
         assert_eq!(
             d.selection_range(),
             Some((Position::new(0, 10), Position::new(0, 13)))
+        );
+        assert_eq!(d.cursors.len(), 1);
+        assert_eq!(
+            d.cursors[0].range(),
+            (Position::new(0, 4), Position::new(0, 7))
         );
 
         d.select_next_occurrence();
@@ -1409,13 +2116,127 @@ mod tests {
             d.selection_range(),
             Some((Position::new(0, 16), Position::new(0, 19)))
         );
+        assert_eq!(d.cursors.len(), 2);
 
-        // Past the last occurrence it wraps to the first.
+        // Every occurrence now has a cursor, so further presses stop growing.
         d.select_next_occurrence();
         assert_eq!(
             d.selection_range(),
-            Some((Position::new(0, 4), Position::new(0, 7)))
+            Some((Position::new(0, 16), Position::new(0, 19)))
         );
+        assert_eq!(d.cursors.len(), 2);
+    }
+
+    #[test]
+    fn typing_replaces_every_selected_occurrence_in_one_undo_step() {
+        let mut d = doc("foo = foo + foo;");
+        d.move_to(Position::new(0, 0));
+        d.select_next_occurrence();
+        d.select_next_occurrence();
+        d.select_next_occurrence();
+        assert_eq!(d.cursors.len(), 2);
+
+        d.insert_text("bar");
+        assert_eq!(d.buffer.text(), "bar = bar + bar;");
+
+        // One undo restores all three replacements.
+        d.undo();
+        assert_eq!(d.buffer.text(), "foo = foo + foo;");
+        d.redo();
+        assert_eq!(d.buffer.text(), "bar = bar + bar;");
+    }
+
+    #[test]
+    fn select_all_occurrences_puts_a_cursor_on_each() {
+        let mut d = doc("let x = 1;\nlet y = 2;\nlet z = 3;\n");
+        d.move_to(Position::new(0, 0));
+        d.select_all_occurrences();
+        // "let" appears three times: primary plus two secondaries.
+        assert_eq!(d.selected_text().as_deref(), Some("let"));
+        assert_eq!(d.cursors.len(), 2);
+        d.insert_text("var");
+        assert_eq!(d.buffer.text(), "var x = 1;\nvar y = 2;\nvar z = 3;\n");
+    }
+
+    #[test]
+    fn add_cursor_below_stacks_carets_and_types_across_lines() {
+        let mut d = doc("aaa\naaa\naaa\n");
+        d.move_to(Position::new(0, 3));
+        d.add_cursor_below();
+        d.add_cursor_below();
+        // Primary on line 0, carets on lines 1 and 2: three in total.
+        assert_eq!(d.cursors.len() + 1, 3);
+        d.type_char('!');
+        assert_eq!(d.buffer.text(), "aaa!\naaa!\naaa!\n");
+        // Selections are distinct and the whole thing undoes in one step.
+        d.undo();
+        assert_eq!(d.buffer.text(), "aaa\naaa\naaa\n");
+    }
+
+    #[test]
+    fn multi_cursor_backspace_and_newline() {
+        let mut d = doc("ab\nab\nab\n");
+        d.move_to(Position::new(0, 1));
+        d.add_cursor_below();
+        d.add_cursor_below();
+        d.backspace();
+        assert_eq!(d.buffer.text(), "b\nb\nb\n");
+
+        // Undo the backspaces, then insert a newline at every caret.
+        d.undo();
+        assert_eq!(d.buffer.text(), "ab\nab\nab\n");
+        d.move_to(Position::new(0, 2));
+        d.add_cursor_below();
+        d.add_cursor_below();
+        d.insert_newline();
+        assert_eq!(d.buffer.text(), "ab\n\nab\n\nab\n\n");
+    }
+
+    #[test]
+    fn multi_cursor_indent_is_grouped_and_deduplicates_rows() {
+        let mut d = doc("one\ntwo\nthree\n");
+        d.move_to(Position::new(0, 0));
+        d.add_cursor_below();
+        d.add_cursor_below();
+        // Two cursors land on the same line as the primary is moved; ensure a
+        // row is never indented twice.
+        d.add_cursor_below();
+        d.indent();
+        assert_eq!(d.buffer.text(), "    one\n    two\n    three\n");
+        d.undo();
+        assert_eq!(d.buffer.text(), "one\ntwo\nthree\n");
+    }
+
+    #[test]
+    fn clear_selection_ends_a_multi_cursor_session() {
+        let mut d = doc("a a a");
+        d.move_to(Position::new(0, 0));
+        d.select_all_occurrences();
+        assert!(d.has_multiple_cursors());
+        d.clear_selection();
+        assert!(!d.has_multiple_cursors());
+    }
+
+    #[test]
+    fn moving_the_cursor_collapses_multi_cursor() {
+        let mut d = doc("a a a");
+        d.move_to(Position::new(0, 0));
+        d.select_all_occurrences();
+        assert!(d.has_multiple_cursors());
+        d.move_left(false);
+        assert!(!d.has_multiple_cursors());
+    }
+
+    #[test]
+    fn multi_cursor_delete_line_removes_each_line() {
+        let mut d = doc("one\ntwo\nthree\n");
+        d.move_to(Position::new(0, 0));
+        d.add_cursor_below();
+        // Carets on rows 0 and 1; `delete_line` acts on the primary only and
+        // collapses, so exactly one line is removed.
+        d.delete_line();
+        assert_eq!(d.cursors.len(), 0);
+        assert_eq!(d.buffer.text(), "two\nthree\n");
     }
 
     #[test]

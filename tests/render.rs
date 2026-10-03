@@ -432,6 +432,40 @@ fn statusline_uses_mellow_panel_background() {
 }
 
 #[test]
+fn multi_cursor_carets_are_visible() {
+    let dir = temp_project("multicursor");
+    let file = dir.join("src/main.rs");
+    fs::write(&file, "let foo = foo + foo;\n").unwrap();
+    let mut app = app_with_file(&file);
+    app.editor
+        .active_document_mut()
+        .unwrap()
+        .move_to(koda::editor::Position::new(0, 4));
+    app.execute_command(ids::SELECT_ALL_OCCURRENCES);
+    assert!(app.editor.active_document().unwrap().has_multiple_cursors());
+
+    let backend = TestBackend::new(100, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| koda::ui::render(frame, &mut app))
+        .unwrap();
+
+    let buffer = terminal.backend().buffer();
+    let has_secondary = (0..buffer.area.height).any(|y| {
+        (0..buffer.area.width).any(|x| {
+            buffer
+                .cell((x, y))
+                .is_some_and(|cell| cell.bg == theme::MULTI_CURSOR)
+        })
+    });
+    assert!(
+        has_secondary,
+        "secondary cursors should render an accent block"
+    );
+    cleanup(&dir);
+}
+
+#[test]
 fn bracket_match_is_highlighted() {
     let dir = temp_project("bracket");
     let file = dir.join("src/main.rs");

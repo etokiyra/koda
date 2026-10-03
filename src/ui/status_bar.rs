@@ -53,6 +53,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             ));
         }
 
+        // A multi-cursor session is easy to lose track of; say how many.
+        if doc.has_multiple_cursors() {
+            spans.push(Span::styled(
+                format!("  {} {} cursors", art::POINTER, doc.cursors.len() + 1),
+                Style::default().fg(theme::MULTI_CURSOR).bg(theme::PANEL_BG),
+            ));
+        }
+
         // Diagnostics: keep errors loud, warnings present, both compact.
         let (errors, warnings) = doc.diagnostic_counts();
         if errors > 0 {
