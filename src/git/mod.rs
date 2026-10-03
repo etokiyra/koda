@@ -134,6 +134,48 @@ fn run(dir: &Path, args: &[&str]) -> Option<String> {
     if text.is_empty() { None } else { Some(text) }
 }
 
+/// Run a git subcommand, returning trimmed stdout or the first error line.
+///
+/// Unlike [`run`], this surfaces failures so the UI can explain what git said.
+fn run_checked(dir: &Path, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .map_err(|err| err.to_string())?;
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let message = stderr
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("git command failed")
+        .trim()
+        .to_string();
+    Err(message)
+}
+
+/// Stage every change in the repository at `root`.
+pub fn stage_all(root: &Path) -> Result<(), String> {
+    run_checked(root, &["add", "-A"]).map(|_| ())
+}
+
+/// Stage every change and commit it with `message`.
+///
+/// Koda never rewrites history; this is a plain `git add -A` followed by a
+/// `git commit`, run only when the user explicitly asks for it.
+pub fn commit_all(root: &Path, message: &str) -> Result<String, String> {
+    stage_all(root)?;
+    let output = run_checked(root, &["commit", "-m", message])?;
+    if output.is_empty() {
+        Ok("Committed".to_string())
+    } else {
+        Ok(output)
+    }
+}
+
 fn parse_status(code: &str) -> GitFileStatus {
     let mut chars = code.chars();
     let x = chars.next().unwrap_or(' ');
@@ -171,5 +213,51 @@ mod tests {
         assert_eq!(parse_status("A "), GitFileStatus::Added);
         assert_eq!(parse_status("UU"), GitFileStatus::Conflicted);
         assert_eq!(parse_status("R "), GitFileStatus::Renamed);
+    }
+
+    #[test]
+    fn stages_and_commits_when_git_is_available() {
+        if std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return; // Skip when git is unavailable.
+        }
+        let dir = std::env::temp_dir().join(format!("koda-git-commit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+        };
+        // A fresh repository with a deterministic identity.
+        assert!(git(&["init", "-q"]).unwrap().status.success());
+        assert!(
+            git(&["config", "user.email", "koda@example.com"])
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(
+            git(&["config", "user.name", "Koda Test"])
+                .unwrap()
+                .status
+                .success()
+        );
+        std::fs::write(dir.join("a.txt"), "hello\n").unwrap();
+
+        assert!(stage_all(&dir).is_ok());
+        let result = commit_all(&dir, "initial commit");
+        assert!(result.is_ok(), "commit failed: {result:?}");
+
+        let log = git(&["log", "--oneline"]).unwrap();
+        assert!(String::from_utf8_lossy(&log.stdout).contains("initial commit"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

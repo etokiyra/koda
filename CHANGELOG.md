@@ -202,6 +202,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a working-tree status (modified, added, deleted, renamed, untracked,
   conflicted), each showing its short indicator. Choosing one opens it. This is
   a read-only view built from the existing git snapshot.
+- Added **Commit Changes…**: prompts for a message, stages every change
+  (`git add -A`) and commits on the background worker, then refreshes the
+  status bar and changed-files list. Failures — such as a missing git identity
+  — are reported verbatim. Koda never rewrites history; the action is explicit.
 
 ### Search
 

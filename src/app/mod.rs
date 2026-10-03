@@ -175,6 +175,8 @@ pub struct App {
     pending_rename_file: Option<PathBuf>,
     /// A tool install in progress, if any.
     pending_install: Option<Tool>,
+    /// Whether a git commit is running on the worker.
+    pending_commit: bool,
     /// Code actions from the most recent server response.
     pending_code_actions: Vec<convert::CodeAction>,
     /// Connection state, shown in the statusline.
@@ -248,6 +250,7 @@ impl App {
             pending_rename: None,
             pending_rename_file: None,
             pending_install: None,
+            pending_commit: false,
             pending_code_actions: Vec::new(),
             lsp_status: LspStatus::Offline,
             last_disk_check: Instant::now(),
@@ -414,6 +417,8 @@ impl App {
             Some("searching project")
         } else if self.pending_install.is_some() {
             Some("installing")
+        } else if self.pending_commit {
+            Some("committing")
         } else if self.lsp_status == LspStatus::Starting {
             Some("connecting")
         } else {
@@ -1061,6 +1066,7 @@ impl App {
             ids::WORKSPACE_SYMBOLS => self.open_workspace_symbols(),
             ids::PROJECT_SEARCH => self.open_project_search(),
             ids::CHANGED_FILES => self.open_changed_files(),
+            ids::GIT_COMMIT => self.commit_changes(),
             ids::FIND => self.open_search(false),
             ids::REPLACE => self.open_search(true),
             ids::GOTO_LINE => self.open_prompt(PromptKind::GotoLine, "Go to line", "42"),
@@ -1198,6 +1204,20 @@ impl App {
                     revision,
                 );
                 self.set_status(format!("Searching for \"{input}\"…"));
+            }
+            PromptKind::CommitMessage => {
+                if input.is_empty() {
+                    self.set_error("No commit message provided");
+                    return;
+                }
+                if self.pending_commit {
+                    self.set_status("A commit is already running");
+                    return;
+                }
+                self.pending_commit = true;
+                self.background
+                    .commit_all(self.workspace.root().to_path_buf(), input.clone());
+                self.set_status(format!("Committing: {input}"));
             }
         }
     }
@@ -1911,6 +1931,14 @@ impl App {
                 self.workspace.git = info;
                 true
             }
+            BackgroundEvent::GitCommitted { result } => {
+                self.pending_commit = false;
+                match result {
+                    Ok(message) => self.set_status(message),
+                    Err(message) => self.set_error(format!("Commit failed — {message}")),
+                }
+                true
+            }
             BackgroundEvent::WorkspaceSymbols { revision, symbols } => {
                 if self.pending_workspace_symbols != Some(revision) {
                     return false;
@@ -1949,6 +1977,23 @@ impl App {
                 true
             }
         }
+    }
+
+    /// Prompt for a commit message, then stage everything and commit.
+    fn commit_changes(&mut self) {
+        if !self.workspace.git.available {
+            self.set_status("Not a git repository");
+            return;
+        }
+        if self.workspace.git.files.is_empty() {
+            self.set_status("Nothing to commit");
+            return;
+        }
+        self.open_prompt(
+            PromptKind::CommitMessage,
+            "Commit message",
+            "describe the change",
+        );
     }
 
     /// List the files changed in the working tree, newest snapshot.
@@ -3232,6 +3277,12 @@ impl App {
             ids::RENAME_FILE | ids::DELETE_FILE if self.file_op_target().is_none() => {
                 (false, Some("select a file first".to_string()))
             }
+            ids::GIT_COMMIT if !self.workspace.git.available => {
+                (false, Some("not a git repository".to_string()))
+            }
+            ids::GIT_COMMIT if self.workspace.git.files.is_empty() => {
+                (false, Some("nothing to commit".to_string()))
+            }
             ids::DIAGNOSTICS_NEXT | ids::DIAGNOSTICS_PREV
                 if !document.is_some_and(|doc| !doc.diagnostics().is_empty()) =>
             {
@@ -4299,6 +4350,41 @@ mod tests {
         let item = picker.item(0).expect("an item");
         assert!(matches!(item.action, PickerAction::OpenPath(_)));
         assert!(item.detail.contains('M'), "detail was {}", item.detail);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn commit_flow_reports_state_and_prompts() {
+        let dir = temp_project("commit");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        // Not a repository: the command explains instead of prompting.
+        app.workspace.git = crate::git::GitInfo::default();
+        app.execute_command(ids::GIT_COMMIT);
+        assert!(matches!(app.overlay, Overlay::None));
+        assert!(
+            app.status_message()
+                .unwrap_or("")
+                .contains("Not a git repository")
+        );
+
+        // With changes, it opens a commit-message prompt and dispatches work.
+        let mut files = std::collections::HashMap::new();
+        files.insert(file.clone(), GitFileStatus::Modified);
+        app.workspace.git = crate::git::GitInfo {
+            repo_root: Some(dir.clone()),
+            branch: Some("main".to_string()),
+            files,
+            available: true,
+        };
+        app.execute_command(ids::GIT_COMMIT);
+        assert!(matches!(app.overlay, Overlay::Prompt(_)));
+
+        app.submit_prompt(PromptKind::CommitMessage, "a message".to_string());
+        assert!(app.pending_commit);
+        assert_eq!(app.busy(), Some("committing"));
+
         fs::remove_dir_all(&dir).ok();
     }
 

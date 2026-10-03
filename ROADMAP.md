@@ -163,7 +163,9 @@ command palette already reports which are available. Filling them in is additive
 - [ ] Better diff/merge view for git.
 - [x] A changed-files list (`Ctrl+Shift+G`) over the working-tree snapshot;
       selecting an entry opens it.
-- [ ] Staged/unstaged git view and basic commit flow.
+- [x] A basic commit flow: **Commit Changes…** prompts for a message, stages
+      everything and commits on the background worker, then refreshes status.
+- [ ] A staged/unstaged git view with per-file staging.
 - [x] Project-wide text search (`Ctrl+Shift+F`): a `.gitignore`-aware,
       case-insensitive scan on the background worker with a filterable result
       list.

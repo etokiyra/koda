@@ -55,6 +55,8 @@ enum Request {
     InstallTool(Tool),
     /// Recompute git status for a repository root.
     RefreshGit { root: PathBuf },
+    /// Stage all changes and commit them.
+    GitCommit { root: PathBuf, message: String },
 }
 
 /// A finished piece of background work.
@@ -91,6 +93,10 @@ pub enum Event {
         result: Result<String, String>,
     },
     Git(GitInfo),
+    /// The result of staging and committing.
+    GitCommitted {
+        result: Result<String, String>,
+    },
 }
 
 /// Handle to the background thread.
@@ -169,6 +175,13 @@ impl Background {
                         Request::RefreshGit { root } => {
                             let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
                         }
+                        Request::GitCommit { root, message } => {
+                            let result = crate::git::commit_all(&root, &message);
+                            let _ = event_tx.send(Event::GitCommitted { result });
+                            // Refresh so the status bar and changed-files list
+                            // reflect the new state immediately.
+                            let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
+                        }
                     }
                 }
             });
@@ -235,6 +248,11 @@ impl Background {
     /// Ask for git status to be refreshed.
     pub fn refresh_git(&self, root: PathBuf) {
         let _ = self.requests.send(Request::RefreshGit { root });
+    }
+
+    /// Ask to stage all changes and commit them.
+    pub fn commit_all(&self, root: PathBuf, message: String) {
+        let _ = self.requests.send(Request::GitCommit { root, message });
     }
 
     /// Take the next finished event, if any.
