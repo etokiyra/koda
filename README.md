@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-169%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-170%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -110,9 +110,11 @@ The complexity lives inside Koda:
                               (and it stays out of your way when none exists)
 ```
 
-Missing something? **Language Setup…** in the command palette shows every tool
-Koda knows about and installs a missing one with a single `Enter` — through the
-official channel, so provenance and integrity stay with the package manager:
+Missing something? Koda notices when a Rust or Go file is open without its
+language server and offers to install it, once, without blocking startup.
+**Language Setup…** in the command palette then lists every tool Koda knows
+about and installs a missing one with a single `Enter` — through the official
+channel, so provenance and integrity stay with the package manager:
 
 | Tool | Purpose | Koda installs it with |
 | --- | --- | --- |

@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Installation runs on the background worker with a busy indicator; Koda
   re-probes when it finishes and, if a server is now available, starts it.
   Failures (for example, offline) are reported verbatim and editing continues.
+- When a Rust or Go file is open and the language server is missing but
+  installable, Koda now offers to install it once per session, from the event
+  loop so the prompt never blocks startup. Choosing **Not now** keeps the
+  built-in intelligence and the offer stays available in **Language Setup…**.
 
 ### Reliability
 

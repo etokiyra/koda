@@ -137,6 +137,9 @@ pub struct App {
     pub lsp_status: LspStatus,
     /// When open files were last checked for on-disk changes.
     last_disk_check: Instant,
+    /// Languages for which Koda has already offered to install a missing
+    /// language server this session.
+    setup_offered: std::collections::HashSet<LanguageId>,
 }
 
 impl App {
@@ -194,6 +197,7 @@ impl App {
             pending_code_actions: Vec::new(),
             lsp_status: LspStatus::Offline,
             last_disk_check: Instant::now(),
+            setup_offered: std::collections::HashSet::new(),
         };
 
         if let Some(path) = target
@@ -226,11 +230,13 @@ impl App {
             let background_changed = self.apply_background_events();
             let animated = self.tick_animation();
             let external_changed = self.poll_external_changes();
+            let offered = self.maybe_offer_tool_setup();
             if needs_redraw
                 || background_changed
                 || lsp_changed
                 || animated
                 || external_changed
+                || offered
                 || self.tick_status()
             {
                 terminal.draw(|frame| ui::render(frame, self))?;
@@ -2570,6 +2576,61 @@ impl App {
         self.set_status(format!("Installing {}…", tool.label()));
     }
 
+    /// Offer, once per language, to install a missing language server.
+    ///
+    /// This is called from the interactive event loop rather than at startup, so
+    /// the prompt never blocks the first frame and never appears when Koda is
+    /// embedded (tests, previews). The user always chooses; dismissing it keeps
+    /// Koda's built-in intelligence, and **Language Setup…** stays available.
+    fn maybe_offer_tool_setup(&mut self) -> bool {
+        if !self.overlay.is_none()
+            || self.pending_install.is_some()
+            || self.lsp.is_some()
+            || self.lsp_language.is_some()
+            || self.lsp_start_at.is_some()
+        {
+            return false;
+        }
+        let Some(tools) = self.tools.as_ref() else {
+            return false;
+        };
+        let Some(language) = self.editor.active_document().map(|doc| doc.buffer.language) else {
+            return false;
+        };
+        if language == LanguageId::Unknown {
+            return false;
+        }
+        let Some(tool) = Tool::for_language(language, ToolPurpose::LanguageServer) else {
+            return false;
+        };
+        if tools.available(tool) || tool.install_command().is_none() {
+            return false;
+        }
+        if !self.setup_offered.insert(language) {
+            return false;
+        }
+
+        let install = PickerItem::new(
+            format!("Install {}", tool.label()),
+            tool.install_hint().to_string(),
+            PickerAction::InstallTool(tool),
+        )
+        .shortcut("Enter");
+        let later = PickerItem::new(
+            "Not now",
+            "Keep Koda's built-in intelligence — install later from Language Setup…",
+            PickerAction::Info("Install language tools any time from Language Setup…".to_string()),
+        );
+        let mut picker = Picker::new(
+            format!("{} is not installed", tool.label()),
+            "Choose…",
+            vec![install, later],
+        );
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+        true
+    }
+
     /// Show which language tools Koda found, and how to install the rest.
     fn language_setup(&mut self) {
         let Some(tools) = self.tools.clone() else {
@@ -3400,6 +3461,39 @@ mod tests {
             item.action,
             PickerAction::InstallTool(Tool::RustAnalyzer)
         ));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn offers_to_install_a_missing_language_server_once() {
+        let dir = temp_project("offer-install");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.tools.is_none() && Instant::now() < deadline {
+            app.apply_background_events();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        let missing = app
+            .tools
+            .as_ref()
+            .is_some_and(|tools| !tools.available(Tool::RustAnalyzer));
+        let offered = app.maybe_offer_tool_setup();
+        assert_eq!(offered, missing, "the offer must track tool availability");
+        if offered {
+            let Overlay::Picker(picker) = &app.overlay else {
+                panic!("expected the install prompt");
+            };
+            assert!(matches!(
+                picker.item(0).map(|item| &item.action),
+                Some(PickerAction::InstallTool(Tool::RustAnalyzer))
+            ));
+            // Dismissing must not re-offer in the same session.
+            app.overlay = Overlay::None;
+            assert!(!app.maybe_offer_tool_setup());
+        }
         fs::remove_dir_all(&dir).ok();
     }
 
