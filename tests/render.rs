@@ -29,11 +29,32 @@ fn temp_project(name: &str) -> PathBuf {
 }
 
 /// Build an app and open `file`, settling detection, as these editor-rendering
-/// tests expect a document to be active.
+/// tests expect a document to be active. Detection runs on the background worker
+/// behind queued git/tool probes, so wait for the result rather than assuming a
+/// fixed delay.
 fn app_with_file(file: &Path) -> App {
     let mut app = App::new(Some(file)).unwrap();
     app.open_path(file.to_path_buf());
-    app.pump_background(std::time::Duration::from_millis(300));
+    let expected_known = std::fs::read(file)
+        .map(|bytes| bytes.starts_with(b"#!"))
+        .unwrap_or(false)
+        || file
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| app.language.language_for_extension(extension).is_some());
+    if expected_known {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while app
+            .editor
+            .active_document()
+            .is_some_and(|doc| doc.buffer.language == koda::language::LanguageId::Unknown)
+            && std::time::Instant::now() < deadline
+        {
+            app.pump_background(std::time::Duration::from_millis(20));
+        }
+    } else {
+        app.pump_background(std::time::Duration::from_millis(300));
+    }
     app
 }
 

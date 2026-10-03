@@ -4859,10 +4859,34 @@ mod tests {
 
     /// Build an app and open `file`, settling detection, as tests expect a
     /// document to be active. Koda itself launches into the welcome screen.
+    ///
+    /// Detection runs on the background worker behind any queued git/tool
+    /// probes, so wait for the result rather than assuming a fixed delay. Only
+    /// extensions a provider recognises are waited on; an unknown extension is
+    /// expected to stay [`LanguageId::Unknown`].
     fn app_with_file(file: &Path) -> App {
         let mut app = App::new(Some(file)).unwrap();
         app.open_path(file.to_path_buf());
-        app.pump_background(Duration::from_millis(300));
+        let expected_known = std::fs::read(file)
+            .map(|bytes| bytes.starts_with(b"#!"))
+            .unwrap_or(false)
+            || file
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| app.language.language_for_extension(extension).is_some());
+        if expected_known {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app
+                .editor
+                .active_document()
+                .is_some_and(|doc| doc.buffer.language == LanguageId::Unknown)
+                && Instant::now() < deadline
+            {
+                app.pump_background(Duration::from_millis(20));
+            }
+        } else {
+            app.pump_background(Duration::from_millis(300));
+        }
         app
     }
 
@@ -6554,7 +6578,16 @@ done
             .expect("a target action");
         app.activate_welcome(action.action);
         assert_eq!(app.editor.len(), 1);
-        app.pump_background(Duration::from_millis(300));
+        // Detection runs behind the queued git/tool probes; wait for the result.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app
+            .editor
+            .active_document()
+            .is_some_and(|doc| doc.buffer.language != LanguageId::Rust)
+            && Instant::now() < deadline
+        {
+            app.pump_background(Duration::from_millis(20));
+        }
         assert_eq!(
             app.editor.active_document().unwrap().buffer.language,
             LanguageId::Rust
@@ -6643,7 +6676,17 @@ done
         while app.pending_project && Instant::now() < deadline {
             app.pump_background(Duration::from_millis(20));
         }
-        app.pump_background(Duration::from_millis(300));
+        // Detection runs on the background worker behind the git and tool
+        // probes `open_workspace` queues, so wait for the result.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app
+            .editor
+            .active_document()
+            .is_some_and(|doc| doc.buffer.language != LanguageId::Rust)
+            && Instant::now() < deadline
+        {
+            app.pump_background(Duration::from_millis(20));
+        }
 
         let root = parent.join("myapp");
         assert!(root.join("Cargo.toml").is_file(), "project not created");
