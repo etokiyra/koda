@@ -899,7 +899,7 @@ pub fn render_new_project(frame: &mut Frame, area: Rect, flow: &NewProject) {
                 })
                 .collect();
             let visible = rows.len();
-            let height = (visible as u16 + 4).min(area.height);
+            let height = (visible as u16 + 5).min(area.height);
             let title = panel_title("New Project  ·  3 of 3  language");
             let inner = draw_panel(frame, area, title, width, height);
             if inner.height < 4 {

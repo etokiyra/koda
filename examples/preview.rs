@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! cargo run --example preview -- [width] [height] [mode]
-//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols | completion | hover | help | setup | split | toast | newproject
+//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols | completion | hover | help | setup | split | toast | newproject | newproject-name | newproject-lang
 //! ```
 
 use koda::app::App;
@@ -75,6 +75,25 @@ fn main() {
         "newproject" => {
             let mut app = App::new(Some(&root)).expect("app");
             app.execute_command(ids::NEW_PROJECT);
+            app
+        }
+        "newproject-name" => {
+            let mut app = App::new(Some(&root)).expect("app");
+            app.execute_command(ids::NEW_PROJECT);
+            if let koda::app::overlay::Overlay::NewProject(flow) = &mut app.overlay {
+                flow.step = koda::app::overlay::NewProjectStep::Name;
+                flow.name = "my-app".to_string();
+            }
+            app
+        }
+        "newproject-lang" => {
+            let mut app = App::new(Some(&root)).expect("app");
+            app.execute_command(ids::NEW_PROJECT);
+            if let koda::app::overlay::Overlay::NewProject(flow) = &mut app.overlay {
+                flow.step = koda::app::overlay::NewProjectStep::Language;
+                flow.name = "my-app".to_string();
+                flow.parent = root.clone();
+            }
             app
         }
         "bracket" => {
