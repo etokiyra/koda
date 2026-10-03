@@ -92,6 +92,50 @@ impl Tool {
             .copied()
             .find(|tool| tool.language() == language && tool.purpose() == purpose)
     }
+
+    /// The trusted command that installs this tool, when one exists.
+    ///
+    /// Koda runs only the official acquisition path — `rustup` for Rust tooling
+    /// and `go install` for Go tooling — so provenance and integrity are the
+    /// upstream tools' responsibility, not a bespoke downloader.
+    pub fn install_command(self) -> Option<(&'static str, &'static [&'static str])> {
+        match self {
+            Tool::RustAnalyzer => Some(("rustup", &["component", "add", "rust-analyzer"])),
+            Tool::Rustfmt => Some(("rustup", &["component", "add", "rustfmt"])),
+            Tool::Gopls => Some(("go", &["install", "golang.org/x/tools/gopls@latest"])),
+            // `gofmt` ships with the Go toolchain; there is nothing to install.
+            Tool::Gofmt => None,
+        }
+    }
+}
+
+/// Install a tool through its trusted package manager.
+///
+/// Intended for the background worker. Returns a short success message or the
+/// first line of the tool's error, so the user sees something actionable even
+/// when the network is unavailable.
+pub fn install(tool: Tool) -> Result<String, String> {
+    let Some((program, args)) = tool.install_command() else {
+        return Err(format!(
+            "{} cannot be installed automatically — {}",
+            tool.label(),
+            tool.install_hint()
+        ));
+    };
+    match Command::new(program).args(args).output() {
+        Ok(output) if output.status.success() => Ok(format!("Installed {}", tool.label())),
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let message = stderr
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("installation failed")
+                .trim()
+                .to_string();
+            Err(format!("{}: {message}", tool.label()))
+        }
+        Err(err) => Err(format!("could not run {program}: {err}")),
+    }
 }
 
 /// What Koda learned about one tool.
@@ -224,6 +268,21 @@ mod tests {
                 assert!(status.version.is_none());
             }
         }
+    }
+
+    #[test]
+    fn install_commands_use_trusted_managers() {
+        assert_eq!(
+            Tool::RustAnalyzer.install_command(),
+            Some(("rustup", &["component", "add", "rust-analyzer"][..]))
+        );
+        assert_eq!(
+            Tool::Gopls.install_command(),
+            Some(("go", &["install", "golang.org/x/tools/gopls@latest"][..]))
+        );
+        assert_eq!(Tool::Gofmt.install_command(), None);
+        // `gofmt` cannot be installed on its own.
+        assert!(install(Tool::Gofmt).is_err());
     }
 
     #[test]

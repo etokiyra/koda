@@ -17,6 +17,8 @@ pub enum PickerAction {
     },
     /// Show a short informational message in the statusline.
     Info(String),
+    /// Install an external tool through its trusted package manager.
+    InstallTool(crate::language::tools::Tool),
 }
 
 /// A single row in a picker.

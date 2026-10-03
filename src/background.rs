@@ -21,7 +21,7 @@ use crate::language::detection::Confidence;
 use crate::language::diagnostics::Diagnostic;
 use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
-use crate::language::tools::ToolRegistry;
+use crate::language::tools::{Tool, ToolRegistry};
 
 /// Work sent to the background thread.
 enum Request {
@@ -45,6 +45,8 @@ enum Request {
     WorkspaceSymbols { root: PathBuf, revision: u64 },
     /// Probe for the external tools Koda can drive.
     DiscoverTools,
+    /// Install a tool through its trusted package manager.
+    InstallTool(Tool),
     /// Recompute git status for a repository root.
     RefreshGit { root: PathBuf },
 }
@@ -72,6 +74,11 @@ pub enum Event {
     },
     /// The result of probing for external tools.
     Tools(ToolRegistry),
+    /// The result of installing a tool.
+    ToolInstalled {
+        tool: Tool,
+        result: Result<String, String>,
+    },
     Git(GitInfo),
 }
 
@@ -133,6 +140,13 @@ impl Background {
                         Request::DiscoverTools => {
                             let _ = event_tx.send(Event::Tools(ToolRegistry::discover()));
                         }
+                        Request::InstallTool(tool) => {
+                            let result = crate::language::tools::install(tool);
+                            let _ = event_tx.send(Event::ToolInstalled { tool, result });
+                            // Re-probe so the setup view and server startup see
+                            // the new state immediately.
+                            let _ = event_tx.send(Event::Tools(ToolRegistry::discover()));
+                        }
                         Request::RefreshGit { root } => {
                             let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
                         }
@@ -183,6 +197,11 @@ impl Background {
     /// Ask for the external tools to be probed.
     pub fn discover_tools(&self) {
         let _ = self.requests.send(Request::DiscoverTools);
+    }
+
+    /// Ask for a tool to be installed through its trusted package manager.
+    pub fn install_tool(&self, tool: Tool) {
+        let _ = self.requests.send(Request::InstallTool(tool));
     }
 
     /// Ask for git status to be refreshed.

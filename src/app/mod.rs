@@ -129,6 +129,8 @@ pub struct App {
     lsp_start_at: Option<(Instant, LanguageId)>,
     /// The symbol awaiting a new name, from the rename prompt.
     pending_rename: Option<(PathBuf, usize, usize)>,
+    /// A tool install in progress, if any.
+    pending_install: Option<Tool>,
     /// Connection state, shown in the statusline.
     pub lsp_status: LspStatus,
     /// When open files were last checked for on-disk changes.
@@ -186,6 +188,7 @@ impl App {
             lsp_language: None,
             lsp_start_at: None,
             pending_rename: None,
+            pending_install: None,
             lsp_status: LspStatus::Offline,
             last_disk_check: Instant::now(),
         };
@@ -343,6 +346,8 @@ impl App {
             Some("formatting")
         } else if self.pending_workspace_symbols.is_some() {
             Some("searching symbols")
+        } else if self.pending_install.is_some() {
+            Some("installing")
         } else if self.lsp_status == LspStatus::Starting {
             Some("connecting")
         } else {
@@ -996,6 +1001,7 @@ impl App {
             PickerAction::OpenPath(path) => self.open_path(path),
             PickerAction::Reveal { path, position } => self.reveal(path, position),
             PickerAction::Info(message) => self.set_status(message),
+            PickerAction::InstallTool(tool) => self.install_tool(tool),
         }
     }
 
@@ -1492,6 +1498,14 @@ impl App {
                     .filter(|language| *language != LanguageId::Unknown)
                 {
                     self.maybe_start_lsp(language);
+                }
+                true
+            }
+            BackgroundEvent::ToolInstalled { tool: _, result } => {
+                self.pending_install = None;
+                match result {
+                    Ok(message) => self.set_status(message),
+                    Err(message) => self.set_error(format!("Install failed — {message}")),
                 }
                 true
             }
@@ -2462,6 +2476,17 @@ impl App {
         }
     }
 
+    /// Install a tool through its trusted package manager, on the worker.
+    fn install_tool(&mut self, tool: Tool) {
+        if self.pending_install.is_some() {
+            self.set_status("An install is already running");
+            return;
+        }
+        self.pending_install = Some(tool);
+        self.background.install_tool(tool);
+        self.set_status(format!("Installing {}…", tool.label()));
+    }
+
     /// Show which language tools Koda found, and how to install the rest.
     fn language_setup(&mut self) {
         let Some(tools) = self.tools.clone() else {
@@ -2479,11 +2504,20 @@ impl App {
                 crate::language::tools::ToolPurpose::Formatter => "formatter",
             };
             let label = format!("{}  ·  {} {purpose}", tool.label(), tool.language().name());
-            let detail = status.summary();
-            let mut item = PickerItem::new(label, detail.clone(), PickerAction::Info(detail));
-            if !status.available {
-                item = item.disabled(tool.install_hint());
-            }
+            let item = if status.available {
+                let detail = status.summary();
+                PickerItem::new(label, detail.clone(), PickerAction::Info(detail))
+            } else if tool.install_command().is_some() {
+                let hint = tool.install_hint();
+                PickerItem::new(
+                    label,
+                    format!("{hint}  ·  press Enter to install"),
+                    PickerAction::InstallTool(tool),
+                )
+            } else {
+                let hint = tool.install_hint();
+                PickerItem::new(label, hint, PickerAction::Info(hint.to_string())).disabled(hint)
+            };
             items.push(item);
         }
         let mut picker = Picker::new("Language Setup", "Language tools…", items);
@@ -3252,6 +3286,66 @@ mod tests {
             panic!("expected the language setup list");
         };
         assert!(picker.filtered.len() >= crate::language::tools::Tool::ALL.len());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn installing_a_tool_reports_progress() {
+        let dir = temp_project("install");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        app.install_tool(Tool::Gofmt);
+        assert_eq!(app.busy(), Some("installing"));
+        assert!(app.pending_install.is_some());
+
+        // Simulate the worker's result.
+        app.apply_background_event(BackgroundEvent::ToolInstalled {
+            tool: Tool::Gofmt,
+            result: Err("gofmt: it ships with the Go toolchain".to_string()),
+        });
+        assert!(app.pending_install.is_none());
+        assert!(app.status.error);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn language_setup_offers_install_for_missing_tools() {
+        let dir = temp_project("setup-install");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.tools.is_none() && Instant::now() < deadline {
+            app.apply_background_events();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // Only meaningful when rust-analyzer is actually missing.
+        if !app
+            .tools
+            .as_ref()
+            .is_some_and(|tools| !tools.available(Tool::RustAnalyzer))
+        {
+            fs::remove_dir_all(&dir).ok();
+            return;
+        }
+
+        app.execute_command(ids::SETUP);
+        let Overlay::Picker(picker) = &app.overlay else {
+            panic!("expected the language setup list");
+        };
+        let item = (0..picker.filtered.len())
+            .filter_map(|index| picker.item(index))
+            .find(|item| item.label.contains("rust-analyzer"))
+            .expect("rust-analyzer entry");
+        assert!(
+            item.enabled,
+            "a missing installable tool should be actionable"
+        );
+        assert!(matches!(
+            item.action,
+            PickerAction::InstallTool(Tool::RustAnalyzer)
+        ));
         fs::remove_dir_all(&dir).ok();
     }
 

@@ -92,7 +92,8 @@ Implemented:
   count.
 - Language-tool discovery: **Language Setup…** reports which of
   `rust-analyzer`, `gopls`, `rustfmt` and `gofmt` Koda found, with install
-  hints for the rest.
+  hints for the rest — and can install a missing tool with one action through
+  its official manager (`rustup`, `go install`).
 - An asynchronous **language-server client**: when `rust-analyzer` or `gopls` is
   installed Koda starts it for the workspace and shows its diagnostics, falling
   back to the built-in providers when no server is available. Completion, hover,
