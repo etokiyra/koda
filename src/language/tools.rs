@@ -10,15 +10,29 @@
 //! tool installed by rustup or pip is found even when Koda was launched from a
 //! GUI or a non-login shell whose `PATH` omits them.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, SystemTime};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::language::id::LanguageId;
 
 /// A lock older than this is assumed to be left by a crashed instance.
 const STALE_INSTALL_LOCK: Duration = Duration::from_secs(15 * 60);
+
+/// The longest a single install command may run before it is killed. Package
+/// managers can legitimately take a while on a slow link, but a hung process
+/// must never wedge the background worker forever.
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+/// The most output Koda keeps from an install command. A verbose or hostile
+/// tool cannot exhaust memory; the excess is drained and discarded.
+const MAX_TOOL_OUTPUT: usize = 256 * 1024;
+
+/// The largest archive Koda will download. The managed JDK and .NET SDK are
+/// the biggest, and both are well under this.
+const MAX_DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 /// A tool Koda knows how to use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -393,6 +407,12 @@ fn rustup_bootstrap(component: &'static str) -> Option<InstallAttempt> {
                     "=https".into(),
                     "--tlsv1.2".into(),
                     "-sSf".into(),
+                    "--connect-timeout".into(),
+                    "30".into(),
+                    "--max-time".into(),
+                    "120".into(),
+                    "--max-filesize".into(),
+                    (1024 * 1024).to_string(),
                     "https://sh.rustup.rs".into(),
                     "-o".into(),
                     script.to_string_lossy().into_owned(),
@@ -517,6 +537,10 @@ fn npm_attempts(packages: &[&str]) -> Vec<InstallAttempt> {
 /// `create_new`; a stale one (from a crashed instance) is reclaimed by age.
 struct InstallLock {
     path: PathBuf,
+    /// Identifies this acquisition, so `Drop` only removes the lock if it is
+    /// still ours. Without it, a holder that was reclaimed as stale could
+    /// delete the new holder's lock on exit.
+    nonce: String,
 }
 
 impl InstallLock {
@@ -528,25 +552,37 @@ impl InstallLock {
     fn acquire_at(dir: &Path) -> Result<Self, String> {
         std::fs::create_dir_all(dir).map_err(|err| err.to_string())?;
         let path = dir.join("install.lock");
+        let nonce = format!(
+            "{}:{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|since| since.as_nanos())
+                .unwrap_or(0)
+        );
 
-        // Reclaim a lock left behind by a crashed instance.
-        if let Ok(modified) = std::fs::metadata(&path).and_then(|meta| meta.modified())
-            && SystemTime::now()
-                .duration_since(modified)
-                .map(|age| age > STALE_INSTALL_LOCK)
-                .unwrap_or(false)
-        {
-            let _ = std::fs::remove_file(&path);
+        if let Ok(file) = Self::create_new(&path, &nonce) {
+            drop(file);
+            return Ok(InstallLock { path, nonce });
         }
 
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(mut file) => {
-                let _ = writeln!(file, "{}", std::process::id());
-                Ok(InstallLock { path })
+        // The lock exists. Reclaim it only if it is old enough to be from a
+        // crashed instance; a live install must never be disturbed.
+        let stale = std::fs::metadata(&path)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+            .is_some_and(|age| age > STALE_INSTALL_LOCK);
+        if !stale {
+            return Err(
+                "another Koda instance is installing tools — try again shortly".to_string(),
+            );
+        }
+        let _ = std::fs::remove_file(&path);
+        match Self::create_new(&path, &nonce) {
+            Ok(file) => {
+                drop(file);
+                Ok(InstallLock { path, nonce })
             }
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
                 Err("another Koda instance is installing tools — try again shortly".to_string())
@@ -554,11 +590,25 @@ impl InstallLock {
             Err(err) => Err(err.to_string()),
         }
     }
+
+    fn create_new(path: &Path, nonce: &str) -> std::io::Result<std::fs::File> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
+        let _ = writeln!(file, "{nonce}");
+        Ok(file)
+    }
 }
 
 impl Drop for InstallLock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        // Only remove the lock if it is still the one we created.
+        if let Ok(contents) = std::fs::read_to_string(&self.path)
+            && contents.trim() == self.nonce
+        {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 }
 
@@ -585,13 +635,17 @@ pub fn install(tool: Tool) -> Result<String, String> {
 
     let mut last_error = None;
     for attempt in &attempts {
+        let mut completed = true;
         for step in &attempt.steps {
             if let Err(message) = run_step(step) {
                 last_error = Some(format!("{}: {message}", tool.label()));
+                completed = false;
                 break;
             }
         }
-        if probe(tool).available {
+        // Only a strategy whose steps all succeeded may be trusted, even if a
+        // stale binary from a previous attempt happens to probe as available.
+        if completed && probe(tool).available {
             return Ok(format!("Installed {}", tool.label()));
         }
     }
@@ -612,13 +666,106 @@ fn run_step(step: &InstallStep) -> Result<(), String> {
     }
 }
 
-/// Run a program, reporting its first stderr line on failure.
-fn run_command(command: &InstallCommand) -> Result<(), String> {
-    match Command::new(&command.program).args(&command.args).output() {
-        Ok(output) if output.status.success() => Ok(()),
-        Ok(output) => Err(first_stderr_line(&output.stderr)),
-        Err(err) => Err(format!("could not run {}: {err}", command.program)),
+/// A `Command` for an install subprocess, run from Koda's own tools directory.
+///
+/// Installing from the user's project directory lets a repository-local
+/// `.npmrc` (or an equivalent per-directory config) redirect a package manager
+/// to an attacker-controlled registry. Running from a Koda-managed directory
+/// removes that vector while leaving the user's own `~/.npmrc` and similar
+/// configuration in effect.
+fn install_command(program: &str) -> Command {
+    let mut command = Command::new(program);
+    if let Some(dir) = install_work_dir() {
+        command.current_dir(dir);
     }
+    command
+}
+
+/// The directory install subprocesses run from, created on demand.
+fn install_work_dir() -> Option<PathBuf> {
+    let dir = tools_dir()?;
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir)
+}
+
+/// Run a program with a timeout and bounded output, reporting its first stderr
+/// line on failure.
+///
+/// A hung package manager would otherwise stall the single background worker
+/// forever, and a verbose tool could exhaust memory through unbounded capture.
+fn run_command(command: &InstallCommand) -> Result<(), String> {
+    use std::process::Stdio;
+
+    let mut child = install_command(&command.program)
+        .args(&command.args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("could not run {}: {err}", command.program))?;
+
+    // Drain both pipes on their own threads so the child can never block on a
+    // full pipe buffer while we wait for it.
+    let stdout = child
+        .stdout
+        .take()
+        .map(|pipe| thread::spawn(move || read_capped(pipe)));
+    let stderr = child
+        .stderr
+        .take()
+        .map(|pipe| thread::spawn(move || read_capped(pipe)));
+
+    let deadline = Instant::now() + COMMAND_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "{} timed out after {} minutes",
+                        command.program,
+                        COMMAND_TIMEOUT.as_secs() / 60
+                    ));
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(err) => return Err(format!("could not run {}: {err}", command.program)),
+        }
+    };
+
+    let stderr = stderr
+        .and_then(|handle| handle.join().ok())
+        .unwrap_or_default();
+    let _stdout = stdout
+        .and_then(|handle| handle.join().ok())
+        .unwrap_or_default();
+    if status.success() {
+        Ok(())
+    } else {
+        Err(first_stderr_line(&stderr))
+    }
+}
+
+/// Read at most [`MAX_TOOL_OUTPUT`] bytes, draining the rest so the writer never
+/// blocks.
+fn read_capped<R: Read>(mut reader: R) -> Vec<u8> {
+    let mut kept = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                if kept.len() < MAX_TOOL_OUTPUT {
+                    let take = (MAX_TOOL_OUTPUT - kept.len()).min(n);
+                    kept.extend_from_slice(&chunk[..take]);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    kept
 }
 
 /// Download `url` to `dest` over HTTPS, verifying a SHA-256 when one is known.
@@ -627,18 +774,26 @@ fn download(url: &str, dest: &Path, sha256: Option<&str>) -> Result<(), String> 
         std::fs::create_dir_all(parent)
             .map_err(|err| format!("could not create {}: {err}", parent.display()))?;
     }
-    let output = Command::new("curl")
-        .args([
-            "--proto",
-            "=https",
-            "--tlsv1.2",
-            "-L",
-            "--fail",
-            "-sS",
-            "-o",
-        ])
+    let mut command = install_command("curl");
+    command.args([
+        "--proto",
+        "=https",
+        "--tlsv1.2",
+        "-L",
+        "--fail",
+        "-sS",
+        "--connect-timeout",
+        "30",
+        "--max-time",
+        "600",
+    ]);
+    command
+        .arg("--max-filesize")
+        .arg(MAX_DOWNLOAD_BYTES.to_string())
+        .arg("-o")
         .arg(dest)
-        .arg(url)
+        .arg(url);
+    let output = command
         .output()
         .map_err(|err| format!("could not run curl: {err}"))?;
     if !output.status.success() {
@@ -671,8 +826,17 @@ fn adoptium_jdk(feature: u32, dest: &Path) -> Result<(), String> {
     let api = format!(
         "https://api.adoptium.net/v3/assets/latest/{feature}/hotspot?os={os}&architecture={arch}&image_type=jdk"
     );
-    let output = Command::new("curl")
-        .args(["-sS", "-L", "--fail"])
+    let output = install_command("curl")
+        .args([
+            "--proto",
+            "=https",
+            "--tlsv1.2",
+            "-sS",
+            "-L",
+            "--fail",
+            "--max-time",
+            "60",
+        ])
         .arg(&api)
         .output()
         .map_err(|err| format!("could not query Adoptium: {err}"))?;
@@ -692,8 +856,15 @@ fn adoptium_jdk(feature: u32, dest: &Path) -> Result<(), String> {
         .get("link")
         .and_then(|link| link.as_str())
         .ok_or_else(|| "Adoptium package had no link".to_string())?;
-    let checksum = package.get("checksum").and_then(|sum| sum.as_str());
-    download(link, dest, checksum)
+    // Fail closed: an unverified JDK would be launched as `JAVA_HOME`, so never
+    // fall back to "no checksum required".
+    let checksum = package
+        .get("checksum")
+        .and_then(|sum| sum.as_str())
+        .ok_or_else(|| {
+            "Adoptium package had no checksum; refusing an unverified JDK".to_string()
+        })?;
+    download(link, dest, Some(checksum))
 }
 
 /// The Adoptium OS/architecture names for this platform.
@@ -718,11 +889,11 @@ fn extract(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
         .map_err(|err| format!("could not create {}: {err}", dest.display()))?;
     let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
     let mut command = if zip {
-        let mut command = Command::new("unzip");
+        let mut command = install_command("unzip");
         command.arg("-q").arg("-o").arg(archive).arg("-d").arg(dest);
         command
     } else {
-        let mut command = Command::new("tar");
+        let mut command = install_command("tar");
         command.arg("-xf").arg(archive).arg("-C").arg(dest);
         if strip > 0 {
             command.arg(format!("--strip-components={strip}"));
@@ -743,7 +914,7 @@ fn extract(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
 /// SHA-256 of a file, using whichever tool the platform provides.
 fn file_sha256(path: &Path) -> Result<String, String> {
     for (program, args) in [("sha256sum", &[][..]), ("shasum", &["-a", "256"][..])] {
-        if let Ok(output) = Command::new(program).args(args).arg(path).output()
+        if let Ok(output) = install_command(program).args(args).arg(path).output()
             && output.status.success()
             && let Some(hash) = String::from_utf8_lossy(&output.stdout)
                 .split_whitespace()
@@ -771,6 +942,11 @@ fn first_stderr_line(stderr: &[u8]) -> String {
 /// promises an install and then fails because no package manager, `curl` or
 /// archive tool exists.
 pub fn can_install(tool: Tool) -> bool {
+    // `jdtls` is a Python launcher script; without a Python interpreter it
+    // cannot run even though its download plan only needs `curl` and `tar`.
+    if tool == Tool::Jdtls && locate("python3").is_none() && locate("python").is_none() {
+        return false;
+    }
     tool.install_attempts()
         .iter()
         .any(|attempt| attempt.steps.iter().all(step_available))
@@ -778,13 +954,27 @@ pub fn can_install(tool: Tool) -> bool {
 
 fn step_available(step: &InstallStep) -> bool {
     match step {
-        InstallStep::Run(command) => locate(&command.program).is_some(),
+        InstallStep::Run(command) => {
+            locate(&command.program).is_some() || is_user_bin_program(&command.program)
+        }
         InstallStep::Download { .. } | InstallStep::AdoptiumJdk { .. } => locate("curl").is_some(),
         InstallStep::Extract { archive, .. } => {
             let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
             locate(if zip { "unzip" } else { "tar" }).is_some()
         }
     }
+}
+
+/// Whether `program` is an absolute path inside a user bin directory.
+///
+/// Such a program may not exist yet but is produced by an earlier step in the
+/// strategy — the `rustup` bootstrap installs `~/.cargo/bin/rustup`, and a
+/// managed virtualenv's `pip` is created by `python -m venv` just before it is
+/// used. Treating these as available lets Koda offer the strategy it can run
+/// instead of rejecting it up front.
+fn is_user_bin_program(program: &str) -> bool {
+    let path = Path::new(program);
+    path.is_absolute() && known_bin_dirs().iter().any(|dir| path.starts_with(dir))
 }
 
 /// What Koda learned about one tool.
@@ -1268,6 +1458,42 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dropping_a_reclaimed_lock_leaves_the_successor_alone() {
+        let dir = std::env::temp_dir().join(format!("koda-lock-nonce-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let holder = InstallLock::acquire_at(&dir).expect("lock");
+        // Another instance has, in the meantime, taken the lock.
+        std::fs::write(dir.join("install.lock"), "another-instance").unwrap();
+        drop(holder);
+        assert!(
+            dir.join("install.lock").exists(),
+            "a stale guard must not delete a successor's lock"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_capped_bounds_and_drains_output() {
+        let data = vec![b'x'; MAX_TOOL_OUTPUT * 2];
+        let kept = read_capped(std::io::Cursor::new(data));
+        assert_eq!(kept.len(), MAX_TOOL_OUTPUT);
+    }
+
+    #[test]
+    fn user_bin_programs_are_considered_bootstrappable() {
+        let Some(home) = std::env::var_os("HOME") else {
+            return;
+        };
+        let rustup = PathBuf::from(home).join(".cargo/bin/rustup");
+        assert!(is_user_bin_program(&rustup.to_string_lossy()));
+        assert!(!is_user_bin_program("rustup"));
+        assert!(!is_user_bin_program("/opt/strange/place/tool"));
     }
 
     #[test]
