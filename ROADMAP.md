@@ -247,6 +247,12 @@ command palette already reports which are available. Filling them in is additive
       (Ruby), `sqls` (SQL) and `asm-lsp` (Assembly) install automatically through
       their own package managers; the Dart, Elixir, Swift and Perl servers are
       discovered when their toolchain is present.
+- [x] Web tokenizer depth: regex literals (expression-position lookback) and
+      single-line JSX tags, attributes, fragments and closing tags for
+      JavaScript/TypeScript/JSX, with generics and comparisons kept as operators.
+- [x] Formatting coverage: Prettier (web/HTML/CSS/JSON/YAML/Markdown),
+      `clang-format` (C/C++), `shfmt` (Shell) and `perltidy` (Perl) join
+      `rustfmt`/`gofmt`, each discovered automatically with an accurate reason.
 - [x] HTML and CSS built-in support: tag/attribute and selector/property
       highlighting, tag- and brace-balance diagnostics, id/selector symbols,
       completion and hover, with `vscode-langservers-extracted` provisioned for

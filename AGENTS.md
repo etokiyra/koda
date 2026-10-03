@@ -280,6 +280,20 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   bounds scrolling work to the visible rows instead of scanning the document.
   Wrapping never edits the buffer, so undo/redo, diagnostics, LSP positions and
   multiple cursors are unaffected; turning it off restores horizontal scrolling.
+- **Formatting reuses trusted tools through one pipeline.** A provider declares
+  the `Formatting` capability and implements `format()` by calling a shared
+  helper in `language/format.rs` (`rustfmt`, `gofmt`, `prettier`,
+  `clang-format`, `shfmt`, `perltidy`). Every helper feeds a buffer snapshot on
+  stdin and takes stdout, so unsaved edits are formatted in place and the result
+  applies as one undoable edit. The provider's `formatter()` names the
+  executable, and `Tool::for_language(language, Formatter)` lets the palette
+  explain a missing formatter before the user invokes it. Language-server
+  formatting is preferred when the server advertises it.
+- **The web tokenizer uses lookback heuristics, not a parser.** A `/` in
+  expression position starts a regex literal (division after a value does not),
+  and `<` opens a JSX tag only after an expression start, so `Array<Foo>` and
+  `a < b` stay operators. This keeps the built-in highlighter predictable on
+  incomplete and ambiguous code; it is a lexical aid, not a semantic parser.
 - **Scenes are drawn on a canvas.** `ui/art.rs` composes each welcome scene by
   placing glyphs at coordinates on a small `Canvas`, then turning runs of equal
   style into spans. This keeps the art symmetric and lets one element animate

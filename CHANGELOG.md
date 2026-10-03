@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Core web tokenizer and wider formatting
+
+- **JavaScript/TypeScript tokenizer.** Regex and JSX literals are now
+  recognised instead of being treated as operators: a `/` in expression position
+  (after `=`, `(`, `,`, `return`, …) starts a regex literal, while division after
+  a value stays an operator; `<Tag …>`, `</Tag>`, fragments and self-closing
+  elements highlight their tag names, attributes and attribute strings. Generics
+  (`Array<Foo>`) and comparisons (`a < b`) remain operators. Regression tests
+  cover each ambiguous case.
+- **Formatting across more languages.** The shared formatter pipeline now
+  covers Prettier for web, HTML, CSS, JSON, YAML and Markdown; `clang-format`
+  for C/C++; `shfmt` for Shell; and `perltidy` for Perl, in addition to
+  `rustfmt`/`gofmt`. Every formatter reads stdin and writes stdout, so unsaved
+  edits are formatted in place, and each is discovered automatically with an
+  accurate availability reason. Prettier and `shfmt` have trusted one-action
+  installs (`npm`, `go install`); `clang-format` and `perltidy` ship with their
+  toolchains.
+- **Broader toolchain discovery.** Koda now also searches ElixirLS escripts
+  (`~/.mix/escripts`), asdf shims, `local::lib` Perl, Swift toolchains
+  (`~/.swiftly`, `/usr/local/swift/usr/bin`, `/usr/lib/swift/bin`), a
+  Flutter-bundled Dart SDK, `/usr/local/go/bin` and `/snap/bin`, so an existing
+  toolchain is found even when it is not on a GUI session's `PATH`. The Dart
+  language server is launched with its current `dart language-server` command.
+
 ### Kotlin and seven more languages
 
 - **Kotlin.** A built-in, offline provider (comments, regular/raw strings,

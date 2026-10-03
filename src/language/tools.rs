@@ -317,7 +317,7 @@ impl Tool {
             // `solargraph` needs its `stdio` subcommand.
             Tool::RubyLs => &["stdio"],
             // The Dart SDK's analysis server is launched as a subcommand.
-            Tool::DartAnalyzer => &["language-server", "--protocol=lsp"],
+            Tool::DartAnalyzer => &["language-server"],
             // The extracted VS Code servers speak stdio.
             Tool::HtmlLs | Tool::CssLs => &["--stdio"],
             _ => &[],
@@ -1641,6 +1641,16 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         dirs.push(home.join(".deno/bin"));
         dirs.push(home.join(".npm-global/bin"));
         dirs.push(home.join(".local/share/pnpm"));
+        // Toolchains installed under the home directory rather than on the
+        // login PATH: ElixirLS escripts, asdf shims, local::lib Perl, Swift and
+        // a Flutter-bundled Dart SDK.
+        dirs.push(home.join(".mix/escripts"));
+        dirs.push(home.join(".asdf/shims"));
+        dirs.push(home.join("perl5/bin"));
+        dirs.push(home.join(".local/share/swiftly/bin"));
+        dirs.push(home.join(".swiftly/bin"));
+        dirs.push(home.join("development/flutter/bin/cache/dart-sdk/bin"));
+        dirs.push(home.join(".pub-cache/bin"));
     }
     // Tools Koda installed itself, plus the npm prefix, Python virtualenv,
     // managed Node.js and managed runtimes it maintains.
@@ -1666,6 +1676,10 @@ fn known_bin_dirs() -> Vec<PathBuf> {
     }
     dirs.push(PathBuf::from("/usr/local/bin"));
     dirs.push(PathBuf::from("/opt/homebrew/bin"));
+    dirs.push(PathBuf::from("/usr/local/go/bin"));
+    dirs.push(PathBuf::from("/usr/local/swift/usr/bin"));
+    dirs.push(PathBuf::from("/usr/lib/swift/bin"));
+    dirs.push(PathBuf::from("/snap/bin"));
     dirs.push(PathBuf::from("/usr/bin"));
     dirs.push(PathBuf::from("/bin"));
     dirs
@@ -2541,6 +2555,32 @@ mod tests {
         let dirs = known_bin_dirs();
         assert!(dirs.iter().any(|dir| dir.ends_with(".cargo/bin")));
         assert!(dirs.iter().any(|dir| dir.ends_with(".local/bin")));
+    }
+
+    #[test]
+    fn known_bin_dirs_cover_common_toolchains() {
+        let dirs = known_bin_dirs();
+        for suffix in [
+            ".mix/escripts",
+            ".asdf/shims",
+            "perl5/bin",
+            "development/flutter/bin/cache/dart-sdk/bin",
+        ] {
+            assert!(
+                dirs.iter().any(|dir| dir.ends_with(suffix)),
+                "discovery should search a directory ending in {suffix}"
+            );
+        }
+        for absolute in [
+            "/usr/local/swift/usr/bin",
+            "/usr/lib/swift/bin",
+            "/snap/bin",
+        ] {
+            assert!(
+                dirs.iter().any(|dir| dir == Path::new(absolute)),
+                "discovery should search {absolute}"
+            );
+        }
     }
 
     #[test]
