@@ -36,6 +36,60 @@ pub struct FileEdit {
     pub edits: Vec<TextEdit>,
 }
 
+/// A command to run on the server.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommandRef {
+    pub command: String,
+    pub arguments: Value,
+}
+
+/// A quick fix or refactor offered by the server.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CodeAction {
+    pub title: String,
+    /// A workspace edit to apply, if the action carries one.
+    pub edit: Option<Value>,
+    /// A command to run, if the action carries one.
+    pub command: Option<CommandRef>,
+}
+
+/// Parse a `textDocument/codeAction` result, which mixes `CodeAction` and
+/// `Command` shapes.
+pub fn code_actions(value: &Value) -> Vec<CodeAction> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let title = item.get("title")?.as_str()?.to_string();
+            let edit = item.get("edit").cloned();
+            let command = match item.get("command") {
+                // A bare `Command`: the command is a string with sibling args.
+                Some(command) if command.is_string() => Some(CommandRef {
+                    command: command.as_str()?.to_string(),
+                    arguments: item.get("arguments").cloned().unwrap_or(Value::Null),
+                }),
+                // A `CodeAction`'s embedded `Command` object.
+                Some(command) => parse_command(command),
+                None => None,
+            };
+            Some(CodeAction {
+                title,
+                edit,
+                command,
+            })
+        })
+        .collect()
+}
+
+fn parse_command(value: &Value) -> Option<CommandRef> {
+    Some(CommandRef {
+        command: value.get("command")?.as_str()?.to_string(),
+        arguments: value.get("arguments").cloned().unwrap_or(Value::Null),
+    })
+}
+
 /// File edits from a `WorkspaceEdit` (`changes` or `documentChanges`).
 pub fn workspace_edit(value: &Value) -> Vec<FileEdit> {
     let mut files = Vec::new();
@@ -284,5 +338,26 @@ mod tests {
         let files = workspace_edit(&document_changes);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, PathBuf::from("/tmp/b.rs"));
+    }
+
+    #[test]
+    fn parses_code_actions_and_commands() {
+        let value = json!([
+            { "title": "Add `mut`", "kind": "quickfix",
+              "edit": { "changes": { "file:///tmp/a.rs": [
+                  { "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } }, "newText": "mut " }
+              ] } } },
+            { "title": "Import trait", "command": { "command": "rust-analyzer.applySourceChange", "arguments": [] } },
+            { "title": "Bare command", "command": "do.thing", "arguments": [1] }
+        ]);
+        let actions = code_actions(&value);
+        assert_eq!(actions.len(), 3);
+        assert!(actions[0].edit.is_some());
+        assert_eq!(
+            actions[1].command.as_ref().unwrap().command,
+            "rust-analyzer.applySourceChange"
+        );
+        assert_eq!(actions[2].command.as_ref().unwrap().command, "do.thing");
+        assert_eq!(actions[2].command.as_ref().unwrap().arguments, json!([1]));
     }
 }

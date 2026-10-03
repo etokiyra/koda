@@ -63,6 +63,7 @@ impl LanguageProvider for RustProvider {
             Capability::Formatting,
             Capability::Hover,
             Capability::Rename,
+            Capability::CodeActions,
         ]
     }
 

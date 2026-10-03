@@ -19,6 +19,8 @@ pub enum PickerAction {
     Info(String),
     /// Install an external tool through its trusted package manager.
     InstallTool(crate::language::tools::Tool),
+    /// Apply the code action at an index in the last response.
+    ApplyCodeAction(usize),
 }
 
 /// A single row in a picker.

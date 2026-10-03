@@ -44,6 +44,7 @@ pub enum RequestKind {
     Definition,
     References,
     Rename,
+    CodeActions,
 }
 
 /// Something the app consumes from a running server.
@@ -62,6 +63,9 @@ pub enum ServerEvent {
         kind: RequestKind,
         result: Result<Value, String>,
     },
+    /// The server asked Koda to apply a workspace edit. The app must apply it
+    /// and then call [`Server::apply_edit_response`].
+    ApplyEdit { id: Value, params: Value },
     /// The server could not start or exited unexpectedly.
     Failed(String),
 }
@@ -147,7 +151,8 @@ impl Server {
                         "hover": { "contentFormat": ["markdown", "plaintext"] },
                         "definition": {},
                         "references": {},
-                        "rename": { "prepareSupport": false }
+                        "rename": { "prepareSupport": false },
+                        "codeAction": {}
                     },
                     "workspace": { "configuration": true }
                 },
@@ -258,6 +263,33 @@ impl Server {
         let _ = self.send_request(RequestKind::Rename, "textDocument/rename", params);
     }
 
+    /// Ask the server for code actions over a range.
+    pub fn code_action(&mut self, path: &Path, start: (usize, usize), end: (usize, usize)) {
+        let params = json!({
+            "textDocument": { "uri": path_to_uri(path) },
+            "range": {
+                "start": { "line": start.0, "character": start.1 },
+                "end": { "line": end.0, "character": end.1 }
+            },
+            "context": { "diagnostics": [] }
+        });
+        let _ = self.send_request(RequestKind::CodeActions, "textDocument/codeAction", params);
+    }
+
+    /// Ask the server to execute one of its commands. The response is ignored;
+    /// the server may follow up with a `workspace/applyEdit` request.
+    pub fn execute_command(&mut self, command: &str, arguments: Value) {
+        let _ = self.request(
+            "workspace/executeCommand",
+            json!({ "command": command, "arguments": arguments }),
+        );
+    }
+
+    /// Answer the server's `workspace/applyEdit` request.
+    pub fn apply_edit_response(&mut self, id: &Value, applied: bool) {
+        let _ = self.respond(id, json!({ "applied": applied }));
+    }
+
     /// Drain pending events without blocking.
     pub fn poll(&mut self) -> Vec<ServerEvent> {
         let mut events = Vec::new();
@@ -292,9 +324,14 @@ impl Server {
                     }
                 }
                 Ok(Message::Request { id, method, params }) => {
-                    // Answer server-initiated requests so it does not stall.
-                    let result = self.server_request_result(&method, &params);
-                    let _ = self.respond(&id, result);
+                    if method == "workspace/applyEdit" {
+                        // The app applies the edit and answers for us.
+                        events.push(ServerEvent::ApplyEdit { id, params });
+                    } else {
+                        // Answer other server-initiated requests so it does not stall.
+                        let result = self.server_request_result(&method, &params);
+                        let _ = self.respond(&id, result);
+                    }
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
@@ -539,6 +576,7 @@ cat >/dev/null
                     ServerEvent::Ready => ready = true,
                     ServerEvent::Diagnostics { diagnostics: d, .. } => diagnostics = Some(d),
                     ServerEvent::Response { .. } => {}
+                    ServerEvent::ApplyEdit { .. } => {}
                     ServerEvent::Failed(_) => {}
                 }
             }

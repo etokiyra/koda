@@ -52,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Rename** (`F2`) asks the server for a workspace edit and applies it across
   every affected file — open buffers as undoable edits, unopened files on disk.
   The palette reports "needs a language server" when none is attached.
+- **Code actions** (`Ctrl+.`) list the server's quick fixes and refactors in a
+  picker and apply the chosen one, whether it carries an edit or a command
+  (including server-initiated `workspace/applyEdit`).
 
 ### Fixed
 

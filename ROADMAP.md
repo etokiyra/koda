@@ -91,7 +91,8 @@ The highest-value work. These turn Koda from an editor into an IDE.
       remain as fallbacks. Rename and code actions are next.
 - [x] **Rename** over LSP: `F2` prompts for a name and applies the server's
       workspace edit across files.
-- [ ] **Code actions** over LSP.
+- [x] **Code actions** over LSP: `Ctrl+.` lists quick fixes and refactors and
+      applies edits or commands, including `workspace/applyEdit`.
 
 The abstraction is already in place: providers declare `Capability`s, and the
 command palette already reports which are available. Filling them in is additive.

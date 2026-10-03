@@ -131,6 +131,8 @@ pub struct App {
     pending_rename: Option<(PathBuf, usize, usize)>,
     /// A tool install in progress, if any.
     pending_install: Option<Tool>,
+    /// Code actions from the most recent server response.
+    pending_code_actions: Vec<convert::CodeAction>,
     /// Connection state, shown in the statusline.
     pub lsp_status: LspStatus,
     /// When open files were last checked for on-disk changes.
@@ -189,6 +191,7 @@ impl App {
             lsp_start_at: None,
             pending_rename: None,
             pending_install: None,
+            pending_code_actions: Vec::new(),
             lsp_status: LspStatus::Offline,
             last_disk_check: Instant::now(),
         };
@@ -497,6 +500,7 @@ impl App {
                         'v' => self.paste(),
                         'd' if shift => self.with_doc(|d| d.duplicate_line()),
                         '/' => self.toggle_comment(),
+                        '.' => self.code_actions(),
                         _ => {}
                     }
                 } else if !alt {
@@ -983,7 +987,7 @@ impl App {
             ids::PALETTE => self.open_command_palette(),
             ids::HELP => self.toggle_help(),
             ids::RENAME => self.rename_symbol(),
-            ids::CODE_ACTIONS => self.report_language_capability(id),
+            ids::CODE_ACTIONS => self.code_actions(),
             ids::FORMAT => self.format_document(),
             ids::GOTO_DEFINITION => self.goto_definition(),
             ids::FIND_REFERENCES => self.find_references(),
@@ -1002,6 +1006,7 @@ impl App {
             PickerAction::Reveal { path, position } => self.reveal(path, position),
             PickerAction::Info(message) => self.set_status(message),
             PickerAction::InstallTool(tool) => self.install_tool(tool),
+            PickerAction::ApplyCodeAction(index) => self.apply_code_action(index),
         }
     }
 
@@ -1780,6 +1785,17 @@ impl App {
                 ServerEvent::Response { kind, result } => {
                     self.handle_lsp_response(kind, result);
                 }
+                ServerEvent::ApplyEdit { id, params } => {
+                    let edit = params.get("edit").cloned().unwrap_or(Value::Null);
+                    let files = convert::workspace_edit(&edit);
+                    let applied = self.apply_workspace_edit(files);
+                    if let Some(server) = self.lsp.as_mut() {
+                        server.apply_edit_response(&id, applied > 0);
+                    }
+                    if applied > 0 {
+                        self.set_status(format!("Applied {applied} edit(s)"));
+                    }
+                }
                 ServerEvent::Failed(message) => {
                     self.lsp = None;
                     self.lsp_status = LspStatus::Failed(message);
@@ -1900,6 +1916,70 @@ impl App {
                     self.set_status("Nothing to rename");
                 }
             }
+            RequestKind::CodeActions => {
+                let actions = convert::code_actions(&value);
+                if actions.is_empty() {
+                    self.set_status("No code actions available");
+                    return;
+                }
+                self.pending_code_actions = actions;
+                let items = self
+                    .pending_code_actions
+                    .iter()
+                    .enumerate()
+                    .map(|(index, action)| {
+                        PickerItem::new(
+                            action.title.clone(),
+                            String::new(),
+                            PickerAction::ApplyCodeAction(index),
+                        )
+                    })
+                    .collect();
+                let mut picker = Picker::new("Code Actions", "Filter actions…", items);
+                picker.refilter();
+                self.overlay = Overlay::Picker(picker);
+            }
+        }
+    }
+
+    /// Ask the server for code actions over the cursor or selection.
+    fn code_actions(&mut self) {
+        let Some((path, row, col)) = self.lsp_target() else {
+            self.set_status("Code actions need a language server (see Language Setup…)");
+            return;
+        };
+        let range = self
+            .editor
+            .active_document()
+            .and_then(|doc| doc.selection_range())
+            .map(|(start, end)| ((start.row, start.col), (end.row, end.col)))
+            .unwrap_or(((row, col), (row, col)));
+        if let Some(server) = self.lsp.as_mut() {
+            server.code_action(&path, range.0, range.1);
+        }
+        self.set_status("Finding code actions…");
+    }
+
+    /// Apply the code action at `index`, either as an edit or a command.
+    fn apply_code_action(&mut self, index: usize) {
+        let Some(action) = self.pending_code_actions.get(index).cloned() else {
+            return;
+        };
+        if let Some(edit) = action.edit {
+            let files = convert::workspace_edit(&edit);
+            let applied = self.apply_workspace_edit(files);
+            if applied > 0 {
+                self.set_status(format!("Applied {applied} edit(s)"));
+            } else {
+                self.set_status("Nothing to apply");
+            }
+        } else if let Some(command) = action.command {
+            if let Some(server) = self.lsp.as_mut() {
+                server.execute_command(&command.command, command.arguments);
+            }
+            self.set_status("Running action…");
+        } else {
+            self.set_status("This action does nothing");
         }
     }
 
@@ -2450,6 +2530,9 @@ impl App {
             ids::RENAME if self.lsp_target().is_none() => {
                 (false, Some("needs a language server".to_string()))
             }
+            ids::CODE_ACTIONS if self.lsp_target().is_none() => {
+                (false, Some("needs a language server".to_string()))
+            }
             _ => (true, None),
         }
     }
@@ -2618,32 +2701,6 @@ impl App {
             return;
         }
         self.should_quit = true;
-    }
-
-    fn report_language_capability(&mut self, id: &str) {
-        let (capability, label) = match id {
-            ids::RENAME => (Capability::Rename, "Rename"),
-            ids::CODE_ACTIONS => (Capability::CodeActions, "Code actions"),
-            _ => return,
-        };
-        let language = self
-            .editor
-            .active_document()
-            .map(|doc| doc.buffer.language)
-            .unwrap_or(LanguageId::Unknown);
-        let available = self
-            .language
-            .provider(language)
-            .capabilities()
-            .contains(&capability);
-        if available {
-            self.set_status(format!("{label} is starting for {}", language.name()));
-        } else {
-            self.set_status(format!(
-                "{label} is not available for {} yet",
-                language.name()
-            ));
-        }
     }
 
     pub fn set_status(&mut self, message: impl Into<String>) {
@@ -3438,6 +3495,7 @@ while read -r header; do
     textDocument/definition) result="[{\"uri\":\"file://$target\",\"range\":{\"start\":{\"line\":2,\"character\":0},\"end\":{\"line\":2,\"character\":5}}}]" ;;
     textDocument/references) result="[{\"uri\":\"file://$target\",\"range\":{\"start\":{\"line\":1,\"character\":4},\"end\":{\"line\":1,\"character\":9}}}]" ;;
     textDocument/rename) result="{\"changes\":{\"file://$target\":[{\"range\":{\"start\":{\"line\":1,\"character\":8},\"end\":{\"line\":1,\"character\":13}},\"newText\":\"renamed\"}]}}" ;;
+    textDocument/codeAction) result="[{\"title\":\"Apply fix\",\"edit\":{\"changes\":{\"file://$target\":[{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":0}},\"newText\":\"FIX \"}]}}}]" ;;
     *) result='null' ;;
   esac
   resp=$(printf '{"jsonrpc":"2.0","id":%s,"result":%s}' "$id" "$result")
@@ -3549,6 +3607,20 @@ done
         assert_eq!(
             app.editor.active_document().unwrap().buffer.line_text(1),
             "    let renamed = 1;"
+        );
+
+        // Code actions (the server returns one edit-based action).
+        app.code_actions();
+        assert!(
+            wait(&mut app, &|app| matches!(app.overlay, Overlay::Picker(_))),
+            "expected the code actions picker"
+        );
+        app.apply_code_action(0);
+        assert!(
+            wait(&mut app, &|app| app.editor.active_document().is_some_and(
+                |doc| doc.buffer.line_text(0).starts_with("FIX ")
+            )),
+            "expected the code action edit to apply"
         );
 
         fs::remove_dir_all(&dir).ok();
