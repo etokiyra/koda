@@ -21,6 +21,7 @@ pub enum Tool {
     RustAnalyzer,
     Gopls,
     Pylsp,
+    BashLs,
     Rustfmt,
     Gofmt,
 }
@@ -38,6 +39,7 @@ impl Tool {
         Tool::RustAnalyzer,
         Tool::Gopls,
         Tool::Pylsp,
+        Tool::BashLs,
         Tool::Rustfmt,
         Tool::Gofmt,
     ];
@@ -47,6 +49,7 @@ impl Tool {
             Tool::RustAnalyzer => "rust-analyzer",
             Tool::Gopls => "gopls",
             Tool::Pylsp => "pylsp",
+            Tool::BashLs => "bash-language-server",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
         }
@@ -57,6 +60,7 @@ impl Tool {
             Tool::RustAnalyzer => "rust-analyzer",
             Tool::Gopls => "gopls",
             Tool::Pylsp => "pylsp",
+            Tool::BashLs => "bash-language-server",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
         }
@@ -67,12 +71,15 @@ impl Tool {
             Tool::RustAnalyzer | Tool::Rustfmt => LanguageId::Rust,
             Tool::Gopls | Tool::Gofmt => LanguageId::Go,
             Tool::Pylsp => LanguageId::Python,
+            Tool::BashLs => LanguageId::Shell,
         }
     }
 
     pub fn purpose(self) -> ToolPurpose {
         match self {
-            Tool::RustAnalyzer | Tool::Gopls | Tool::Pylsp => ToolPurpose::LanguageServer,
+            Tool::RustAnalyzer | Tool::Gopls | Tool::Pylsp | Tool::BashLs => {
+                ToolPurpose::LanguageServer
+            }
             Tool::Rustfmt | Tool::Gofmt => ToolPurpose::Formatter,
         }
     }
@@ -81,9 +88,18 @@ impl Tool {
     /// flag, so it is probed with no arguments against empty stdin.
     fn version_args(self) -> &'static [&'static str] {
         match self {
-            Tool::RustAnalyzer | Tool::Rustfmt | Tool::Pylsp => &["--version"],
+            Tool::RustAnalyzer | Tool::Rustfmt | Tool::Pylsp | Tool::BashLs => &["--version"],
             Tool::Gopls => &["version"],
             Tool::Gofmt => &[],
+        }
+    }
+
+    /// Arguments that start this tool as a language server.
+    pub fn server_args(self) -> &'static [&'static str] {
+        match self {
+            // `bash-language-server` needs its `start` subcommand.
+            Tool::BashLs => &["start"],
+            _ => &[],
         }
     }
 
@@ -93,6 +109,7 @@ impl Tool {
             Tool::RustAnalyzer => "install with `rustup component add rust-analyzer`",
             Tool::Gopls => "install with `go install golang.org/x/tools/gopls@latest`",
             Tool::Pylsp => "install with `pipx install python-lsp-server`",
+            Tool::BashLs => "install with `npm install -g bash-language-server`",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
         }
@@ -117,6 +134,7 @@ impl Tool {
             Tool::RustAnalyzer => &[("rustup", &["component", "add", "rust-analyzer"])],
             Tool::Rustfmt => &[("rustup", &["component", "add", "rustfmt"])],
             Tool::Gopls => &[("go", &["install", "golang.org/x/tools/gopls@latest"])],
+            Tool::BashLs => &[("npm", &["install", "-g", "bash-language-server"])],
             Tool::Pylsp => &[
                 ("pipx", &["install", "python-lsp-server"]),
                 (
@@ -323,6 +341,7 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         dirs.push(home.join("bin"));
         dirs.push(home.join(".bun/bin"));
         dirs.push(home.join(".deno/bin"));
+        dirs.push(home.join(".npm-global/bin"));
     }
     dirs.push(PathBuf::from("/usr/local/bin"));
     dirs.push(PathBuf::from("/opt/homebrew/bin"));
@@ -342,7 +361,7 @@ mod tests {
             assert!(!tool.install_hint().is_empty());
             assert!(matches!(
                 tool.language(),
-                LanguageId::Rust | LanguageId::Go | LanguageId::Python
+                LanguageId::Rust | LanguageId::Go | LanguageId::Python | LanguageId::Shell
             ));
         }
     }
@@ -378,6 +397,10 @@ mod tests {
         assert_eq!(
             Tool::Pylsp.install_command(),
             Some(("pipx", &["install", "python-lsp-server"][..]))
+        );
+        assert_eq!(
+            Tool::BashLs.install_command(),
+            Some(("npm", &["install", "-g", "bash-language-server"][..]))
         );
         // Python tooling has pip fallbacks, so installation is attempted even
         // without pipx.

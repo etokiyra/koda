@@ -22,6 +22,7 @@ We deliberately support few languages well rather than many languages badly:
 Rust → solid
 Go   → solid
 Python → built-in, offline
+Shell  → built-in, offline
 then expand
 ```
 
@@ -147,6 +148,8 @@ command palette already reports which are available. Filling them in is additive
       completion, hover, navigation) that works offline, plus automatic
       provisioning of the `pylsp` language server for rename, code actions and
       richer analysis.
+- [x] Shell support (bash/zsh/sh): built-in highlighting, symbols, completion,
+      hover and navigation, with optional `bash-language-server` provisioning.
 - [x] `.gitignore`-aware file tree and quick open. A dependency-free matcher
       reads root and nested `.gitignore` files plus `.git/info/exclude`, and
       hides ignored paths from the tree, quick open, the inline filter and

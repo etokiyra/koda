@@ -213,6 +213,7 @@ impl ProviderRegistry {
         registry.register(Box::new(crate::language::rust::RustProvider));
         registry.register(Box::new(crate::language::go::GoProvider));
         registry.register(Box::new(crate::language::python::PythonProvider));
+        registry.register(Box::new(crate::language::shell::ShellProvider));
         registry.register(Box::new(crate::language::markdown::MarkdownProvider));
         registry.register(Box::new(crate::language::json::JsonProvider));
         registry.register(Box::new(crate::language::toml::TomlProvider));

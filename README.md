@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-236%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-241%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -115,8 +115,9 @@ The complexity lives inside Koda:
                               (and it stays out of your way when none exists)
 ```
 
-Missing something? Koda notices when a Rust, Go or Python file is open without
-its language server and offers to install it, once, without blocking startup.
+Missing something? Koda notices when a Rust, Go, Python or Shell file is open
+without its language server and offers to install it, once, without blocking
+startup.
 **Language Setup…** in the command palette then lists every tool Koda knows
 about and installs a missing one with a single `Enter` — through the official
 channel, so provenance and integrity stay with the package manager:
@@ -126,6 +127,7 @@ channel, so provenance and integrity stay with the package manager:
 | `rust-analyzer` | Rust language server | `rustup component add rust-analyzer` |
 | `gopls` | Go language server | `go install golang.org/x/tools/gopls@latest` |
 | `pylsp` | Python language server | `pipx install python-lsp-server` (or `pip`) |
+| `bash-language-server` | Shell language server | `npm install -g bash-language-server` |
 | `rustfmt` | Rust formatting | `rustup component add rustfmt` |
 | `gofmt` | Go formatting | ships with the Go toolchain |
 
@@ -140,6 +142,7 @@ them.
 | **Rust** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **Go** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **Python** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
+| **Shell** | built-in | LSP | built-in (functions) | built-in | built-in | built-in | — |
 | **Markdown** | built-in | — | built-in (headings) | — | — | — | — |
 | **JSON** | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — |
 | **TOML** | built-in | built-in | built-in (tables & keys) | built-in (literals) | — | — | — |
@@ -147,11 +150,12 @@ them.
 
 Prose and configuration files are first-class too. Markdown, JSON, TOML and YAML
 get syntax highlighting, structural diagnostics where they make sense, and a
-symbol outline, all offline and with no setup. **Python** works offline through
-Koda's built-in intelligence (highlighting, diagnostics, symbols, completion,
-hover, navigation) and gains rename and code actions when Koda installs
-`pylsp` for it. Adding a language means implementing one trait and registering
-it — no changes to the editor or the UI.
+symbol outline, all offline and with no setup. **Python** and **Shell** work
+offline through Koda's built-in intelligence (highlighting, diagnostics where
+available, symbols, completion, hover, navigation) and gain richer server-backed
+features when Koda installs `pylsp` or `bash-language-server`. Adding a language
+means implementing one trait and registering it — no changes to the editor or
+the UI.
 
 ## ❯ Editing & workflow
 
@@ -313,6 +317,7 @@ src/
 │   ├── rust/       # Rust provider
 │   ├── go/          # Go provider
 │   ├── python/     # Python provider (built-in, offline)
+│   ├── shell/      # Shell provider (bash/zsh/sh)
 │   ├── markdown/   # Markdown provider (headings as symbols)
 │   └── json|toml|yaml/  # configuration-data providers
 ├── project/      # workspace, project detection, file tree

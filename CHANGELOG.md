@@ -22,11 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolved path is used to launch servers and formatters, not just to probe.
 - **Language Setup…** can now install a missing tool with one action, using
   only official acquisition paths: `rustup component add …` for Rust tooling,
-  `go install …@latest` for `gopls`, and `pipx`/`pip` for Python's
-  `python-lsp-server`. Installation tries each candidate package manager in
-  turn, so a machine without `pipx` still succeeds through `pip`. Koda runs no
-  bespoke downloader, so provenance and integrity remain the package managers'
-  responsibility.
+  `go install …@latest` for `gopls`, `pipx`/`pip` for Python's
+  `python-lsp-server` and `npm install -g` for `bash-language-server`.
+  Installation tries each candidate package manager in turn, so a machine
+  without `pipx` still succeeds through `pip`. Koda runs no bespoke downloader,
+  so provenance and integrity remain the package managers' responsibility.
 - Installation runs on the background worker with a busy indicator; Koda
   re-probes when it finishes and, if a server is now available, starts it.
   Failures (for example, offline) are reported verbatim and editing continues.
@@ -64,6 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Language support
 
+- Added **Shell** support (bash, zsh and POSIX sh): built-in highlighting for
+  comments, strings, variables and expansions, keywords, builtins and function
+  definitions, plus symbols, completion, hover and navigation. A
+  `bash-language-server` can be provisioned for fuller analysis.
 - Language detection now uses the file's **nearest** project markers rather
   than only the workspace root's. A `.rs` file inside `crates/a/` of a monorepo
   is corroborated by `crates/a/Cargo.toml` even when the workspace root declares

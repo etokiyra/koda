@@ -2687,7 +2687,7 @@ impl App {
             .and_then(|tools| tools.program_path(tool))
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| tool.program().to_string());
-        self.start_lsp(language, &program, &[]);
+        self.start_lsp(language, &program, tool.server_args());
     }
 
     /// Start a language server, recording our attempt either way.
@@ -5854,6 +5854,19 @@ done
         assert_eq!(
             app.editor.active_document().unwrap().buffer.language,
             LanguageId::Python
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn detects_shell_from_extension_and_shebang() {
+        let dir = temp_project("shell");
+        let file = dir.join("build.sh");
+        fs::write(&file, "#!/usr/bin/env bash\necho hi\n").unwrap();
+        let app = App::new(Some(&file)).unwrap();
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.language,
+            LanguageId::Shell
         );
         fs::remove_dir_all(&dir).ok();
     }

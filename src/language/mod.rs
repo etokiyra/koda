@@ -23,6 +23,7 @@ pub mod markdown;
 pub mod provider;
 pub mod python;
 pub mod rust;
+pub mod shell;
 pub mod symbols;
 pub mod toml;
 pub mod tools;

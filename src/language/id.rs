@@ -13,6 +13,8 @@ pub enum LanguageId {
     Go,
     /// Python source and stubs.
     Python,
+    /// Shell scripts (bash, zsh, POSIX sh).
+    Shell,
     /// Markdown prose and documentation.
     Markdown,
     /// JSON (and its JSONC/GeoJSON relatives).
@@ -28,10 +30,11 @@ pub enum LanguageId {
 
 impl LanguageId {
     /// Every language Koda understands today. Keep this in sync with [`crate::language::provider`].
-    pub const ALL: [LanguageId; 7] = [
+    pub const ALL: [LanguageId; 8] = [
         LanguageId::Rust,
         LanguageId::Go,
         LanguageId::Python,
+        LanguageId::Shell,
         LanguageId::Markdown,
         LanguageId::Json,
         LanguageId::Toml,
@@ -44,6 +47,7 @@ impl LanguageId {
             LanguageId::Rust => "Rust",
             LanguageId::Go => "Go",
             LanguageId::Python => "Python",
+            LanguageId::Shell => "Shell",
             LanguageId::Markdown => "Markdown",
             LanguageId::Json => "JSON",
             LanguageId::Toml => "TOML",
@@ -58,6 +62,7 @@ impl LanguageId {
             LanguageId::Rust => "rust",
             LanguageId::Go => "go",
             LanguageId::Python => "python",
+            LanguageId::Shell => "shell",
             LanguageId::Markdown => "markdown",
             LanguageId::Json => "json",
             LanguageId::Toml => "toml",

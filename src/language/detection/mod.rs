@@ -37,6 +37,7 @@ mod tests {
                 LanguageId::Rust => &["rs"],
                 LanguageId::Go => &["go"],
                 LanguageId::Python => &["py"],
+                LanguageId::Shell => &["sh", "bash"],
                 LanguageId::Markdown => &["md"],
                 LanguageId::Json => &["json"],
                 LanguageId::Toml => &["toml"],
