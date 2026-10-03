@@ -15,6 +15,8 @@
 //! line-oriented and positions are measured in **characters**, matching the
 //! rest of the editor.
 
+use std::cell::Cell;
+
 /// A compiled pattern.
 #[derive(Clone, Debug)]
 pub struct Regex {
@@ -58,6 +60,13 @@ enum Repeat {
 
 /// Cap on repetitions of a single atom, so a pathological pattern cannot spin.
 const MAX_REPEAT: usize = 10_000;
+
+/// The most matcher steps one `find` may take. Backtracking across several
+/// quantifiers can be exponential, and search highlighting runs on the UI
+/// thread after every keystroke; a bounded search that gives up is far better
+/// than a frozen editor. This is generous enough that real patterns and files
+/// never come close.
+const MATCH_BUDGET: usize = 1_000_000;
 
 impl Regex {
     /// Compile `pattern`, returning a readable message on unsupported syntax.
@@ -106,10 +115,17 @@ impl Regex {
         from: usize,
         case_insensitive: bool,
     ) -> Option<(usize, usize)> {
+        // A shared step budget bounds the total backtracking work for this call.
+        let budget = Cell::new(MATCH_BUDGET);
         let mut start = from;
         while start <= chars.len() {
-            if let Some(end) = self.match_from(chars, start, case_insensitive) {
+            if let Some(end) = self.match_from(chars, start, case_insensitive, &budget) {
                 return Some((start, end));
+            }
+            if budget.get() == 0 {
+                // The pattern is pathological for this line; stop rather than
+                // freeze the editor.
+                return None;
             }
             start += 1;
         }
@@ -121,16 +137,36 @@ impl Regex {
         self.find(chars, 0, case_insensitive).is_some()
     }
 
-    fn match_from(&self, chars: &[char], start: usize, ci: bool) -> Option<usize> {
-        self.match_atoms(chars, 0, start, ci)
+    fn match_from(
+        &self,
+        chars: &[char],
+        start: usize,
+        ci: bool,
+        budget: &Cell<usize>,
+    ) -> Option<usize> {
+        self.match_atoms(chars, 0, start, ci, budget)
     }
 
-    fn match_atoms(&self, chars: &[char], index: usize, pos: usize, ci: bool) -> Option<usize> {
+    fn match_atoms(
+        &self,
+        chars: &[char],
+        index: usize,
+        pos: usize,
+        ci: bool,
+        budget: &Cell<usize>,
+    ) -> Option<usize> {
+        if budget.get() == 0 {
+            return None;
+        }
+        budget.set(budget.get() - 1);
         let Some(atom) = self.atoms.get(index) else {
             return Some(pos);
         };
-        let rest = |p: usize| self.match_atoms(chars, index + 1, p, ci);
+        let rest = |p: usize| self.match_atoms(chars, index + 1, p, ci, budget);
 
+        if budget.get() == 0 {
+            return None;
+        }
         match atom.repeat {
             Repeat::One => {
                 let next = match_matcher(&atom.matcher, chars, pos, ci)?;
@@ -375,5 +411,14 @@ mod tests {
     fn backtracking_finds_a_later_match() {
         // `a+aab` must give back the last `a`s to let `b` match.
         assert_eq!(find("a+aab", "aaaab"), Some((0, 5)));
+    }
+
+    #[test]
+    fn pathological_backtracking_is_bounded() {
+        // `.*z` against a long non-matching line is the classic blow-up; the
+        // step budget must abort it instead of freezing the editor.
+        let regex = Regex::new(".*z").expect("valid pattern");
+        let chars: Vec<char> = "a".repeat(200_000).chars().collect();
+        assert_eq!(regex.find(&chars, 0, false), None);
     }
 }

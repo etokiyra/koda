@@ -227,13 +227,27 @@ fn glob_paths(pattern: &str, text: &str) -> bool {
 }
 
 fn match_segments(pattern: &[&str], text: &[&str]) -> bool {
+    // Memoise subproblems by their lengths; a pattern with several `**` would
+    // otherwise backtrack exponentially against a deep path.
+    let mut seen = std::collections::HashSet::new();
+    match_segments_rec(pattern, text, &mut seen)
+}
+
+fn match_segments_rec(
+    pattern: &[&str],
+    text: &[&str],
+    seen: &mut std::collections::HashSet<(usize, usize)>,
+) -> bool {
+    if !seen.insert((pattern.len(), text.len())) {
+        return false;
+    }
     match (pattern.first(), text.first()) {
         (None, None) => true,
         (Some(&"**"), _) => {
-            (0..=text.len()).any(|skip| match_segments(&pattern[1..], &text[skip..]))
+            (0..=text.len()).any(|skip| match_segments_rec(&pattern[1..], &text[skip..], seen))
         }
         (Some(segment), Some(part)) => {
-            segment_match(segment, part) && match_segments(&pattern[1..], &text[1..])
+            segment_match(segment, part) && match_segments_rec(&pattern[1..], &text[1..], seen)
         }
         _ => false,
     }
@@ -246,13 +260,35 @@ fn segment_match(pattern: &str, text: &str) -> bool {
     segment_rec(&pattern, &text)
 }
 
+/// Iterative wildcard match (no exponential backtracking).
+///
+/// Standard two-pointer algorithm with a single remembered `*`: the worst case
+/// is O(pattern × text), never the exponential blow-up a naive recursive `*`
+/// gives on a pattern like `*a*a*a*a*b`.
 fn segment_rec(pattern: &[char], text: &[char]) -> bool {
-    match pattern.first() {
-        None => text.is_empty(),
-        Some('*') => (0..=text.len()).any(|skip| segment_rec(&pattern[1..], &text[skip..])),
-        Some('?') => !text.is_empty() && segment_rec(&pattern[1..], &text[1..]),
-        Some(&c) => text.first() == Some(&c) && segment_rec(&pattern[1..], &text[1..]),
+    let (mut p, mut t) = (0usize, 0usize);
+    let mut star: Option<usize> = None;
+    let mut star_text = 0usize;
+    while t < text.len() {
+        if p < pattern.len() && (pattern[p] == '?' || pattern[p] == text[t]) {
+            p += 1;
+            t += 1;
+        } else if p < pattern.len() && pattern[p] == '*' {
+            star = Some(p);
+            star_text = t;
+            p += 1;
+        } else if let Some(star_p) = star {
+            p = star_p + 1;
+            star_text += 1;
+            t = star_text;
+        } else {
+            return false;
+        }
     }
+    while p < pattern.len() && pattern[p] == '*' {
+        p += 1;
+    }
+    p == pattern.len()
 }
 
 #[cfg(test)]
@@ -328,5 +364,16 @@ mod tests {
         let matcher = Gitignore::load(&dir);
         assert_eq!(matcher.rules.len(), 1);
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn hostile_globs_are_not_exponential() {
+        // These would blow up a naive recursive matcher; both must return fast.
+        let text = "a".repeat(128);
+        assert!(!segment_match("*a*a*a*a*a*a*a*a*a*a*a*a*a*b", &text));
+        assert!(!glob_paths(
+            "**/**/**/**/**/**/**/**/x",
+            "a/b/c/d/e/f/g/h/i/j"
+        ));
     }
 }
