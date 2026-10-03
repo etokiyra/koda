@@ -7,6 +7,7 @@ use std::io::{self, Write};
 
 use crossterm::event::{
     DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use ratatui::DefaultTerminal;
@@ -17,13 +18,27 @@ pub fn init() -> io::Result<DefaultTerminal> {
     let terminal = ratatui::try_init()?;
     // Bracketed paste lets the terminal deliver a paste as one event; focus
     // reporting lets Koda refresh the tree when the user returns to it.
-    let _ = execute!(io::stdout(), EnableBracketedPaste, EnableFocusChange);
+    //
+    // The keyboard-enhancement request (kitty protocol) asks the terminal to
+    // report modified keys distinctly, so `Ctrl+Shift+P` is not delivered as a
+    // plain `Ctrl+P`. Terminals that do not understand it simply ignore it.
+    let _ = execute!(
+        io::stdout(),
+        EnableBracketedPaste,
+        EnableFocusChange,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    );
     Ok(terminal)
 }
 
 /// Restore the terminal to its previous state.
 pub fn restore() {
-    let _ = execute!(io::stdout(), DisableBracketedPaste, DisableFocusChange);
+    let _ = execute!(
+        io::stdout(),
+        PopKeyboardEnhancementFlags,
+        DisableBracketedPaste,
+        DisableFocusChange
+    );
     ratatui::restore();
 }
 

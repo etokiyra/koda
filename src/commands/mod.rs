@@ -358,8 +358,13 @@ impl CommandRegistry {
                 .describes("Toggle the selected file in the git index"),
             Command::new(DIFF, "Diff File", "Git", Some("Alt+D"))
                 .describes("Show the unified diff for the active file"),
-            Command::new(TOGGLE_TREE, "Toggle File Tree", "View", Some("Ctrl+B"))
-                .describes("Show or hide the project sidebar"),
+            Command::new(
+                TOGGLE_TREE,
+                "File Panel: Focus / Hide",
+                "View",
+                Some("Ctrl+B"),
+            )
+            .describes("Focus the project sidebar, or hide it when focused"),
             Command::new(
                 FOCUS_TREE,
                 "Focus File Tree / Editor",

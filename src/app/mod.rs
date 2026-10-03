@@ -635,7 +635,7 @@ impl App {
     /// Shortcuts that work regardless of focus.
     fn handle_global_key(&mut self, key: KeyEvent) -> bool {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        let shift = key_shift(&key);
         if key.code == KeyCode::F(1) {
             self.completion = None;
             self.toggle_help();
@@ -782,7 +782,7 @@ impl App {
     }
 
     fn handle_editor_key(&mut self, key: KeyEvent) {
-        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        let shift = key_shift(&key);
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
 
@@ -5112,12 +5112,17 @@ impl App {
     // ----------------------------------------------------------------------
 
     fn toggle_tree(&mut self) {
-        self.tree_visible = !self.tree_visible;
-        self.focus = if self.tree_visible {
-            Focus::FileTree
+        // `Ctrl+B` is the file panel: reveal and focus it, focus it when the
+        // editor has focus, and hide it once it is focused.
+        if !self.tree_visible {
+            self.tree_visible = true;
+            self.focus = Focus::FileTree;
+        } else if self.focus == Focus::Editor {
+            self.focus = Focus::FileTree;
         } else {
-            Focus::Editor
-        };
+            self.tree_visible = false;
+            self.focus = Focus::Editor;
+        }
     }
 
     /// Re-read the project tree and git status on demand.
@@ -5476,6 +5481,18 @@ fn apply_text_edits(text: &str, edits: &[convert::TextEdit]) -> String {
         chars.splice(start..end, edit.new_text.chars());
     }
     chars.into_iter().collect()
+}
+
+/// Whether a key is "shifted".
+///
+/// Real terminals vary: some report `Shift` explicitly, some report an
+/// uppercase character for a shifted letter, and some (without the kitty
+/// keyboard protocol) conflate `Ctrl+Shift+P` with `Ctrl+P`. Treating an
+/// uppercase character as shifted recovers the former cases, so `Ctrl+Shift+P`
+/// opens the command palette rather than quick open.
+fn key_shift(key: &KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::SHIFT)
+        || matches!(key.code, KeyCode::Char(c) if c.is_ascii_uppercase())
 }
 
 /// Identifier words already present in a document, deduplicated in order.
@@ -5846,6 +5863,57 @@ mod tests {
 
         app.execute_command(ids::FOCUS_TREE);
         assert_eq!(app.focus, Focus::Editor);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ctrl_b_focuses_the_file_panel_then_hides_it() {
+        let dir = temp_project("ctrl-b");
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+        assert!(app.tree_visible);
+        assert_eq!(app.focus, Focus::Editor);
+
+        // First press moves focus into the files.
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+        assert!(app.tree_visible);
+        assert_eq!(app.focus, Focus::FileTree);
+
+        // Second press hides it and returns to the editor.
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+        assert!(!app.tree_visible);
+        assert_eq!(app.focus, Focus::Editor);
+
+        // Third press reveals and focuses it again.
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+        assert!(app.tree_visible);
+        assert_eq!(app.focus, Focus::FileTree);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ctrl_shift_p_opens_the_command_palette() {
+        let dir = temp_project("palette-shift");
+        let file = dir.join("src/main.rs");
+
+        // Terminals that report an uppercase `P` with only Control still open
+        // the command palette, not quick open.
+        let mut app = app_with_file(&file);
+        app.handle_key(KeyEvent::new(KeyCode::Char('P'), KeyModifiers::CONTROL));
+        match &app.overlay {
+            Overlay::Picker(picker) => assert_eq!(picker.title, "Command Palette"),
+            _ => panic!("expected the command palette"),
+        }
+
+        // A plain `Ctrl+P` stays quick open.
+        let mut app = app_with_file(&file);
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+        match &app.overlay {
+            Overlay::Picker(picker) => assert_eq!(picker.title, "Quick Open"),
+            _ => panic!("expected quick open"),
+        }
 
         fs::remove_dir_all(&dir).ok();
     }

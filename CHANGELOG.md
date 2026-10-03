@@ -445,6 +445,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Keymap
 
+- `Ctrl+B` now moves focus into the file panel (revealing it if hidden) and
+  hides it on the next press, so the sidebar is reachable without a mouse;
+  `Ctrl+E` still toggles focus without hiding.
+- Koda asks the terminal for distinct modified keys (the kitty keyboard
+  protocol) and treats an uppercase character as shifted, so `Ctrl+Shift+P`
+  opens the command palette rather than quick open on terminals that would
+  otherwise report it as a plain `Ctrl+P`.
 - Added `Alt+D` **Diff File**, `Alt+I` **Toggle Inline Diagnostics** and `v`
   (on the welcome screen) to cycle the scene. A keymap test now asserts that
   every command id and every shortcut is unique, so future bindings cannot
