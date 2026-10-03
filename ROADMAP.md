@@ -136,6 +136,10 @@ The highest-value work. These turn Koda from an editor into an IDE.
       JDT with a checksum-verified Eclipse Adoptium JDK, and C# installs
       OmniSharp with the .NET SDK, both under Koda's data directory. Servers are
       launched with their runtime on `PATH` (`JAVA_HOME`, `DOTNET_ROOT`).
+- [ ] **LSP position encoding.** Convert positions in both directions using the
+      encoding the server negotiated (`utf-8`, `utf-16` or `utf-32`) and each
+      line's text. Until then, non-ASCII lines can shift diagnostics and cause
+      rename, formatting and code-action edits to land at the wrong offset.
 
 The abstraction is already in place: providers declare `Capability`s, and the
 command palette already reports which are available. Filling them in is additive.

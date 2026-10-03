@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Reliability & security audit
+
+A focused debugging, reliability, security and performance pass. No new
+features; the goal was to make existing behaviour trustworthy.
+
+- **Data safety.** Files are now written through a sibling temporary file and
+  an atomic rename, so an interrupted or failed save can never truncate the
+  original. Loading refuses binary, non-UTF-8 and oversized files instead of
+  replacing invalid bytes and writing them back on the next save, and the LSP
+  workspace-edit path for files that are not open uses the same atomic writer.
+- **File operations.** Rename and copy refuse to overwrite an existing
+  destination, so a mistyped name cannot silently destroy another file.
+- **Git.** `git status` is parsed from `--porcelain -z`, which keeps leading
+  status columns, spaces, non-ASCII names and renames intact (previously the
+  first entry could be shifted and misreported as staged). Committing is scoped
+  to the workspace root so a subdirectory of a larger repository cannot stage
+  unrelated siblings.
+- **Editor correctness.** Undoing back to the last save point now clears the
+  modified marker; merged backspaces restore the cursor to where the run began;
+  closing an earlier tab keeps focus on the same document; and indent, outdent,
+  move-line, delete-line and toggle-comment no longer touch a trailing row that
+  a selection only reaches at column 0.
+- **Detection.** Provider descriptors are ordered deterministically (the
+  registry is a hash map), the content-hint cap is exact, and the
+  project-context bonus only applies to a language with a file-level signal, so
+  a `Cargo.toml` can no longer turn a Markdown file into Rust.
+- **Language servers.** Documents opened after a server is already ready are
+  now sent `didOpen`; closing a tab (or all tabs, or deleting a path) sends
+  `didClose`; a handshake no longer forgives an immediate crash, so the restart
+  budget is genuinely bounded; one malformed JSON body no longer tears down a
+  live connection; and `documentChanges` is preferred over `changes`.
+- **Tool provisioning.** Install subprocesses run from Koda's own tools
+  directory, so a repository-local `.npmrc` cannot redirect `npm install -g` to
+  an attacker-controlled registry. Downloads and install commands are bounded
+  in time and output, the Adoptium JDK install fails closed without a checksum,
+  a reclaimed lock can no longer delete its successor, and a strategy is only
+  reported installed when its own steps completed and a re-probe succeeds.
+- **Adversarial input.** The custom regex and `.gitignore` matchers no longer
+  backtrack exponentially (a search-highlight or project-open freeze), and the
+  `.gitignore` fix also gives `.gitignore` the correct precedence over
+  `.git/info/exclude`.
+
 ### Welcome screen
 
 - The welcome screen now opens on one of five **animated scenes** — *starry

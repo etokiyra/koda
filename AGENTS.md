@@ -258,6 +258,49 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
 - **Motion is a toggle, not a config file.** `App::motion` (palette:
   **Toggle Animations**) freezes the scene and the busy sparkle. Zero
   configuration is preserved; reduced motion is one keypress away.
+- **Saves are atomic and lossless.** Writes go to a sibling temporary file that
+  is flushed and renamed over the original, preserving permissions. Loading
+  refuses binary, non-UTF-8 and oversized files rather than replacing bytes with
+  U+FFFD and writing them back, and filesystem rename/copy never overwrite an
+  existing destination.
+- **Git is parsed losslessly.** `git status` is read as `--porcelain -z` raw
+  bytes, so leading status columns, spaces, non-ASCII names and renames survive;
+  staging is scoped to the workspace root.
+- **Detection is deterministic and file-first.** Provider descriptors are sorted
+  by language id before the engine is built, the content-hint weight is capped
+  at exactly three, and the project-context bonus applies only to a language
+  with a file-level signal (name, shebang or extension) — a project marker never
+  overrides a file's own nature.
+- **Editor history tracks a save point.** Each edit has a unique id and the
+  document remembers the id at its save point, so undo/redo restore the clean
+  state exactly; coalescing is broken when a document is saved.
+- **Language servers are attached for the whole session.** A document detected
+  after the handshake is sent `didOpen`, closing sends `didClose`, the restart
+  budget is only forgiven after a stable uptime (so a crash-after-initialize
+  loop is bounded), and one malformed message does not tear down a live
+  connection. Results are still matched to their request id and document.
+- **Provisioning is isolated and bounded.** Install subprocesses run from Koda's
+  own tools directory (never the user's project, so a local `.npmrc` cannot
+  hijack `npm`), downloads and commands have time and output limits, checksum
+  verification fails closed, and the install lock records a nonce so a reclaimed
+  holder cannot delete a successor's lock.
+- **Adversarial input is bounded.** Search highlighting runs on the UI thread,
+  so the regex engine carries a per-line step budget and the `.gitignore` glob
+  matcher is polynomial; a crafted pattern degrades to "no match" instead of
+  freezing the editor.
+
+### Known limitation
+
+- **LSP position encoding is negotiated but not yet applied.** Koda advertises
+  `utf-8`/`utf-16` and stores the server's choice, but positions are still
+  treated as Unicode scalar columns. On lines containing non-ASCII text this can
+  shift diagnostics, completion, hover, navigation and — most seriously —
+  rename/format/code-action edits, which can then be applied at the wrong
+  offset. The fix is to convert at the request/response boundary using each
+  line's text (`char_to_utf8`/`char_to_utf16` and their inverses), in both
+  directions, before any edit is applied. Until then, prefer setting files that
+  need server-side edits to ASCII, or expect occasional wrong offsets on lines
+  with non-ASCII characters.
 
 ---
 
