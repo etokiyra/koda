@@ -90,6 +90,7 @@ Implemented:
   `gofmt`), run off the UI thread.
 - Hover (`Ctrl+Shift+H`) showing a symbol's kind, definition line and usage
   count.
+- Project-wide symbol search (`Ctrl+T`), scanned off the UI thread.
 - Lightweight git integration (branch + per-file status, via the `git` binary).
 - A distinctive Mellow-based visual identity: a semantic theme layer, an
   adaptive ASCII welcome scene, the Koda familiar and personality-rich empty
@@ -153,6 +154,7 @@ and establishes language context automatically.
 | `Ctrl+/` | Toggle comment |
 | `F8` / `Shift+F8` | Next / previous diagnostic |
 | `Ctrl+Shift+O` | Go to symbol in the active file |
+| `Ctrl+T` | Go to symbol in the workspace |
 | `F12` / `Shift+F12` | Go to definition / find references |
 | `Tab` / `Shift+Tab` | Indent / outdent selection |
 | `Alt+↑` / `Alt+↓` | Move line up / down |

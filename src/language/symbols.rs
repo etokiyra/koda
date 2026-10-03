@@ -9,6 +9,15 @@
 //! the start of a statement, so requiring the keyword to be preceded only by
 //! modifiers keeps false positives (a `fn` inside a string, say) out.
 
+use std::path::PathBuf;
+
+/// A named definition together with the file it lives in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceSymbol {
+    pub path: PathBuf,
+    pub symbol: Symbol,
+}
+
 /// What kind of thing a symbol is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SymbolKind {

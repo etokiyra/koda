@@ -58,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the cursor showing what the word is: its definition kind and source line when
   it is defined in the file, plus how many times it occurs. The provider owns
   the content, so language-server hover can replace it later.
+- Added project-wide symbol search. **Go to Symbol in Workspace…** (`Ctrl+T`)
+  scans the project on the background worker and lists every Rust/Go definition
+  in a filterable picker; choosing one opens its file and jumps to it. Files are
+  mapped by extension (no content reads) and oversized files are skipped.
 
 ### Performance
 

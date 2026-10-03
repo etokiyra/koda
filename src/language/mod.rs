@@ -26,6 +26,7 @@ pub use id::LanguageId;
 pub use provider::{
     Capability, HighlightSpan, HighlightState, LanguageProvider, ProviderRegistry, TokenKind,
 };
+pub use symbols::WorkspaceSymbol;
 
 use detection::{DetectionEngine, DetectionResult};
 
@@ -62,6 +63,60 @@ impl LanguageService {
             project_markers,
             content_sample: content.as_deref(),
         })
+    }
+
+    /// Resolve a file extension to a language, using provider descriptors.
+    ///
+    /// Used for bulk tasks such as workspace symbol search, where reading every
+    /// file for content-based detection would be too expensive.
+    pub fn language_for_extension(&self, extension: &str) -> Option<LanguageId> {
+        self.registry.iter().find_map(|provider| {
+            provider
+                .descriptor()
+                .extensions
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+                .then(|| provider.id())
+        })
+    }
+
+    /// Scan a project for named definitions, up to `limit` symbols.
+    ///
+    /// Intended for the background worker: it reads each source file once and
+    /// reuses the providers' symbol scanners.
+    pub fn workspace_symbols(&self, root: &Path, limit: usize) -> Vec<WorkspaceSymbol> {
+        const MAX_FILE_BYTES: u64 = 512 * 1024;
+        let mut found = Vec::new();
+        for path in crate::filesystem::collect_files(root, 3000) {
+            if found.len() >= limit {
+                break;
+            }
+            let Some(extension) = path.extension().and_then(|e| e.to_str()) else {
+                continue;
+            };
+            let Some(language) = self.language_for_extension(extension) else {
+                continue;
+            };
+            let Ok(metadata) = std::fs::metadata(&path) else {
+                continue;
+            };
+            if metadata.len() > MAX_FILE_BYTES {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for symbol in self.provider(language).symbols(&text) {
+                found.push(WorkspaceSymbol {
+                    path: path.clone(),
+                    symbol,
+                });
+                if found.len() >= limit {
+                    break;
+                }
+            }
+        }
+        found
     }
 }
 

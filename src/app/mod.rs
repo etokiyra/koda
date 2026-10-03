@@ -21,7 +21,7 @@ use crate::language::completion::{Completion, CompletionKind};
 use crate::language::diagnostics::Severity;
 use crate::language::format::FormatOutcome;
 use crate::language::symbols::is_ident_char as is_word_char;
-use crate::language::{Capability, LanguageId, LanguageService};
+use crate::language::{Capability, LanguageId, LanguageService, WorkspaceSymbol};
 use crate::project::Workspace;
 use crate::terminal;
 use crate::ui;
@@ -85,6 +85,10 @@ pub struct App {
     format_seq: u64,
     /// The format request awaiting a result, if any.
     pending_format: Option<(PathBuf, u64)>,
+    /// Monotonic id for workspace symbol scans.
+    workspace_symbols_seq: u64,
+    /// The workspace symbol scan awaiting a result, if any.
+    pending_workspace_symbols: Option<u64>,
 }
 
 impl App {
@@ -128,6 +132,8 @@ impl App {
             diagnostics_dirty_at: None,
             format_seq: 0,
             pending_format: None,
+            workspace_symbols_seq: 0,
+            pending_workspace_symbols: None,
         };
 
         if let Some(path) = target
@@ -240,6 +246,7 @@ impl App {
                     ('b', _) => self.toggle_tree(),
                     ('e', _) => self.focus_tree(),
                     ('w', _) => self.execute_command(ids::CLOSE_TAB),
+                    ('t', _) => self.open_workspace_symbols(),
                     ('i', true) => self.execute_command(ids::FORMAT),
                     _ => return false,
                 }
@@ -737,6 +744,7 @@ impl App {
             ids::PASTE => self.paste(),
             ids::COMPLETE => self.open_completion(),
             ids::HOVER => self.open_hover(),
+            ids::WORKSPACE_SYMBOLS => self.open_workspace_symbols(),
             ids::FIND => self.open_search(false),
             ids::REPLACE => self.open_search(true),
             ids::GOTO_LINE => self.open_prompt(PromptKind::GotoLine, "Go to line", "42"),
@@ -1166,7 +1174,60 @@ impl App {
                 self.workspace.git = info;
                 true
             }
+            BackgroundEvent::WorkspaceSymbols { revision, symbols } => {
+                if self.pending_workspace_symbols != Some(revision) {
+                    return false;
+                }
+                self.pending_workspace_symbols = None;
+                self.open_workspace_symbol_picker(symbols);
+                true
+            }
         }
+    }
+
+    /// Ask the background worker to scan the project for definitions.
+    fn open_workspace_symbols(&mut self) {
+        self.workspace_symbols_seq += 1;
+        let revision = self.workspace_symbols_seq;
+        self.pending_workspace_symbols = Some(revision);
+        self.background
+            .workspace_symbols(self.workspace.root().to_path_buf(), revision);
+        self.set_status("Searching for symbols…");
+    }
+
+    fn open_workspace_symbol_picker(&mut self, symbols: Vec<WorkspaceSymbol>) {
+        if symbols.is_empty() {
+            self.set_status("No symbols found");
+            return;
+        }
+        let root = self.workspace.root().to_path_buf();
+        let items = symbols
+            .into_iter()
+            .map(|entry| {
+                let relative = entry
+                    .path
+                    .strip_prefix(&root)
+                    .unwrap_or(&entry.path)
+                    .display()
+                    .to_string();
+                let detail = format!(
+                    "{}  ·  {relative}:{}",
+                    entry.symbol.kind.label(),
+                    entry.symbol.line + 1
+                );
+                PickerItem::new(
+                    entry.symbol.name,
+                    detail,
+                    PickerAction::Reveal {
+                        path: entry.path,
+                        position: Position::new(entry.symbol.line, entry.symbol.col),
+                    },
+                )
+            })
+            .collect();
+        let mut picker = Picker::new("Workspace Symbols", "Filter symbols…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
     }
 
     /// Format the active document with the language's trusted formatter.
@@ -2399,6 +2460,43 @@ mod tests {
         let hover = app.hover.as_ref().expect("hover should open");
         assert!(hover.title.contains("helper"), "title was {}", hover.title);
         assert!(hover.body.iter().any(|line| line.contains("occurrence")));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn workspace_symbols_lists_definitions_across_files() {
+        let dir = temp_project("workspace-symbols");
+        let a = dir.join("src/main.rs");
+        let b = dir.join("src/lib.rs");
+        fs::write(&b, "pub fn beta() {}\n").unwrap();
+
+        let mut app = App::new(Some(&a)).unwrap();
+        app.open_workspace_symbols();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            app.apply_background_events();
+            if !matches!(app.overlay, Overlay::None) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        let Overlay::Picker(picker) = &app.overlay else {
+            panic!("expected the workspace symbol list");
+        };
+        let labels: Vec<String> = (0..picker.filtered.len())
+            .filter_map(|index| picker.item(index))
+            .map(|item| item.label.clone())
+            .collect();
+        assert!(
+            labels.iter().any(|label| label == "beta"),
+            "labels: {labels:?}"
+        );
+        assert!(
+            labels.iter().any(|label| label == "main"),
+            "labels: {labels:?}"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 }

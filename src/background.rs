@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use crate::git::GitInfo;
 use crate::language::LanguageService;
+use crate::language::WorkspaceSymbol;
 use crate::language::detection::Confidence;
 use crate::language::diagnostics::Diagnostic;
 use crate::language::format::FormatOutcome;
@@ -39,6 +40,8 @@ enum Request {
         text: String,
         revision: u64,
     },
+    /// Scan a project for named definitions.
+    WorkspaceSymbols { root: PathBuf, revision: u64 },
     /// Recompute git status for a repository root.
     RefreshGit { root: PathBuf },
 }
@@ -59,6 +62,10 @@ pub enum Event {
         path: PathBuf,
         revision: u64,
         outcome: FormatOutcome,
+    },
+    WorkspaceSymbols {
+        revision: u64,
+        symbols: Vec<WorkspaceSymbol>,
     },
     Git(GitInfo),
 }
@@ -114,6 +121,10 @@ impl Background {
                                 outcome,
                             });
                         }
+                        Request::WorkspaceSymbols { root, revision } => {
+                            let symbols = language.workspace_symbols(&root, 3000);
+                            let _ = event_tx.send(Event::WorkspaceSymbols { revision, symbols });
+                        }
                         Request::RefreshGit { root } => {
                             let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
                         }
@@ -152,6 +163,13 @@ impl Background {
             text,
             revision,
         });
+    }
+
+    /// Ask for a project-wide symbol scan.
+    pub fn workspace_symbols(&self, root: PathBuf, revision: u64) {
+        let _ = self
+            .requests
+            .send(Request::WorkspaceSymbols { root, revision });
     }
 
     /// Ask for git status to be refreshed.

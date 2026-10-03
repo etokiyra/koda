@@ -45,6 +45,8 @@ pub mod ids {
     pub const DIAGNOSTICS_PREV: &str = "diagnostics.previous";
     pub const DIAGNOSTICS_LIST: &str = "diagnostics.list";
 
+    pub const WORKSPACE_SYMBOLS: &str = "project.symbols";
+
     pub const TOGGLE_TREE: &str = "view.toggleTree";
     pub const FOCUS_TREE: &str = "view.focusTree";
     pub const TOGGLE_HIDDEN: &str = "view.toggleHidden";
@@ -244,6 +246,13 @@ impl CommandRegistry {
             Command::new(DIAGNOSTICS_LIST, "Show Diagnostics", "Diagnostics", None)
                 .describes("List every problem in open files")
                 .needs_doc(),
+            Command::new(
+                WORKSPACE_SYMBOLS,
+                "Go to Symbol in Workspace…",
+                "Project",
+                Some("Ctrl+T"),
+            )
+            .describes("Search every definition in the project"),
             Command::new(TOGGLE_TREE, "Toggle File Tree", "View", Some("Ctrl+B"))
                 .describes("Show or hide the project sidebar"),
             Command::new(
