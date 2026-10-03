@@ -17,6 +17,10 @@ use koda::language::lsp::Server;
 use koda::language::tools::{Tool, ToolRegistry, launch_env};
 
 fn handshake(tool: Tool, language: LanguageId) {
+    handshake_with(tool, language, |_| {});
+}
+
+fn handshake_with(tool: Tool, language: LanguageId, prepare: impl FnOnce(&std::path::Path)) {
     let registry = ToolRegistry::discover();
     // A tool is usable only when its probe succeeds: `perl` may exist while
     // `Perl::LanguageServer` is not installed, or `dart` may be absent.
@@ -30,6 +34,7 @@ fn handshake(tool: Tool, language: LanguageId) {
     };
     let root = std::env::temp_dir().join("koda-live-optional");
     std::fs::create_dir_all(&root).expect("temp root");
+    prepare(&root);
     let env = launch_env(tool);
     let mut server = Server::start_with_env(
         language,
@@ -86,6 +91,22 @@ fn elixir_handshake() {
 #[ignore = "requires the Swift toolchain"]
 fn swift_handshake() {
     handshake(Tool::SwiftLs, LanguageId::Swift);
+}
+
+#[test]
+#[ignore = "requires the Swift toolchain"]
+fn swift_package_handshake() {
+    // Exercise SwiftPM project-root handling: a `Package.swift` and a source
+    // file make sourcekit-lsp treat the root as a package.
+    handshake_with(Tool::SwiftLs, LanguageId::Swift, |root| {
+        let _ = std::fs::write(
+            root.join("Package.swift"),
+            "// swift-tools-version:5.9\nimport PackageDescription\nlet package = Package(name: \"Probe\")\n",
+        );
+        let sources = root.join("Sources/Probe");
+        let _ = std::fs::create_dir_all(&sources);
+        let _ = std::fs::write(sources.join("main.swift"), "print(\"hi\")\n");
+    });
 }
 
 #[test]
