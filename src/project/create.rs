@@ -24,6 +24,7 @@ pub const CREATABLE: &[LanguageId] = &[
     LanguageId::Java,
     LanguageId::CSharp,
     LanguageId::Php,
+    LanguageId::Lua,
     LanguageId::Html,
     LanguageId::Shell,
     LanguageId::C,
@@ -46,6 +47,7 @@ pub fn describe(language: LanguageId) -> &'static str {
         LanguageId::Java => "pom.xml + src/main/java/<package>",
         LanguageId::CSharp => "a .csproj + Program.cs",
         LanguageId::Php => "composer.json + index.php",
+        LanguageId::Lua => "init.lua + .luarc.json",
         LanguageId::Html => "index.html + style.css",
         LanguageId::Shell => "an executable <name>.sh",
         LanguageId::C => "CMakeLists.txt + src/main.c",
@@ -152,6 +154,7 @@ pub fn create(parent: &Path, name: &str, language: LanguageId) -> CreateOutcome 
         LanguageId::Java => java(&root, name),
         LanguageId::CSharp => csharp(&root, name),
         LanguageId::Php => php(&root, name),
+        LanguageId::Lua => lua(&root, name),
         LanguageId::Html => html(&root, name),
         LanguageId::Shell => shell(&root, name),
         LanguageId::C => c(&root, name),
@@ -343,6 +346,18 @@ fn php(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         write(root, "composer.json", &composer)?,
         write(root, "index.php", &index)?,
         write(root, ".gitignore", "/vendor/\n")?,
+    ])
+}
+
+fn lua(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let script = format!(
+        "local M = {{}}\n\nfunction M.greet()\n  print(\"Hello from {name}!\")\nend\n\nreturn M\n"
+    );
+    let config = "{\n  \"runtime.version\": \"Lua 5.4\"\n}\n";
+    Ok(vec![
+        write(root, "init.lua", &script)?,
+        write(root, ".luarc.json", config)?,
+        write(root, ".gitignore", "*.luac\n")?,
     ])
 }
 
@@ -663,6 +678,22 @@ mod tests {
         assert!(composer.contains("\"name\": \"koda/my-service\""));
         // The generated project is recognised as a PHP project by its marker.
         assert_eq!(crate::project::ProjectKind::Php.language(), LanguageId::Php);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scaffolds_lua() {
+        let dir = scratch("lua");
+        let parent = dir.join("parent");
+        std::fs::create_dir_all(&parent).unwrap();
+        let CreateOutcome::Created { root, .. } = create(&parent, "my mod", LanguageId::Lua) else {
+            panic!("expected Lua success");
+        };
+        assert!(root.join("init.lua").is_file());
+        assert!(root.join(".luarc.json").is_file());
+        let script = std::fs::read_to_string(root.join("init.lua")).unwrap();
+        assert!(script.contains("Hello from my mod!"));
+        assert_eq!(crate::project::ProjectKind::Lua.language(), LanguageId::Lua);
         std::fs::remove_dir_all(&dir).ok();
     }
 

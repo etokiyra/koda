@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-434%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-442%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -144,6 +144,7 @@ channel, so provenance and integrity stay with the package manager:
 | `jdtls` | Java language server | a managed Adoptium JDK 25 + Eclipse JDT |
 | `omnisharp` | C# language server | a managed .NET SDK + OmniSharp |
 | `phpactor` | PHP language server | detected if installed (`composer global require phpactor/phpactor`) |
+| `lua-language-server` | Lua language server | a self-contained download managed by Koda |
 | `vscode-html-language-server` | HTML language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
 | `vscode-css-language-server` | CSS language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
 | `rustfmt` | Rust formatting | `rustup component add rustfmt` |
@@ -183,6 +184,7 @@ managed prefix.
 | **PHP** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
 | **HTML** | built-in | built-in + LSP | built-in (ids) | built-in | built-in | LSP | LSP |
 | **CSS** | built-in | built-in + LSP | built-in (selectors) | built-in | built-in | LSP | LSP |
+| **Lua** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **Shell** | built-in | LSP | built-in (functions) | built-in | built-in | built-in | — |
 | **Markdown** | built-in | — | built-in (headings) | — | — | — | — |
 | **JSON** | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — |
@@ -340,8 +342,8 @@ the home screen back.
 2. **Name it** — the name is validated for your platform and checked against
    the chosen folder so an existing project is never overwritten.
 3. **Pick a language** — Rust, Go, Python, TypeScript, JavaScript, Java, C#,
-   PHP, HTML, Shell, C or C++, each shown with what Koda will generate. `Esc`
-   steps back at any point.
+   PHP, Lua, HTML, Shell, C or C++, each shown with what Koda will generate.
+   `Esc` steps back at any point.
 
 Koda then scaffolds the project without a network connection or a toolchain and
 opens it, ready to edit:
@@ -356,6 +358,7 @@ opens it, ready to edit:
 | **Java** | `pom.xml`, `src/main/java/…/App.java`, `.gitignore` |
 | **C#** | a `*.csproj`, `Program.cs`, `.gitignore` |
 | **PHP** | `composer.json`, `index.php`, `.gitignore` |
+| **Lua** | `init.lua`, `.luarc.json`, `.gitignore` |
 | **HTML** | `index.html` and `style.css` |
 | **Shell** | an executable `<name>.sh` (plus a `README.md`) |
 | **C** | `CMakeLists.txt`, `src/main.c`, `.gitignore` |
@@ -466,6 +469,7 @@ src/
 │   ├── php/        # PHP provider (built-in, offline)
 │   ├── html/       # HTML provider (tags, ids)
 │   ├── css/        # CSS provider (selectors, properties)
+│   ├── lua/        # Lua provider (built-in, offline)
 │   ├── markdown/   # Markdown provider (headings as symbols)
 │   └── json|toml|yaml/  # configuration-data providers
 ├── project/      # workspace, project detection, file tree, templates

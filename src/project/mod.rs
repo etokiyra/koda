@@ -22,6 +22,7 @@ pub enum ProjectKind {
     Java,
     CSharp,
     Php,
+    Lua,
     Generic,
 }
 
@@ -42,6 +43,7 @@ pub const KNOWN_MARKERS: &[(&str, ProjectKind)] = &[
     ("settings.gradle.kts", ProjectKind::Java),
     ("global.json", ProjectKind::CSharp),
     ("composer.json", ProjectKind::Php),
+    (".luarc.json", ProjectKind::Lua),
 ];
 
 /// Markers identified by a file-name suffix rather than an exact name, which
@@ -60,6 +62,7 @@ impl ProjectKind {
             ProjectKind::Java => "Java",
             ProjectKind::CSharp => "C#",
             ProjectKind::Php => "PHP",
+            ProjectKind::Lua => "Lua",
             ProjectKind::Generic => "Workspace",
         }
     }
@@ -72,6 +75,7 @@ impl ProjectKind {
             ProjectKind::Java => LanguageId::Java,
             ProjectKind::CSharp => LanguageId::CSharp,
             ProjectKind::Php => LanguageId::Php,
+            ProjectKind::Lua => LanguageId::Lua,
             ProjectKind::Generic => LanguageId::Unknown,
         }
     }

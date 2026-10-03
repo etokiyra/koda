@@ -24,6 +24,7 @@ pub mod id;
 pub mod java;
 pub mod json;
 pub mod lsp;
+pub mod lua;
 pub mod markdown;
 pub mod php;
 pub mod provider;

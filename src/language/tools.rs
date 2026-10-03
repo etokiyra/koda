@@ -36,6 +36,11 @@ const PROBE_ALIVE_WINDOW: Duration = Duration::from_millis(600);
 /// language servers into Koda's managed prefix.
 const NODE_VERSION: &str = "24.21.0";
 
+/// The `lua-language-server` release Koda provisions. It ships a self-contained
+/// archive per platform (no runtime required), so the version is pinned for a
+/// stable download URL.
+const LUA_LS_VERSION: &str = "3.19.1";
+
 /// The longest a single install command may run before it is killed. Package
 /// managers can legitimately take a while on a slow link, but a hung process
 /// must never wedge the background worker forever.
@@ -61,6 +66,7 @@ pub enum Tool {
     Jdtls,
     OmniSharp,
     Phpactor,
+    LuaLs,
     HtmlLs,
     CssLs,
     Rustfmt,
@@ -86,6 +92,7 @@ impl Tool {
         Tool::Jdtls,
         Tool::OmniSharp,
         Tool::Phpactor,
+        Tool::LuaLs,
         Tool::HtmlLs,
         Tool::CssLs,
         Tool::Rustfmt,
@@ -103,6 +110,7 @@ impl Tool {
             Tool::Jdtls => "jdtls",
             Tool::OmniSharp => "OmniSharp",
             Tool::Phpactor => "phpactor",
+            Tool::LuaLs => "lua-language-server",
             Tool::HtmlLs => "vscode-html-language-server",
             Tool::CssLs => "vscode-css-language-server",
             Tool::Rustfmt => "rustfmt",
@@ -121,6 +129,7 @@ impl Tool {
             Tool::Jdtls => "jdtls",
             Tool::OmniSharp => "omnisharp",
             Tool::Phpactor => "phpactor",
+            Tool::LuaLs => "lua-language-server",
             Tool::HtmlLs => "vscode-html-language-server",
             Tool::CssLs => "vscode-css-language-server",
             Tool::Rustfmt => "rustfmt",
@@ -139,6 +148,7 @@ impl Tool {
             Tool::Jdtls => LanguageId::Java,
             Tool::OmniSharp => LanguageId::CSharp,
             Tool::Phpactor => LanguageId::Php,
+            Tool::LuaLs => LanguageId::Lua,
             Tool::HtmlLs => LanguageId::Html,
             Tool::CssLs => LanguageId::Css,
         }
@@ -163,6 +173,7 @@ impl Tool {
             | Tool::Jdtls
             | Tool::OmniSharp
             | Tool::Phpactor
+            | Tool::LuaLs
             | Tool::HtmlLs
             | Tool::CssLs => ToolPurpose::LanguageServer,
             Tool::Rustfmt | Tool::Gofmt => ToolPurpose::Formatter,
@@ -180,6 +191,7 @@ impl Tool {
             | Tool::TypeScriptLs
             | Tool::Clangd
             | Tool::Phpactor
+            | Tool::LuaLs
             | Tool::HtmlLs
             | Tool::CssLs => &["--version"],
             Tool::Gopls => &["version"],
@@ -231,6 +243,7 @@ impl Tool {
             Tool::Jdtls => "Koda can install a managed JDK and Eclipse JDT",
             Tool::OmniSharp => "Koda can install the .NET SDK and OmniSharp",
             Tool::Phpactor => "install phpactor with `composer global require phpactor/phpactor`",
+            Tool::LuaLs => "Koda can install a self-contained lua-language-server",
             Tool::HtmlLs | Tool::CssLs => "install with npm — Koda provisions Node.js if missing",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
@@ -267,6 +280,9 @@ impl Tool {
             // `phpactor` is a Composer package; Koda uses it when present
             // rather than installing Composer and modifying the user's setup.
             Tool::Phpactor => None,
+            // `lua-language-server` is installed by Koda's own managed download
+            // plan rather than a package-manager command.
+            Tool::LuaLs => None,
             // `jdtls` and `OmniSharp` are installed by Koda's own managed
             // download plan rather than a single package-manager command.
             Tool::Jdtls | Tool::OmniSharp => None,
@@ -292,6 +308,7 @@ impl Tool {
             // `jdtls` is a Python launcher script.
             Tool::Jdtls => &["python3"],
             Tool::Clangd | Tool::OmniSharp | Tool::Phpactor => &[],
+            Tool::LuaLs => &[],
         }
     }
 
@@ -329,6 +346,9 @@ impl Tool {
             // `phpactor` is discovered when installed; Koda does not install
             // Composer or modify the user's global setup.
             Tool::Phpactor => Vec::new(),
+            // `lua-language-server` ships a self-contained, runtime-free archive
+            // per platform, so Koda manages it like the JDK and OmniSharp.
+            Tool::LuaLs => lua_ls_attempts(),
             Tool::Jdtls => jdtls_attempts(),
             Tool::OmniSharp => omnisharp_attempts(),
             Tool::HtmlLs | Tool::CssLs => npm_attempts(&["vscode-langservers-extracted"]),
@@ -1361,6 +1381,7 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         }
         dirs.push(tools.join("omnisharp"));
         dirs.push(tools.join("jdtls/bin"));
+        dirs.push(tools.join("lua-language-server/bin"));
         dirs.push(tools.join("jdk/bin"));
         dirs.push(tools.join("dotnet"));
         dirs.push(tools.join("bin"));
@@ -1446,6 +1467,11 @@ pub fn omnisharp_dir() -> Option<PathBuf> {
 /// Koda's managed `jdtls` directory.
 pub fn jdtls_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("jdtls"))
+}
+
+/// Koda's managed `lua-language-server` directory.
+pub fn lua_ls_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("lua-language-server"))
 }
 
 /// Scratch space for downloaded archives.
@@ -1546,6 +1572,55 @@ fn jdtls_attempts() -> Vec<InstallAttempt> {
     )]
 }
 
+/// A self-contained `lua-language-server` release for this platform, or `None`
+/// when the project publishes none.
+fn lua_ls_asset() -> Option<String> {
+    let (triple, extension) = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => ("linux-x64", "tar.gz"),
+        ("linux", "aarch64") => ("linux-arm64", "tar.gz"),
+        ("macos", "x86_64") => ("darwin-x64", "tar.gz"),
+        ("macos", "aarch64") => ("darwin-arm64", "tar.gz"),
+        ("windows", "x86_64") => ("win32-x64", "zip"),
+        _ => return None,
+    };
+    Some(format!(
+        "lua-language-server-{LUA_LS_VERSION}-{triple}.{extension}"
+    ))
+}
+
+/// Download and unpack the self-contained Lua language server.
+///
+/// The archive extracts its `bin/`, `main.lua` and `script/` at the top level,
+/// so `tools/lua-language-server/bin/lua-language-server` is the launcher. It
+/// needs no runtime, which is why Koda can provision it unconditionally.
+fn lua_ls_attempts() -> Vec<InstallAttempt> {
+    let Some(asset) = lua_ls_asset() else {
+        return Vec::new();
+    };
+    let (Some(downloads), Some(dest)) = (downloads_dir(), lua_ls_dir()) else {
+        return Vec::new();
+    };
+    let archive = downloads.join(&asset);
+    let url = format!(
+        "https://github.com/LuaLS/lua-language-server/releases/download/{LUA_LS_VERSION}/{asset}"
+    );
+    vec![InstallAttempt::managed(
+        "a self-contained lua-language-server",
+        vec![
+            InstallStep::Download {
+                url,
+                dest: archive.clone(),
+                sha256: None,
+            },
+            InstallStep::Extract {
+                archive,
+                dest,
+                strip: 0,
+            },
+        ],
+    )]
+}
+
 /// OmniSharp plus the .NET SDK it runs on, both managed by Koda.
 fn omnisharp_attempts() -> Vec<InstallAttempt> {
     let Some(asset) = omnisharp_asset() else {
@@ -1629,6 +1704,7 @@ mod tests {
                     | LanguageId::Java
                     | LanguageId::CSharp
                     | LanguageId::Php
+                    | LanguageId::Lua
                     | LanguageId::Html
                     | LanguageId::Css
             ));
@@ -1678,6 +1754,33 @@ mod tests {
                     .any(|step| matches!(step, InstallStep::Extract { .. }))
             );
         }
+    }
+
+    #[test]
+    fn lua_tool_is_self_contained_and_managed() {
+        assert_eq!(
+            Tool::for_language(LanguageId::Lua, ToolPurpose::LanguageServer),
+            Some(Tool::LuaLs)
+        );
+        assert!(
+            Tool::LuaLs.server_args().is_empty(),
+            "lua-language-server speaks stdio with no arguments"
+        );
+        if lua_ls_asset().is_none() || tools_dir().is_none() {
+            return; // No published archive for this platform.
+        }
+        let attempts = Tool::LuaLs.install_attempts();
+        let steps = &attempts.first().expect("a Lua language server plan").steps;
+        assert!(
+            steps
+                .iter()
+                .any(|step| matches!(step, InstallStep::Download { .. }))
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| matches!(step, InstallStep::Extract { strip: 0, .. }))
+        );
     }
 
     #[test]

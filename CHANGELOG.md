@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Lua support
+
+- Added **Lua** as a built-in, offline language: `--` line comments,
+  `--[[ … ]]` block comments (carried across lines), single- and double-quoted
+  strings, `[[ … ]]` and `[=[ … ]=]` long strings, numbers, keywords, builtins
+  and operators. Structural diagnostics reuse the shared delimiter checker, and
+  functions and methods (`function M:run`, `M.stop = function`) appear in the
+  symbol outline with within-file completion, hover, definition and references.
+- Detection understands `.lua`, a `lua` shebang and a `.luarc.json` project
+  marker (which also gives Lua its own workspace kind). New projects scaffold
+  `init.lua` + `.luarc.json`.
+- **Zero configuration:** Koda provisions `lua-language-server` itself. Its
+  release archive is self-contained (no Node, JDK or other runtime), so Koda
+  downloads and unpacks it under its data directory, verifies it with the
+  server's own `--version`, and starts it over stdio — giving completion,
+  hover, diagnostics, navigation, symbols, rename and code actions with no
+  manual setup at all. A live handshake test guards the whole path.
+
 ### Soft wrap
 
 - Added **soft wrap** for long lines (`Alt+Z`, or **Toggle Soft Wrap** in the

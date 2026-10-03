@@ -51,6 +51,7 @@ mod tests {
                 LanguageId::Php => &["php", "phtml"],
                 LanguageId::Html => &["html", "htm"],
                 LanguageId::Css => &["css"],
+                LanguageId::Lua => &["lua"],
                 LanguageId::Unknown => &[],
             },
             project_markers: match id {

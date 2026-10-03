@@ -28,6 +28,7 @@ C / C++ → built-in, offline (clangd when present)
 Java → built-in, offline (managed Eclipse JDT)
 C# → built-in, offline (managed OmniSharp)
 PHP → built-in, offline (phpactor when present)
+Lua → built-in, offline (managed lua-language-server)
 HTML / CSS → built-in, offline (npm servers)
 then expand
 ```
@@ -225,6 +226,11 @@ command palette already reports which are available. Filling them in is additive
       builtins and operators; structural diagnostics, symbols (functions,
       classes, interfaces, traits, enums, constants, namespaces) and offline
       completion/hover/navigation, with `phpactor` driven over LSP when present.
+- [x] Lua support: `--` and `--[[ … ]]` comments, quoted and long strings,
+      numbers, keywords, builtins and operators; structural diagnostics,
+      functions and methods as symbols, offline completion/hover/navigation, and
+      a fully managed, self-contained `lua-language-server` for the full LSP
+      feature set with no runtime to install.
 - [x] HTML and CSS built-in support: tag/attribute and selector/property
       highlighting, tag- and brace-balance diagnostics, id/selector symbols,
       completion and hover, with `vscode-langservers-extracted` provisioned for
