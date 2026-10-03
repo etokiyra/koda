@@ -20,6 +20,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -27,6 +28,11 @@ use crate::language::diagnostics::{Diagnostic, Severity, TextPos};
 use crate::language::id::LanguageId;
 
 use jsonrpc::Message;
+
+/// How long the server has to answer a request before Koda gives up and clears
+/// the pending state. Formatting can legitimately take longer than the others.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const FORMAT_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// How a server counts the `character` offset in a `{line, character}` position.
 ///
@@ -110,9 +116,11 @@ pub enum ServerEvent {
     /// The `initialize` handshake completed; the server accepts document
     /// notifications.
     Ready,
-    /// Fresh diagnostics for a document.
+    /// Fresh diagnostics for a document. `version` is the document version the
+    /// server computed them against, when it reported one.
     Diagnostics {
         path: PathBuf,
+        version: Option<i64>,
         diagnostics: Vec<Diagnostic>,
     },
     /// The answer to a [`RequestKind`] request. The `id` is the JSON-RPC id the
@@ -130,6 +138,12 @@ pub enum ServerEvent {
     Failed(String),
 }
 
+/// A request awaiting a response, with the deadline that bounds it.
+struct PendingRequest {
+    kind: RequestKind,
+    deadline: Instant,
+}
+
 /// A language server process and its message loop.
 pub struct Server {
     child: Child,
@@ -140,7 +154,7 @@ pub struct Server {
     ready: bool,
     root: PathBuf,
     versions: HashMap<PathBuf, i64>,
-    pending: HashMap<i64, RequestKind>,
+    pending: HashMap<i64, PendingRequest>,
     language: LanguageId,
     /// The encoding the server uses for `character` offsets.
     encoding: PositionEncoding,
@@ -430,44 +444,55 @@ impl Server {
         .ok()
     }
 
-    /// Ask the server for hover information at a position.
-    pub fn hover(&mut self, path: &Path, line: usize, col: usize) {
-        let _ = self.send_request(
+    /// Ask the server for hover information at a position, returning the
+    /// request id so a late answer can be discarded.
+    pub fn hover(&mut self, path: &Path, line: usize, col: usize) -> Option<i64> {
+        self.send_request(
             RequestKind::Hover,
             "textDocument/hover",
             position_params(path, line, col),
-        );
+        )
+        .ok()
     }
 
-    /// Ask the server for the definition at a position.
-    pub fn definition(&mut self, path: &Path, line: usize, col: usize) {
-        let _ = self.send_request(
+    /// Ask the server for the definition at a position, returning the request id
+    /// so the caller can ignore a response the cursor has moved past.
+    pub fn definition(&mut self, path: &Path, line: usize, col: usize) -> Option<i64> {
+        self.send_request(
             RequestKind::Definition,
             "textDocument/definition",
             position_params(path, line, col),
-        );
+        )
+        .ok()
     }
 
     /// Ask the server for every reference to the symbol at a position.
-    pub fn references(&mut self, path: &Path, line: usize, col: usize) {
+    pub fn references(&mut self, path: &Path, line: usize, col: usize) -> Option<i64> {
         let mut params = position_params(path, line, col);
         if let Some(object) = params.as_object_mut() {
             object.insert("context".to_string(), json!({ "includeDeclaration": true }));
         }
-        let _ = self.send_request(RequestKind::References, "textDocument/references", params);
+        self.send_request(RequestKind::References, "textDocument/references", params)
+            .ok()
     }
 
     /// Ask the server to rename the symbol at a position.
-    pub fn rename(&mut self, path: &Path, line: usize, col: usize, new_name: &str) {
+    pub fn rename(&mut self, path: &Path, line: usize, col: usize, new_name: &str) -> Option<i64> {
         let mut params = position_params(path, line, col);
         if let Some(object) = params.as_object_mut() {
             object.insert("newName".to_string(), json!(new_name));
         }
-        let _ = self.send_request(RequestKind::Rename, "textDocument/rename", params);
+        self.send_request(RequestKind::Rename, "textDocument/rename", params)
+            .ok()
     }
 
     /// Ask the server for code actions over a range.
-    pub fn code_action(&mut self, path: &Path, start: (usize, usize), end: (usize, usize)) {
+    pub fn code_action(
+        &mut self,
+        path: &Path,
+        start: (usize, usize),
+        end: (usize, usize),
+    ) -> Option<i64> {
         let params = json!({
             "textDocument": { "uri": path_to_uri(path) },
             "range": {
@@ -476,7 +501,8 @@ impl Server {
             },
             "context": { "diagnostics": [] }
         });
-        let _ = self.send_request(RequestKind::CodeActions, "textDocument/codeAction", params);
+        self.send_request(RequestKind::CodeActions, "textDocument/codeAction", params)
+            .ok()
     }
 
     /// Ask the server for workspace-wide symbols matching `query`.
@@ -508,6 +534,18 @@ impl Server {
     /// Drain pending events without blocking.
     pub fn poll(&mut self) -> Vec<ServerEvent> {
         let mut events = Vec::new();
+
+        // Expire requests the server never answered, so `pending` stays bounded
+        // and the UI is not left waiting forever.
+        let expired = expire_requests(&mut self.pending, Instant::now());
+        for (id, kind) in expired {
+            events.push(ServerEvent::Response {
+                kind,
+                id,
+                result: Err("request timed out".to_string()),
+            });
+        }
+
         loop {
             match self.events.try_recv() {
                 Ok(Message::Response { id, result, error }) => {
@@ -526,13 +564,13 @@ impl Server {
                             }
                             None => {}
                         }
-                    } else if let Some(kind) = self.pending.remove(&id_number) {
+                    } else if let Some(request) = self.pending.remove(&id_number) {
                         let result = match error {
                             Some(error) => Err(error.message),
                             None => Ok(result.unwrap_or(Value::Null)),
                         };
                         events.push(ServerEvent::Response {
-                            kind,
+                            kind: request.kind,
                             id: id_number,
                             result,
                         });
@@ -541,6 +579,7 @@ impl Server {
                 Ok(Message::Notification { method, params }) => {
                     if method == "textDocument/publishDiagnostics"
                         && let Some(event) = parse_publish_diagnostics(&params)
+                        && !self.is_stale_diagnostics(&event)
                     {
                         events.push(event);
                     }
@@ -567,6 +606,24 @@ impl Server {
         events
     }
 
+    /// Whether published diagnostics are known to describe an older document
+    /// version than the server has since received.
+    ///
+    /// A missing version is accepted for compatibility; a present one that is
+    /// behind the last synchronized version is dropped so stale markers cannot
+    /// appear over newer text.
+    fn is_stale_diagnostics(&self, event: &ServerEvent) -> bool {
+        let ServerEvent::Diagnostics {
+            path,
+            version: Some(version),
+            ..
+        } = event
+        else {
+            return false;
+        };
+        diagnostics_are_stale(Some(*version), self.versions.get(path).copied())
+    }
+
     fn request(&mut self, method: &str, params: Value) -> io::Result<i64> {
         self.next_id += 1;
         let id = self.next_id;
@@ -579,7 +636,13 @@ impl Server {
 
     fn send_request(&mut self, kind: RequestKind, method: &str, params: Value) -> io::Result<i64> {
         let id = self.request(method, params)?;
-        self.pending.insert(id, kind);
+        self.pending.insert(
+            id,
+            PendingRequest {
+                kind,
+                deadline: Instant::now() + request_timeout(kind),
+            },
+        );
         Ok(id)
     }
 
@@ -663,13 +726,52 @@ fn parse_initialize(result: &Value) -> (PositionEncoding, ServerCapabilities) {
 
 fn parse_publish_diagnostics(params: &Value) -> Option<ServerEvent> {
     let path = uri_to_path(params.get("uri")?.as_str()?)?;
+    let version = params.get("version").and_then(Value::as_i64);
     let diagnostics = params
         .get("diagnostics")?
         .as_array()?
         .iter()
         .filter_map(parse_diagnostic)
         .collect();
-    Some(ServerEvent::Diagnostics { path, diagnostics })
+    Some(ServerEvent::Diagnostics {
+        path,
+        version,
+        diagnostics,
+    })
+}
+
+/// Whether diagnostics stamped with `version` are behind the version the server
+/// has since received.
+///
+/// A missing version on either side is treated as current, matching the
+/// protocol's optional field and servers that do not version diagnostics.
+fn diagnostics_are_stale(version: Option<i64>, current: Option<i64>) -> bool {
+    matches!((version, current), (Some(version), Some(current)) if version < current)
+}
+
+/// The deadline for a request of `kind`.
+fn request_timeout(kind: RequestKind) -> Duration {
+    if kind == RequestKind::Formatting {
+        FORMAT_REQUEST_TIMEOUT
+    } else {
+        REQUEST_TIMEOUT
+    }
+}
+
+/// Remove and return every request whose deadline has passed.
+fn expire_requests(
+    pending: &mut HashMap<i64, PendingRequest>,
+    now: Instant,
+) -> Vec<(i64, RequestKind)> {
+    let expired: Vec<i64> = pending
+        .iter()
+        .filter(|(_, request)| request.deadline <= now)
+        .map(|(id, _)| *id)
+        .collect();
+    expired
+        .into_iter()
+        .filter_map(|id| pending.remove(&id).map(|request| (id, request.kind)))
+        .collect()
 }
 
 fn parse_diagnostic(item: &Value) -> Option<Diagnostic> {
@@ -797,12 +899,16 @@ mod tests {
                 }
             ]
         });
-        let ServerEvent::Diagnostics { path, diagnostics } =
-            parse_publish_diagnostics(&params).expect("event")
+        let ServerEvent::Diagnostics {
+            path,
+            version,
+            diagnostics,
+        } = parse_publish_diagnostics(&params).expect("event")
         else {
             panic!("expected diagnostics");
         };
         assert_eq!(path, PathBuf::from("/tmp/main.rs"));
+        assert_eq!(version, None);
         assert_eq!(diagnostics.len(), 2);
         assert_eq!(diagnostics[0].severity, Severity::Error);
         assert_eq!(diagnostics[0].start, TextPos::new(1, 2));
@@ -868,5 +974,57 @@ cat >/dev/null
         assert_eq!(diagnostics[0].message, "boom");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parses_a_published_diagnostic_version() {
+        let params = json!({
+            "uri": "file:///tmp/a.rs",
+            "version": 7,
+            "diagnostics": []
+        });
+        match parse_publish_diagnostics(&params).expect("event") {
+            ServerEvent::Diagnostics { version, .. } => assert_eq!(version, Some(7)),
+            other => panic!("expected diagnostics, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn diagnostics_staleness_rules() {
+        assert!(diagnostics_are_stale(Some(1), Some(2)), "older is stale");
+        assert!(!diagnostics_are_stale(Some(2), Some(2)));
+        assert!(!diagnostics_are_stale(Some(3), Some(2)), "newer is kept");
+        assert!(!diagnostics_are_stale(None, Some(2)), "missing is kept");
+        assert!(!diagnostics_are_stale(Some(1), None));
+    }
+
+    #[test]
+    fn requests_expire_and_bounded() {
+        // Formatting is allowed longer than the other requests.
+        assert!(
+            request_timeout(RequestKind::Formatting) > request_timeout(RequestKind::Completion)
+        );
+
+        let now = Instant::now();
+        let mut pending = HashMap::new();
+        pending.insert(
+            1,
+            PendingRequest {
+                kind: RequestKind::Hover,
+                deadline: now - Duration::from_secs(1),
+            },
+        );
+        pending.insert(
+            2,
+            PendingRequest {
+                kind: RequestKind::Definition,
+                deadline: now + Duration::from_secs(60),
+            },
+        );
+
+        let expired = expire_requests(&mut pending, now);
+        assert_eq!(expired, vec![(1, RequestKind::Hover)]);
+        assert!(!pending.contains_key(&1), "expired entries are removed");
+        assert!(pending.contains_key(&2), "live entries are kept");
     }
 }

@@ -11,7 +11,78 @@ use serde_json::Value;
 use crate::language::completion::{Completion, CompletionKind};
 use crate::language::hover::Hover;
 
-use super::uri_to_path;
+use super::{PositionEncoding, uri_to_path};
+
+/// Convert a Koda **character** column into the `character` unit the server
+/// negotiated for a line.
+///
+/// Koda counts Unicode scalar values; LSP counts UTF-8 bytes, UTF-16 code units
+/// or code points depending on the connection. `col` is clamped to the line and
+/// the conversion always lands on a character boundary, so it never splits a
+/// code point.
+pub fn char_to_lsp(line: &str, col: usize, encoding: PositionEncoding) -> usize {
+    let col = col.min(line.chars().count());
+    match encoding {
+        PositionEncoding::Utf8 => line.chars().take(col).map(char::len_utf8).sum(),
+        PositionEncoding::Utf16 => line.chars().take(col).map(char::len_utf16).sum(),
+        PositionEncoding::Utf32 => col,
+    }
+}
+
+/// Convert an LSP `character` unit into a Koda character column.
+///
+/// Out-of-range or mid-code-point offsets are clamped to the end of the line
+/// rather than panicking, so a malformed server message degrades safely.
+pub fn lsp_to_char(line: &str, character: usize, encoding: PositionEncoding) -> usize {
+    match encoding {
+        PositionEncoding::Utf32 => character.min(line.chars().count()),
+        PositionEncoding::Utf8 => units_to_char(line, character, char::len_utf8),
+        PositionEncoding::Utf16 => units_to_char(line, character, char::len_utf16),
+    }
+}
+
+/// Walk `line`, consuming `units` of the given per-character width and returning
+/// the number of whole characters that fit.
+fn units_to_char(line: &str, mut units: usize, width: fn(char) -> usize) -> usize {
+    let mut chars = 0;
+    for c in line.chars() {
+        if units == 0 {
+            break;
+        }
+        units = units.saturating_sub(width(c));
+        chars += 1;
+    }
+    chars
+}
+
+/// Convert the LSP-encoded ranges of `edits` into Koda character positions.
+///
+/// `line_text` supplies the text of a (zero-based) line; every edit range is
+/// resolved against it so edits are applied at character offsets, never at a
+/// byte offset that could split a code point.
+pub fn edits_to_chars<F>(
+    edits: &[TextEdit],
+    line_text: F,
+    encoding: PositionEncoding,
+) -> Vec<TextEdit>
+where
+    F: Fn(usize) -> String,
+{
+    edits
+        .iter()
+        .map(|edit| TextEdit {
+            start: (
+                edit.start.0,
+                lsp_to_char(&line_text(edit.start.0), edit.start.1, encoding),
+            ),
+            end: (
+                edit.end.0,
+                lsp_to_char(&line_text(edit.end.0), edit.end.1, encoding),
+            ),
+            new_text: edit.new_text.clone(),
+        })
+        .collect()
+}
 
 /// A jump target from a definition or references response.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -400,6 +471,9 @@ pub fn signature_help(value: &Value) -> Option<SignatureHelp> {
 }
 
 /// A parameter label, either a string or `[start, end]` offsets into `label`.
+///
+/// LSP defines these offsets in **UTF-16 code units** regardless of the
+/// connection's position encoding, so they are converted explicitly.
 fn parameter_label(parameter: &Value, label: &str) -> Option<String> {
     match parameter.get("label")? {
         Value::String(text) => Some(text.clone()),
@@ -407,6 +481,8 @@ fn parameter_label(parameter: &Value, label: &str) -> Option<String> {
             let start = offsets.first()?.as_u64()? as usize;
             let end = offsets.get(1)?.as_u64()? as usize;
             let chars: Vec<char> = label.chars().collect();
+            let start = lsp_to_char(label, start, PositionEncoding::Utf16);
+            let end = lsp_to_char(label, end, PositionEncoding::Utf16);
             (start < end && end <= chars.len())
                 .then(|| chars[start..end].iter().collect::<String>())
         }
@@ -604,5 +680,97 @@ mod tests {
         );
         assert_eq!(actions[2].command.as_ref().unwrap().command, "do.thing");
         assert_eq!(actions[2].command.as_ref().unwrap().arguments, json!([1]));
+    }
+
+    /// A line mixing ASCII, an accented character (2 UTF-8 bytes), CJK (3 UTF-8
+    /// bytes), an emoji (4 UTF-8 bytes, 2 UTF-16 units) and a base+combining
+    /// pair (2 code points).
+    const MIXED: &str = "aé日本語😀e\u{0301}z";
+
+    fn char_count(text: &str) -> usize {
+        text.chars().count()
+    }
+
+    #[test]
+    fn encodes_and_decodes_utf8_and_utf16_round_trip() {
+        let chars = char_count(MIXED);
+        for encoding in [
+            PositionEncoding::Utf8,
+            PositionEncoding::Utf16,
+            PositionEncoding::Utf32,
+        ] {
+            // Every character boundary round-trips exactly.
+            for col in 0..=chars {
+                let units = char_to_lsp(MIXED, col, encoding);
+                assert_eq!(
+                    lsp_to_char(MIXED, units, encoding),
+                    col,
+                    "{encoding:?} round trip failed at char {col}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn utf8_units_are_bytes_and_utf16_units_are_code_units() {
+        // `é` is 2 UTF-8 bytes / 1 UTF-16 unit; the emoji is 4 / 2.
+        assert_eq!(char_to_lsp(MIXED, 2, PositionEncoding::Utf8), 3); // a(1)+é(2)
+        assert_eq!(char_to_lsp(MIXED, 2, PositionEncoding::Utf16), 2);
+        // Just past the emoji: a é 日 本 語 😀.
+        let after_emoji = 6;
+        assert_eq!(char_to_lsp(MIXED, after_emoji, PositionEncoding::Utf8), 16);
+        assert_eq!(char_to_lsp(MIXED, after_emoji, PositionEncoding::Utf16), 7);
+    }
+
+    #[test]
+    fn conversions_clamp_out_of_range_input() {
+        let chars = char_count(MIXED);
+        assert_eq!(lsp_to_char(MIXED, 9999, PositionEncoding::Utf16), chars);
+        assert_eq!(lsp_to_char("", 5, PositionEncoding::Utf8), 0);
+        // A mid-code-point byte/unit offset snaps forward to a whole character.
+        let units = char_to_lsp(MIXED, 2, PositionEncoding::Utf8) + 1; // inside `é`
+        assert_eq!(lsp_to_char(MIXED, units, PositionEncoding::Utf8), 3);
+    }
+
+    #[test]
+    fn edits_are_converted_to_character_offsets() {
+        let edits = vec![
+            text_edit((0, 3), (0, 3), "X"), // after `aé` in UTF-8 bytes
+            text_edit((1, 0), (1, 1), "Y"), // start of second line
+        ];
+        let lines = ["aé", "日本語"];
+        let converted =
+            edits_to_chars(&edits, |row| lines[row].to_string(), PositionEncoding::Utf8);
+        assert_eq!(converted[0].start, (0, 2));
+        assert_eq!(converted[0].end, (0, 2));
+        assert_eq!(converted[1].start, (1, 0));
+        // UTF-8 byte 1 and byte 4 are inside the first and second CJK
+        // characters (three bytes each), so they snap forward to char
+        // boundaries 1 and 2.
+        let edits = vec![text_edit((1, 1), (1, 4), "Y")];
+        let converted =
+            edits_to_chars(&edits, |row| lines[row].to_string(), PositionEncoding::Utf8);
+        assert_eq!(converted[0].start, (1, 1));
+        assert_eq!(converted[0].end, (1, 2));
+    }
+
+    fn text_edit(start: (usize, usize), end: (usize, usize), new_text: &str) -> TextEdit {
+        TextEdit {
+            start,
+            end,
+            new_text: new_text.to_string(),
+        }
+    }
+
+    #[test]
+    fn signature_parameter_offsets_are_utf16() {
+        // `é` before `)` shifts the offset; offsets are UTF-16 units.
+        let value = json!({
+            "signatures": [
+                { "label": "fn f(é, x)", "parameters": [ { "label": [5, 6] }, { "label": [8, 9] } ] }
+            ]
+        });
+        let help = signature_help(&value).expect("help");
+        assert_eq!(help.signatures[0].parameters, vec!["é", "x"]);
     }
 }

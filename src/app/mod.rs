@@ -25,7 +25,7 @@ use crate::language::completion::{Completion, CompletionKind};
 use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::format;
 use crate::language::format::FormatOutcome;
-use crate::language::lsp::{RequestKind, Server, ServerEvent, convert};
+use crate::language::lsp::{PositionEncoding, RequestKind, Server, ServerEvent, convert};
 use crate::language::provider::TokenKind;
 use crate::language::symbols::is_ident_char as is_word_char;
 use crate::language::tools::{Tool, ToolPurpose, ToolRegistry};
@@ -159,6 +159,34 @@ struct PendingCompletion {
     version: u64,
 }
 
+/// A document-sensitive language-server request.
+///
+/// The response may only be applied if it is still the newest request for its
+/// kind and the document has not changed since it was issued, so a slow server
+/// cannot edit or move the cursor over newer text.
+#[derive(Clone)]
+struct PendingDocRequest {
+    language: LanguageId,
+    id: i64,
+    path: PathBuf,
+    version: u64,
+}
+
+impl PendingDocRequest {
+    /// Whether `(language, id)` is still this request and the document at
+    /// `path` is still open with the same buffer version.
+    fn is_current(&self, app: &App, language: LanguageId, id: i64) -> bool {
+        if self.language != language || self.id != id {
+            return false;
+        }
+        app.editor
+            .documents
+            .iter()
+            .find(|doc| same_file(doc.buffer.path.as_deref(), &self.path))
+            .is_some_and(|doc| doc.buffer.version == self.version)
+    }
+}
+
 /// The tone of a notification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToastKind {
@@ -240,6 +268,9 @@ pub struct App {
     /// The id of the newest signature-help request, so an older response can be
     /// discarded when the cursor has moved on.
     signature_request: Option<(LanguageId, i64)>,
+    /// The id of the newest hover request, so a late answer cannot replace a
+    /// newer one.
+    hover_request: Option<(LanguageId, i64)>,
     /// Screen position of the editor cursor, updated during rendering.
     pub cursor_screen: Option<(u16, u16)>,
     pub tree_visible: bool,
@@ -271,8 +302,19 @@ pub struct App {
     format_seq: u64,
     /// The format request awaiting a result, if any.
     pending_format: Option<(PathBuf, u64)>,
-    /// A language-server formatting request awaiting a result.
-    pending_lsp_format: Option<(PathBuf, LanguageId, i64)>,
+    /// A language-server formatting request awaiting a result, with the buffer
+    /// version it was computed against.
+    pending_lsp_format: Option<(PathBuf, LanguageId, i64, u64)>,
+    /// An in-flight definition request.
+    pending_definition: Option<PendingDocRequest>,
+    /// An in-flight references request.
+    pending_references: Option<PendingDocRequest>,
+    /// An in-flight rename request.
+    pending_rename_request: Option<PendingDocRequest>,
+    /// An in-flight code-action request.
+    pending_code_action_request: Option<PendingDocRequest>,
+    /// The document and version the offered code actions were computed against.
+    pending_code_actions_context: Option<(PathBuf, u64)>,
     /// Monotonic id for workspace symbol scans.
     workspace_symbols_seq: u64,
     /// The workspace symbol scan awaiting a result, if any.
@@ -364,6 +406,7 @@ impl App {
             hover: None,
             signature: None,
             signature_request: None,
+            hover_request: None,
             cursor_screen: None,
             tree_visible: true,
             inline_diagnostics: true,
@@ -383,6 +426,11 @@ impl App {
             format_seq: 0,
             pending_format: None,
             pending_lsp_format: None,
+            pending_definition: None,
+            pending_references: None,
+            pending_rename_request: None,
+            pending_code_action_request: None,
+            pending_code_actions_context: None,
             workspace_symbols_seq: 0,
             pending_workspace_symbols: None,
             pending_workspace_symbols_query: None,
@@ -1407,6 +1455,7 @@ impl App {
             self.signature = None;
             return;
         };
+        let col = self.lsp_col(language, &path, row, col);
         if let Some(server) = self
             .lsp
             .get_mut(&language)
@@ -1556,6 +1605,7 @@ impl App {
         let Some((path, row, col)) = self.lsp_target_for(RequestKind::Completion) else {
             return;
         };
+        let col = self.lsp_col(language, &path, row, col);
         if let Some(server) = self
             .lsp
             .get_mut(&language)
@@ -1636,8 +1686,9 @@ impl App {
 
         // Ask the language server for a richer answer when one is attached.
         if let Some((path, row, col)) = self.lsp_target_for(RequestKind::Hover) {
+            let col = self.lsp_col(language, &path, row, col);
             if let Some(server) = self.active_server_mut() {
-                server.hover(&path, row, col);
+                self.hover_request = server.hover(&path, row, col).map(|id| (language, id));
             }
             return;
         }
@@ -1800,6 +1851,7 @@ impl App {
             PickerAction::Command(id) => self.execute_command(id),
             PickerAction::OpenPath(path) => self.open_path(path),
             PickerAction::Reveal { path, position } => self.reveal(path, position),
+            PickerAction::RevealLsp { path, position } => self.reveal_lsp(path, position),
             PickerAction::Info(message) => self.set_status(message),
             PickerAction::InstallTool(tool) => self.install_tool(tool),
             PickerAction::ApplyCodeAction(index) => self.apply_code_action(index),
@@ -1834,10 +1886,38 @@ impl App {
                     self.set_error("No new name provided");
                     return;
                 }
-                if let Some((path, row, col)) = self.pending_rename.take()
-                    && let Some(server) = self.active_server_mut()
+                let Some((path, row, col)) = self.pending_rename.take() else {
+                    return;
+                };
+                // The prompt may be answered after the user switched tabs, so
+                // resolve the language and version from the document itself.
+                let language = self
+                    .editor
+                    .documents
+                    .iter()
+                    .find(|doc| same_file(doc.buffer.path.as_deref(), &path))
+                    .map(|doc| doc.buffer.language)
+                    .or_else(|| self.lsp_language());
+                let Some(language) = language else {
+                    self.set_status("Rename needs a language server");
+                    return;
+                };
+                let lsp_col = self.lsp_col(language, &path, row, col);
+                let version = self.document_version(&path).unwrap_or(0);
+                if let Some(server) = self
+                    .lsp
+                    .get_mut(&language)
+                    .and_then(|job| job.server.as_mut())
                 {
-                    server.rename(&path, row, col, &input);
+                    self.pending_rename_request =
+                        server
+                            .rename(&path, row, lsp_col, &input)
+                            .map(|id| PendingDocRequest {
+                                language,
+                                id,
+                                path: path.clone(),
+                                version,
+                            });
                 }
                 self.set_status("Renaming…");
             }
@@ -3508,6 +3588,7 @@ impl App {
                 .active_document()
                 .map(|doc| doc.indent_width())
                 .unwrap_or(4);
+            let version = self.document_version(&path).unwrap_or(0);
             if let Some(server) = self
                 .lsp
                 .get_mut(&language)
@@ -3515,7 +3596,7 @@ impl App {
             {
                 self.pending_lsp_format = server
                     .formatting(&path, tab_size, true)
-                    .map(|id| (path.clone(), language, id));
+                    .map(|id| (path.clone(), language, id, version));
                 if self.pending_lsp_format.is_some() {
                     self.set_status("Formatting…");
                     return;
@@ -3903,6 +3984,7 @@ impl App {
 
         // Drop this language's connection and schedule a fresh one now. The
         // restart budget resets because the user asked explicitly.
+        self.clear_lsp_pending();
         self.lsp.remove(&language);
         for doc in &mut self.editor.documents {
             doc.use_builtin_diagnostics();
@@ -3935,7 +4017,11 @@ impl App {
                 changed = true;
                 match event {
                     ServerEvent::Ready => self.lsp_ready(language),
-                    ServerEvent::Diagnostics { path, diagnostics } => {
+                    ServerEvent::Diagnostics {
+                        path,
+                        version: _,
+                        diagnostics,
+                    } => {
                         self.apply_lsp_diagnostics(&path, diagnostics);
                     }
                     ServerEvent::Response { kind, id, result } => {
@@ -3944,7 +4030,7 @@ impl App {
                     ServerEvent::ApplyEdit { id, params } => {
                         let edit = params.get("edit").cloned().unwrap_or(Value::Null);
                         let files = convert::workspace_edit(&edit);
-                        let applied = self.apply_workspace_edit(files);
+                        let applied = self.apply_workspace_edit(files, language);
                         if let Some(server) = self
                             .lsp
                             .get_mut(&language)
@@ -3979,6 +4065,8 @@ impl App {
             }
             job.failed = Some(message.clone());
         }
+        // Requests in flight on the failed connection will never be answered.
+        self.clear_lsp_pending();
         // Fall back to the built-in providers for every document.
         for doc in &mut self.editor.documents {
             doc.use_builtin_diagnostics();
@@ -4053,15 +4141,44 @@ impl App {
         }
     }
 
-    fn apply_lsp_diagnostics(&mut self, path: &Path, diagnostics: Vec<Diagnostic>) {
-        if let Some(doc) = self
+    /// Install diagnostics published by a language server.
+    ///
+    /// The ranges arrive in the connection's position encoding and the buffer
+    /// may have moved on since the server last synchronized, so results for a
+    /// dirty buffer are dropped and ranges are converted to character columns.
+    fn apply_lsp_diagnostics(&mut self, path: &Path, mut diagnostics: Vec<Diagnostic>) {
+        let Some(index) = self
             .editor
             .documents
-            .iter_mut()
-            .find(|doc| same_file(doc.buffer.path.as_deref(), path))
-        {
-            doc.set_lsp_diagnostics(diagnostics);
+            .iter()
+            .position(|doc| same_file(doc.buffer.path.as_deref(), path))
+        else {
+            return;
+        };
+        // `diagnostics_dirty` is set on every edit and cleared when the change
+        // is streamed to the server, so it marks results computed against text
+        // the server has not yet seen.
+        if self.editor.documents[index].diagnostics_dirty() {
+            return;
         }
+        let language = self.editor.documents[index].buffer.language;
+        let encoding = self.lsp_encoding(language);
+        {
+            let doc = &self.editor.documents[index];
+            for diagnostic in &mut diagnostics {
+                diagnostic.start.col = convert::lsp_to_char(
+                    &doc.buffer.line_text(diagnostic.start.line),
+                    diagnostic.start.col,
+                    encoding,
+                );
+                diagnostic.end.col = convert::lsp_to_char(
+                    &doc.buffer.line_text(diagnostic.end.line),
+                    diagnostic.end.col,
+                    encoding,
+                );
+            }
+        }
+        self.editor.documents[index].set_lsp_diagnostics(diagnostics);
     }
 
     /// The language of the active document, when a ready server serves it.
@@ -4123,6 +4240,90 @@ impl App {
         Some((path, cursor.row, cursor.col))
     }
 
+    /// The position encoding the server for `language` negotiated, or the
+    /// protocol default when there is no server.
+    fn lsp_encoding(&self, language: LanguageId) -> PositionEncoding {
+        self.lsp
+            .get(&language)
+            .and_then(|job| job.server.as_ref())
+            .map(Server::position_encoding)
+            .unwrap_or_default()
+    }
+
+    /// Convert a Koda character column to the LSP `character` offset the
+    /// document's server expects, using the line's actual text.
+    fn lsp_col(&self, language: LanguageId, path: &Path, row: usize, col: usize) -> usize {
+        let encoding = self.lsp_encoding(language);
+        let line = self
+            .editor
+            .documents
+            .iter()
+            .find(|doc| same_file(doc.buffer.path.as_deref(), path))
+            .map(|doc| doc.buffer.line_text(row))
+            .unwrap_or_default();
+        convert::char_to_lsp(&line, col, encoding)
+    }
+
+    /// Convert an LSP-encoded position from a server into a Koda character
+    /// position, using the open document's line text.
+    fn lsp_position_to_char(&self, position: Position) -> Position {
+        let Some(doc) = self.editor.active_document() else {
+            return position;
+        };
+        let encoding = self.lsp_encoding(doc.buffer.language);
+        let line = doc.buffer.line_text(position.row);
+        Position::new(
+            position.row,
+            convert::lsp_to_char(&line, position.col, encoding),
+        )
+    }
+
+    /// The buffer version of the document at `path`, if it is open.
+    fn document_version(&self, path: &Path) -> Option<u64> {
+        self.editor
+            .documents
+            .iter()
+            .find(|doc| same_file(doc.buffer.path.as_deref(), path))
+            .map(|doc| doc.buffer.version)
+    }
+
+    /// Whether `path` is the active document.
+    fn active_document_is(&self, path: &Path) -> bool {
+        self.editor
+            .active_document()
+            .is_some_and(|doc| same_file(doc.buffer.path.as_deref(), path))
+    }
+
+    /// Forget the in-flight request bookkeeping for one feature.
+    fn clear_lsp_pending_for(&mut self, kind: RequestKind) {
+        match kind {
+            RequestKind::Completion => self.completion_request = None,
+            RequestKind::Hover => self.hover_request = None,
+            RequestKind::SignatureHelp => self.signature_request = None,
+            RequestKind::Definition => self.pending_definition = None,
+            RequestKind::References => self.pending_references = None,
+            RequestKind::Rename => self.pending_rename_request = None,
+            RequestKind::CodeActions => self.pending_code_action_request = None,
+            RequestKind::Formatting => self.pending_lsp_format = None,
+            RequestKind::WorkspaceSymbols => self.ws_lsp_pending = false,
+        }
+    }
+
+    /// Forget every in-flight language-server request, e.g. after a crash or a
+    /// restart, so stale callbacks cannot touch the new connection's state.
+    fn clear_lsp_pending(&mut self) {
+        self.completion_request = None;
+        self.hover_request = None;
+        self.signature_request = None;
+        self.pending_definition = None;
+        self.pending_references = None;
+        self.pending_rename_request = None;
+        self.pending_code_action_request = None;
+        self.pending_lsp_format = None;
+        self.pending_code_actions_context = None;
+        self.ws_lsp_pending = false;
+    }
+
     /// Apply a language-server feature response for `language`.
     fn handle_lsp_response(
         &mut self,
@@ -4134,11 +4335,10 @@ impl App {
         let value = match result {
             Ok(value) => value,
             Err(message) => {
-                if kind == RequestKind::WorkspaceSymbols {
-                    // Keep the built-in scan's results; a server that cannot
-                    // answer workspace symbols is not an error worth shouting.
-                    self.ws_lsp_pending = false;
-                } else {
+                // Clear any loading state this request owned so a timeout or
+                // error cannot leave the UI waiting forever.
+                self.clear_lsp_pending_for(kind);
+                if kind != RequestKind::WorkspaceSymbols {
                     self.set_error(format!("Language server: {message}"));
                 }
                 return;
@@ -4157,29 +4357,53 @@ impl App {
                     state.extend(items);
                 }
             }
-            RequestKind::Hover => match convert::hover(&value) {
-                Some(hover) => {
-                    self.hover = Some(HoverState {
-                        title: hover.title,
-                        kind: hover.kind,
-                        body: hover.body,
-                    });
+            RequestKind::Hover => {
+                if self.hover_request != Some((language, id)) {
+                    return;
                 }
-                None if self.hover.is_none() => {
-                    self.set_status("No information available");
+                self.hover_request = None;
+                match convert::hover(&value) {
+                    Some(hover) => {
+                        self.hover = Some(HoverState {
+                            title: hover.title,
+                            kind: hover.kind,
+                            body: hover.body,
+                        });
+                    }
+                    None if self.hover.is_none() => {
+                        self.set_status("No information available");
+                    }
+                    None => {}
                 }
-                None => {}
-            },
+            }
             RequestKind::Definition => {
+                let Some(request) = self.pending_definition.take() else {
+                    return;
+                };
+                if !request.is_current(self, language, id)
+                    || !self.active_document_is(&request.path)
+                {
+                    self.set_status("The document changed; resolve again");
+                    return;
+                }
                 let locations = convert::locations(&value);
                 match locations.into_iter().next() {
                     Some(location) => {
-                        self.reveal(location.path, Position::new(location.line, location.col));
+                        self.reveal_lsp(location.path, Position::new(location.line, location.col));
                     }
                     None => self.set_status("No definition found"),
                 }
             }
             RequestKind::References => {
+                let Some(request) = self.pending_references.take() else {
+                    return;
+                };
+                if !request.is_current(self, language, id)
+                    || !self.active_document_is(&request.path)
+                {
+                    self.set_status("The document changed; find references again");
+                    return;
+                }
                 let locations = convert::locations(&value);
                 if locations.is_empty() {
                     self.set_status("No references found");
@@ -4188,8 +4412,15 @@ impl App {
                 }
             }
             RequestKind::Rename => {
+                let Some(request) = self.pending_rename_request.take() else {
+                    return;
+                };
+                if !request.is_current(self, language, id) {
+                    self.set_status("The document changed; rename again");
+                    return;
+                }
                 let files = convert::workspace_edit(&value);
-                let applied = self.apply_workspace_edit(files);
+                let applied = self.apply_workspace_edit(files, language);
                 if applied > 0 {
                     self.set_status(format!("Renamed in {applied} place(s)"));
                 } else {
@@ -4197,11 +4428,19 @@ impl App {
                 }
             }
             RequestKind::CodeActions => {
+                let Some(request) = self.pending_code_action_request.take() else {
+                    return;
+                };
+                if !request.is_current(self, language, id) {
+                    self.set_status("The document changed; run code actions again");
+                    return;
+                }
                 let actions = convert::code_actions(&value);
                 if actions.is_empty() {
                     self.set_status("No code actions available");
                     return;
                 }
+                self.pending_code_actions_context = Some((request.path.clone(), request.version));
                 self.pending_code_actions = actions;
                 let items = self
                     .pending_code_actions
@@ -4237,7 +4476,7 @@ impl App {
                         PickerItem::new(
                             item.name,
                             detail,
-                            PickerAction::Reveal {
+                            PickerAction::RevealLsp {
                                 path: item.path,
                                 position: Position::new(item.line, item.col),
                             },
@@ -4264,19 +4503,26 @@ impl App {
                 let current = self
                     .pending_lsp_format
                     .as_ref()
-                    .map(|(_, pending_language, pending_id)| (*pending_language, *pending_id));
+                    .map(|(_, pending_language, pending_id, _)| (*pending_language, *pending_id));
                 if current != Some((language, id)) {
                     return;
                 }
-                let Some((path, _, _)) = self.pending_lsp_format.take() else {
+                let Some((path, _, _, version)) = self.pending_lsp_format.take() else {
                     return;
                 };
+                // A formatting response computed against older text must not be
+                // applied to the current buffer.
+                if self.document_version(&path) != Some(version) {
+                    self.set_status("Formatting response was stale; try again");
+                    return;
+                }
                 let edits = convert::formatting_edits(&value);
                 if edits.is_empty() {
                     self.set_status("No formatting changes");
                     return;
                 }
-                let applied = self.apply_workspace_edit(vec![convert::FileEdit { path, edits }]);
+                let applied =
+                    self.apply_workspace_edit(vec![convert::FileEdit { path, edits }], language);
                 if applied > 0 {
                     self.after_edit();
                     self.set_status("Formatted");
@@ -4289,6 +4535,10 @@ impl App {
 
     /// Ask the server for code actions over the cursor or selection.
     fn code_actions(&mut self) {
+        let Some(language) = self.lsp_language() else {
+            self.set_status("Code actions need a language server (see Language Setup…)");
+            return;
+        };
         let Some((path, row, col)) = self.lsp_target_for(RequestKind::CodeActions) else {
             self.set_status("Code actions need a language server (see Language Setup…)");
             return;
@@ -4297,10 +4547,30 @@ impl App {
             .editor
             .active_document()
             .and_then(|doc| doc.selection_range())
-            .map(|(start, end)| ((start.row, start.col), (end.row, end.col)))
-            .unwrap_or(((row, col), (row, col)));
+            .map(|(start, end)| {
+                (
+                    (
+                        start.row,
+                        self.lsp_col(language, &path, start.row, start.col),
+                    ),
+                    (end.row, self.lsp_col(language, &path, end.row, end.col)),
+                )
+            })
+            .unwrap_or_else(|| {
+                let col = self.lsp_col(language, &path, row, col);
+                ((row, col), (row, col))
+            });
+        let version = self.document_version(&path).unwrap_or(0);
         if let Some(server) = self.active_server_mut() {
-            server.code_action(&path, range.0, range.1);
+            self.pending_code_action_request =
+                server
+                    .code_action(&path, range.0, range.1)
+                    .map(|id| PendingDocRequest {
+                        language,
+                        id,
+                        path: path.clone(),
+                        version,
+                    });
         }
         self.set_status("Finding code actions…");
     }
@@ -4310,9 +4580,30 @@ impl App {
         let Some(action) = self.pending_code_actions.get(index).cloned() else {
             return;
         };
+        // The actions were computed against a snapshot; refuse to apply them if
+        // the document has moved on since.
+        let Some((path, version)) = self.pending_code_actions_context.clone() else {
+            return;
+        };
+        if self.document_version(&path) != Some(version) {
+            self.pending_code_actions.clear();
+            self.pending_code_actions_context = None;
+            self.set_status("The document changed; run code actions again");
+            return;
+        }
+        let language = self
+            .editor
+            .documents
+            .iter()
+            .find(|doc| same_file(doc.buffer.path.as_deref(), &path))
+            .map(|doc| doc.buffer.language)
+            .or_else(|| self.lsp_language());
+        let Some(language) = language else {
+            return;
+        };
         if let Some(edit) = action.edit {
             let files = convert::workspace_edit(&edit);
-            let applied = self.apply_workspace_edit(files);
+            let applied = self.apply_workspace_edit(files, language);
             if applied > 0 {
                 self.set_status(format!("Applied {applied} edit(s)"));
             } else {
@@ -4346,8 +4637,28 @@ impl App {
         self.overlay = Overlay::Prompt(prompt);
     }
 
-    /// Apply a workspace edit, returning the number of edits applied.
-    fn apply_workspace_edit(&mut self, files: Vec<convert::FileEdit>) -> usize {
+    /// Apply a workspace edit produced by the server for `language`, returning
+    /// the number of edits applied.
+    ///
+    /// Every range is converted from the connection's position encoding to Koda
+    /// character offsets using the document's current text, so an edit can never
+    /// land in the middle of a multi-byte character.
+    fn apply_workspace_edit(
+        &mut self,
+        files: Vec<convert::FileEdit>,
+        language: LanguageId,
+    ) -> usize {
+        let encoding = self.lsp_encoding(language);
+        self.apply_workspace_edit_with_encoding(files, encoding)
+    }
+
+    /// [`apply_workspace_edit`] with the encoding supplied explicitly, so the
+    /// conversion is testable without a live server.
+    fn apply_workspace_edit_with_encoding(
+        &mut self,
+        files: Vec<convert::FileEdit>,
+        encoding: PositionEncoding,
+    ) -> usize {
         let mut applied = 0;
         for file in files {
             if let Some(doc) = self
@@ -4356,8 +4667,11 @@ impl App {
                 .iter_mut()
                 .find(|doc| same_file(doc.buffer.path.as_deref(), &file.path))
             {
-                // Apply from the end so earlier offsets stay valid.
-                let mut edits = file.edits;
+                // Convert against the document's current text before applying;
+                // edits are then applied from the end so earlier offsets stay
+                // valid.
+                let mut edits =
+                    convert::edits_to_chars(&file.edits, |row| doc.buffer.line_text(row), encoding);
                 edits.sort_by_key(|edit| Reverse((edit.start.0, edit.start.1)));
                 for edit in edits {
                     doc.replace_range(
@@ -4368,7 +4682,13 @@ impl App {
                     applied += 1;
                 }
             } else if let Ok(text) = crate::editor::buffer::read_text(&file.path) {
-                let updated = apply_text_edits(&text, &file.edits);
+                let lines: Vec<&str> = text.split('\n').collect();
+                let edits = convert::edits_to_chars(
+                    &file.edits,
+                    |row| lines.get(row).copied().unwrap_or("").to_string(),
+                    encoding,
+                );
+                let updated = apply_text_edits(&text, &edits);
                 if crate::filesystem::write_atomic(&file.path, &updated).is_ok() {
                     applied += file.edits.len();
                 }
@@ -4393,7 +4713,7 @@ impl App {
                 PickerItem::new(
                     relative,
                     detail,
-                    PickerAction::Reveal {
+                    PickerAction::RevealLsp {
                         path: location.path,
                         position: Position::new(location.line, location.col),
                     },
@@ -4500,6 +4820,14 @@ impl App {
         self.jump_to(position);
     }
 
+    /// Like [`reveal`], but `position` is LSP-encoded and is converted using the
+    /// opened document's text before the cursor moves.
+    fn reveal_lsp(&mut self, path: PathBuf, position: Position) {
+        self.open_path(path);
+        let position = self.lsp_position_to_char(position);
+        self.jump_to(position);
+    }
+
     /// Centre `position` in the viewport and move the cursor there.
     fn jump_to(&mut self, position: Position) {
         let center = self.viewport_height / 2;
@@ -4511,9 +4839,21 @@ impl App {
 
     /// Jump to the definition of the word under the cursor.
     fn goto_definition(&mut self) {
-        if let Some((path, row, col)) = self.lsp_target_for(RequestKind::Definition) {
+        if let Some(language) = self.lsp_language()
+            && let Some((path, row, col)) = self.lsp_target_for(RequestKind::Definition)
+        {
+            let col = self.lsp_col(language, &path, row, col);
+            let version = self.document_version(&path).unwrap_or(0);
             if let Some(server) = self.active_server_mut() {
-                server.definition(&path, row, col);
+                self.pending_definition =
+                    server
+                        .definition(&path, row, col)
+                        .map(|id| PendingDocRequest {
+                            language,
+                            id,
+                            path: path.clone(),
+                            version,
+                        });
             }
             self.set_status("Resolving definition…");
             return;
@@ -4559,9 +4899,21 @@ impl App {
 
     /// List every occurrence of the word under the cursor.
     fn find_references(&mut self) {
-        if let Some((path, row, col)) = self.lsp_target_for(RequestKind::References) {
+        if let Some(language) = self.lsp_language()
+            && let Some((path, row, col)) = self.lsp_target_for(RequestKind::References)
+        {
+            let col = self.lsp_col(language, &path, row, col);
+            let version = self.document_version(&path).unwrap_or(0);
             if let Some(server) = self.active_server_mut() {
-                server.references(&path, row, col);
+                self.pending_references =
+                    server
+                        .references(&path, row, col)
+                        .map(|id| PendingDocRequest {
+                            language,
+                            id,
+                            path: path.clone(),
+                            version,
+                        });
             }
             self.set_status("Finding references…");
             return;
@@ -6536,7 +6888,7 @@ mod tests {
         fs::write(&file, "fn main(){}\n").unwrap();
         let mut app = app_with_file(&file);
 
-        app.pending_lsp_format = Some((file.clone(), LanguageId::Rust, 3));
+        app.pending_lsp_format = Some((file.clone(), LanguageId::Rust, 3, 0));
         app.handle_lsp_response(
             LanguageId::Rust,
             RequestKind::Formatting,
@@ -6555,7 +6907,7 @@ mod tests {
         );
 
         // A superseded formatting response is ignored.
-        app.pending_lsp_format = Some((file.clone(), LanguageId::Rust, 5));
+        app.pending_lsp_format = Some((file.clone(), LanguageId::Rust, 5, 0));
         let before = app.editor.active_document().unwrap().buffer.text();
         app.handle_lsp_response(
             LanguageId::Rust,
@@ -6565,6 +6917,225 @@ mod tests {
         );
         assert_eq!(app.editor.active_document().unwrap().buffer.text(), before);
         assert!(app.pending_lsp_format.is_some());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A `WorkspaceEdit` JSON that replaces a range in `path`.
+    fn replace_edit(path: &Path, start: (u64, u64), end: (u64, u64), text: &str) -> Value {
+        let mut changes = serde_json::Map::new();
+        changes.insert(
+            crate::language::lsp::path_to_uri(path),
+            serde_json::json!([
+                {
+                    "range": {
+                        "start": { "line": start.0, "character": start.1 },
+                        "end": { "line": end.0, "character": end.1 }
+                    },
+                    "newText": text
+                }
+            ]),
+        );
+        serde_json::json!({ "changes": changes })
+    }
+
+    #[test]
+    fn workspace_edit_applies_utf8_byte_offsets_at_character_boundaries() {
+        let dir = temp_project("lsp-utf8-edit");
+        let file = dir.join("src/main.rs");
+        // `café` is four characters / five UTF-8 bytes starting at byte 4.
+        fs::write(&file, "let café = 1;\n").unwrap();
+        let mut app = app_with_file(&file);
+
+        let applied = app.apply_workspace_edit_with_encoding(
+            vec![convert::FileEdit {
+                path: file.clone(),
+                edits: vec![convert::TextEdit {
+                    start: (0, 4),
+                    end: (0, 9),
+                    new_text: "tea".to_string(),
+                }],
+            }],
+            PositionEncoding::Utf8,
+        );
+
+        assert_eq!(applied, 1);
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.line_text(0),
+            "let tea = 1;"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn workspace_edit_applies_utf16_code_unit_offsets() {
+        let dir = temp_project("lsp-utf16-edit");
+        let file = dir.join("src/main.rs");
+        // Same text, but a UTF-16 server counts `café` as four units (4..8).
+        fs::write(&file, "let café = 1;\n").unwrap();
+        let mut app = app_with_file(&file);
+
+        let applied = app.apply_workspace_edit_with_encoding(
+            vec![convert::FileEdit {
+                path: file.clone(),
+                edits: vec![convert::TextEdit {
+                    start: (0, 4),
+                    end: (0, 8),
+                    new_text: "tea".to_string(),
+                }],
+            }],
+            PositionEncoding::Utf16,
+        );
+
+        assert_eq!(applied, 1);
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.line_text(0),
+            "let tea = 1;"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn stale_rename_response_is_discarded() {
+        let dir = temp_project("lsp-stale-rename");
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+
+        let version = app.editor.active_document().unwrap().buffer.version;
+        app.pending_rename_request = Some(PendingDocRequest {
+            language: LanguageId::Rust,
+            id: 1,
+            path: file.clone(),
+            version,
+        });
+        // The user keeps typing, so the response now describes older text.
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .insert_text("// x\n");
+        let before = app.editor.active_document().unwrap().buffer.text();
+
+        app.handle_lsp_response(
+            LanguageId::Rust,
+            RequestKind::Rename,
+            1,
+            Ok(replace_edit(&file, (0, 0), (0, 3), "renamed")),
+        );
+
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.text(),
+            before,
+            "a stale rename must not edit the buffer"
+        );
+        assert!(app.pending_rename_request.is_none());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn stale_formatting_response_is_discarded() {
+        let dir = temp_project("lsp-stale-format");
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+
+        let stale_version = app.editor.active_document().unwrap().buffer.version;
+        app.pending_lsp_format = Some((file.clone(), LanguageId::Rust, 2, stale_version));
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .insert_text("// x\n");
+        let before = app.editor.active_document().unwrap().buffer.text();
+
+        app.handle_lsp_response(
+            LanguageId::Rust,
+            RequestKind::Formatting,
+            2,
+            Ok(serde_json::json!([
+                { "range": { "start": { "line": 0, "character": 0 },
+                             "end": { "line": 0, "character": 3 } },
+                  "newText": "zzz" }
+            ])),
+        );
+
+        assert_eq!(app.editor.active_document().unwrap().buffer.text(), before);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn diagnostics_for_a_dirty_buffer_are_dropped() {
+        let dir = temp_project("lsp-dirty-diagnostics");
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+        let diagnostic = || {
+            Diagnostic::new(
+                crate::language::diagnostics::TextPos::new(0, 0),
+                crate::language::diagnostics::TextPos::new(0, 1),
+                Severity::Error,
+                "boom",
+            )
+        };
+
+        // The buffer changed but the server has not been told yet.
+        app.editor.active_document_mut().unwrap().insert_text("x");
+        app.apply_lsp_diagnostics(&file, vec![diagnostic()]);
+        assert!(
+            app.editor
+                .active_document()
+                .unwrap()
+                .diagnostics()
+                .is_empty(),
+            "diagnostics over unsent text must be dropped"
+        );
+
+        // Once the change has been streamed, published diagnostics apply.
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .set_diagnostics_revision(1);
+        app.apply_lsp_diagnostics(&file, vec![diagnostic()]);
+        assert_eq!(app.editor.active_document().unwrap().diagnostics().len(), 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_timed_out_request_clears_its_pending_state() {
+        let dir = temp_project("lsp-timeout-state");
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+
+        app.pending_lsp_format = Some((file.clone(), LanguageId::Rust, 9, 0));
+        app.handle_lsp_response(
+            LanguageId::Rust,
+            RequestKind::Formatting,
+            9,
+            Err("request timed out".to_string()),
+        );
+
+        assert!(app.pending_lsp_format.is_none());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn code_actions_are_not_applied_after_the_document_changes() {
+        let dir = temp_project("lsp-stale-actions");
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+
+        let version = app.editor.active_document().unwrap().buffer.version;
+        app.pending_code_actions_context = Some((file.clone(), version));
+        app.pending_code_actions = vec![convert::CodeAction {
+            title: "Add mut".to_string(),
+            edit: Some(replace_edit(&file, (0, 0), (0, 3), "renamed")),
+            command: None,
+        }];
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .insert_text("// x\n");
+        let before = app.editor.active_document().unwrap().buffer.text();
+
+        app.apply_code_action(0);
+
+        assert_eq!(app.editor.active_document().unwrap().buffer.text(), before);
+        assert!(app.pending_code_actions.is_empty());
         fs::remove_dir_all(&dir).ok();
     }
 

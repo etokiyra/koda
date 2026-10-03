@@ -16,6 +16,12 @@ pub enum PickerAction {
         path: PathBuf,
         position: Position,
     },
+    /// Open a file and reveal an LSP-encoded position, converting it to a Koda
+    /// character position using the target line's text.
+    RevealLsp {
+        path: PathBuf,
+        position: Position,
+    },
     /// Show a short informational message in the statusline.
     Info(String),
     /// Install an external tool through its trusted package manager.
