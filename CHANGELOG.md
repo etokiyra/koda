@@ -204,6 +204,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Language intelligence
 
+- Completion is now offered **automatically while you type**. After a short
+  pause (about 120 ms) Koda opens the popup at the cursor and re-filters it as
+  the word grows; it stays quiet inside comments and strings, dismisses on
+  whitespace or punctuation, and does not pop when the only candidate is the
+  word already being typed. `Ctrl+Space` remains the manual fallback and shows
+  the full list. Language-server candidates are requested for the same prefix,
+  and a response superseded by a newer request is discarded, so a stale answer
+  never overwrites the current list. After `.` or `::`, buffer words are left
+  out so member completion is not buried in noise.
 - Completion matching is now fuzzy with a prefix bias: `mrs` finds
   `main_result`, while an exact prefix (`if` over `impl`) still ranks first.
   This applies to both built-in and language-server candidates.

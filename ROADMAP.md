@@ -66,6 +66,10 @@ The highest-value work. These turn Koda from an editor into an IDE.
 - [x] **Completion.** A compact popup merges provider keywords/types/builtins
       with identifiers from the buffer, filters as you type and accepts with
       `Enter`/`Tab`. Language-server candidates can extend the same popup.
+- [x] **Automatic completion.** The popup is offered while typing, after a short
+      pause, and stays quiet in comments and strings, after punctuation, and
+      when there is nothing new to offer; `Ctrl+Space` remains the manual
+      fallback. Stale server responses are discarded by request id.
 - [x] **Hover information.** `Ctrl+Shift+H` opens a dismissible popup with the
       symbol's kind, its definition line and its usage count. Heuristic today;
       language-server hover can replace the content.

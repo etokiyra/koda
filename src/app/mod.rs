@@ -25,6 +25,7 @@ use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::format;
 use crate::language::format::FormatOutcome;
 use crate::language::lsp::{RequestKind, Server, ServerEvent, convert};
+use crate::language::provider::TokenKind;
 use crate::language::symbols::is_ident_char as is_word_char;
 use crate::language::tools::{Tool, ToolPurpose, ToolRegistry};
 use crate::language::{Capability, LanguageId, LanguageService, WorkspaceSymbol};
@@ -43,6 +44,11 @@ use overlay::{
 /// How long typing must pause before diagnostics are recomputed. Short enough to
 /// feel immediate, long enough not to reanalyse on every keystroke.
 const DIAGNOSTICS_DEBOUNCE: Duration = Duration::from_millis(150);
+
+/// How long typing must pause before Koda offers completions automatically.
+/// Short enough to feel instant, long enough that a burst of typing does not
+/// build a candidate pool for every intermediate prefix.
+const AUTOCOMPLETE_DELAY: Duration = Duration::from_millis(120);
 
 /// Which surface receives keyboard input when no overlay is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,6 +111,15 @@ struct Yank {
     start: Position,
     end: Position,
     /// Buffer version at the time of the paste; any later edit invalidates it.
+    version: u64,
+}
+
+/// A scheduled automatic completion, pinned to the document state it was
+/// requested for so a stray timer cannot pop a popup after the user moved on.
+struct PendingCompletion {
+    due_at: Instant,
+    doc: usize,
+    cursor: Position,
     version: u64,
 }
 
@@ -176,6 +191,11 @@ pub struct App {
     pub tree_filter: Option<TreeFilter>,
     /// Completion popup, when open.
     pub completion: Option<CompletionState>,
+    /// When a paused keystroke should offer automatic completion.
+    completion_due: Option<PendingCompletion>,
+    /// The id of the newest language-server completion request, so an older
+    /// response can be discarded when the user has typed on.
+    completion_request: Option<i64>,
     /// Hover popup, when open.
     pub hover: Option<HoverState>,
     /// Screen position of the editor cursor, updated during rendering.
@@ -300,6 +320,8 @@ impl App {
             pending_project: false,
             tree_filter: None,
             completion: None,
+            completion_due: None,
+            completion_request: None,
             hover: None,
             cursor_screen: None,
             tree_visible: true,
@@ -374,6 +396,7 @@ impl App {
             self.poll_lsp_start();
             let lsp_health_changed = self.poll_lsp_health();
             let lsp_changed = self.poll_lsp() || lsp_health_changed;
+            let completion_changed = self.poll_auto_completion();
             let background_changed = self.apply_background_events();
             let animated = self.tick_animation();
             let external_changed = self.poll_external_changes();
@@ -381,6 +404,7 @@ impl App {
             if needs_redraw
                 || background_changed
                 || lsp_changed
+                || completion_changed
                 || animated
                 || external_changed
                 || offered
@@ -396,6 +420,14 @@ impl App {
                     .max(Duration::from_millis(16))
             } else {
                 Duration::from_millis(250)
+            };
+            // Wake early when an automatic completion is due, so the popup is
+            // not delayed by the idle timeout.
+            let timeout = match self.completion_due.as_ref() {
+                Some(pending) => {
+                    timeout.min(pending.due_at.saturating_duration_since(Instant::now()))
+                }
+                None => timeout,
             };
             if event::poll(timeout)? {
                 match event::read()? {
@@ -734,6 +766,9 @@ impl App {
                     }
                 } else {
                     self.with_doc(|d| d.type_char(c));
+                    if is_word_char(c) {
+                        self.after_word_char_typed();
+                    }
                 }
             }
             KeyCode::Enter => self.with_doc(|d| d.insert_newline()),
@@ -1165,6 +1200,7 @@ impl App {
         match key.code {
             KeyCode::Esc => {
                 self.completion = None;
+                self.completion_due = None;
                 true
             }
             KeyCode::Up => {
@@ -1197,28 +1233,135 @@ impl App {
             }
             KeyCode::Backspace => {
                 self.with_doc(|doc| doc.backspace());
-                self.refresh_completion();
+                self.after_completion_edit();
                 true
             }
             KeyCode::Char(c) if !ctrl => {
                 self.with_doc(|doc| doc.type_char(c));
-                self.refresh_completion();
+                if is_word_char(c) {
+                    self.after_word_char_typed();
+                } else {
+                    // Whitespace or punctuation ends the word: dismiss the popup
+                    // so it does not linger with an empty prefix.
+                    self.completion = None;
+                    self.completion_due = None;
+                }
                 true
             }
             _ => {
                 self.completion = None;
+                self.completion_due = None;
                 false
             }
         }
     }
 
+    /// After an edit that may shorten the typed prefix, re-filter an open popup
+    /// and schedule the next automatic offer. Does nothing when the popup is
+    /// closed, since Backspace should not by itself pop one open.
+    fn after_completion_edit(&mut self) {
+        if self.completion.is_none() {
+            return;
+        }
+        if self.completion_prefix().is_empty() {
+            self.completion = None;
+            self.completion_due = None;
+            return;
+        }
+        self.refresh_completion();
+        self.schedule_auto_completion();
+    }
+
+    /// After typing a word character, re-filter an open popup and schedule an
+    /// automatic offer.
+    fn after_word_char_typed(&mut self) {
+        if self.completion.is_some() {
+            self.refresh_completion();
+        }
+        self.schedule_auto_completion();
+    }
+
+    /// Schedule an automatic completion a short pause after the last keystroke.
+    ///
+    /// Suppressed inside comments and strings, and pinned to the current
+    /// document, cursor and buffer version so the offer is dropped if the user
+    /// moves or edits before it fires.
+    fn schedule_auto_completion(&mut self) {
+        if self.cursor_in_comment_or_string() {
+            self.completion = None;
+            self.completion_due = None;
+            return;
+        }
+        let (doc_index, cursor, version) = match self.editor.active_document() {
+            Some(doc) => (
+                self.editor.active_index(),
+                doc.clamped_cursor(),
+                doc.buffer.version,
+            ),
+            None => {
+                self.completion_due = None;
+                return;
+            }
+        };
+        self.completion_due = Some(PendingCompletion {
+            due_at: Instant::now() + AUTOCOMPLETE_DELAY,
+            doc: doc_index,
+            cursor,
+            version,
+        });
+    }
+
+    /// Open the popup once the typing pause has elapsed.
+    fn poll_auto_completion(&mut self) -> bool {
+        let Some(pending) = self.completion_due.as_ref() else {
+            return false;
+        };
+        if Instant::now() < pending.due_at {
+            return false;
+        }
+        // Only offer if nothing else has happened: the same document is active,
+        // the cursor has not moved and the buffer has not changed. This drops
+        // the timer when the user dismissed the popup, opened an overlay or
+        // switched tabs.
+        let valid = self.overlay.is_none()
+            && !self.search.open
+            && self.focus == Focus::Editor
+            && self.editor.active_index() == pending.doc
+            && self.editor.active_document().is_some_and(|doc| {
+                doc.clamped_cursor() == pending.cursor && doc.buffer.version == pending.version
+            });
+        self.completion_due = None;
+        if !valid {
+            return false;
+        }
+        if self.completion.is_some() {
+            // The popup is open and already re-filtered; refresh the server's
+            // candidates for the new prefix.
+            self.request_lsp_completion();
+            return false;
+        }
+        self.open_completion_inner(false)
+    }
+
     /// Open completion for the word being typed.
     fn open_completion(&mut self) {
+        self.open_completion_inner(true);
+    }
+
+    /// Build and show the completion popup.
+    ///
+    /// `manual` distinguishes an explicit `Ctrl+Space` (which reports when there
+    /// is nothing to offer) from the automatic, typing-driven offer, which stays
+    /// silent rather than interrupting with an empty popup.
+    fn open_completion_inner(&mut self, manual: bool) -> bool {
         let (language, text, cursor) = match self.editor.active_document() {
             Some(doc) => (doc.buffer.language, doc.buffer.text(), doc.clamped_cursor()),
-            None => return,
+            None => return false,
         };
 
+        // After `.` or `::` the buffer's own words are noise: only the language
+        // (and the server, when attached) know the members.
+        let member = self.cursor_in_member_access();
         let mut pool: Vec<Completion> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for item in self
@@ -1230,20 +1373,42 @@ impl App {
                 pool.push(item);
             }
         }
-        for item in document_words(&text) {
-            if seen.insert(item.label.clone()) {
-                pool.push(item);
+        if !member {
+            for item in document_words(&text) {
+                if seen.insert(item.label.clone()) {
+                    pool.push(item);
+                }
             }
         }
 
-        let state = CompletionState::new(pool, self.completion_prefix());
+        let prefix = self.completion_prefix();
+        let state = CompletionState::new(pool, prefix.clone());
         let lsp_available = self.lsp_target().is_some();
-        if state.items.is_empty() && !lsp_available {
-            self.set_status("No completions");
-            return;
+
+        if state.items.is_empty() {
+            if manual {
+                // With a server attached, open an empty popup and let its
+                // response fill it in.
+                if lsp_available {
+                    self.completion = Some(state);
+                    self.request_lsp_completion();
+                    return true;
+                }
+                self.set_status("No completions");
+            }
+            return false;
         }
+
+        // An automatic popup whose only candidate is the word already being
+        // typed would just sit there; leave it closed.
+        let only_self = state.items.len() == 1 && state.items[0].label == prefix;
+        if !manual && only_self && !lsp_available {
+            return false;
+        }
+
         self.completion = Some(state);
         self.request_lsp_completion();
+        true
     }
 
     /// Ask the language server for completions at the cursor.
@@ -1251,8 +1416,60 @@ impl App {
         if let Some((path, row, col)) = self.lsp_target()
             && let Some(server) = self.lsp.as_mut()
         {
-            server.completion(&path, row, col);
+            self.completion_request = server.completion(&path, row, col);
         }
+    }
+
+    /// Whether the cursor sits just after a member-access operator (`.` or `::`).
+    fn cursor_in_member_access(&self) -> bool {
+        let Some(doc) = self.editor.active_document() else {
+            return false;
+        };
+        let cursor = doc.clamped_cursor();
+        let line = doc.buffer.line_text(cursor.row);
+        let chars: Vec<char> = line.chars().collect();
+        let mut start = cursor.col.min(chars.len());
+        while start > 0 && is_word_char(chars[start - 1]) {
+            start -= 1;
+        }
+        start > 0 && matches!(chars[start - 1], '.' | ':')
+    }
+
+    /// Whether the cursor is inside a comment or a string, according to the
+    /// provider's highlighting. Used to keep automatic completion quiet in prose
+    /// and literals.
+    ///
+    /// The probe is the start of the identifier being typed (or the character
+    /// before the cursor when there is none), because the cursor sits just past
+    /// the last typed character and a highlight span's end is exclusive.
+    fn cursor_in_comment_or_string(&mut self) -> bool {
+        let Some((id, row, probe)) = self.editor.active_document().map(|doc| {
+            let cursor = doc.clamped_cursor();
+            let line = doc.buffer.line_text(cursor.row);
+            let chars: Vec<char> = line.chars().collect();
+            let end = cursor.col.min(chars.len());
+            let mut start = end;
+            while start > 0 && is_word_char(chars[start - 1]) {
+                start -= 1;
+            }
+            let probe = if start < end {
+                start
+            } else {
+                end.saturating_sub(1)
+            };
+            (doc.buffer.language, cursor.row, probe)
+        }) else {
+            return false;
+        };
+        let service = Arc::clone(&self.language);
+        let provider = service.provider(id);
+        let Some(doc) = self.editor.active_document_mut() else {
+            return false;
+        };
+        matches!(
+            doc.token_kind_at(provider, row, probe),
+            TokenKind::Comment | TokenKind::String
+        )
     }
 
     /// Show information about the symbol under the cursor.
@@ -1321,6 +1538,7 @@ impl App {
         let Some(state) = self.completion.take() else {
             return;
         };
+        self.completion_due = None;
         let Some(item) = state.selected_item().cloned() else {
             return;
         };
@@ -3346,8 +3564,8 @@ impl App {
                 ServerEvent::Diagnostics { path, diagnostics } => {
                     self.apply_lsp_diagnostics(&path, diagnostics);
                 }
-                ServerEvent::Response { kind, result } => {
-                    self.handle_lsp_response(kind, result);
+                ServerEvent::Response { kind, id, result } => {
+                    self.handle_lsp_response(kind, id, result);
                 }
                 ServerEvent::ApplyEdit { id, params } => {
                     let edit = params.get("edit").cloned().unwrap_or(Value::Null);
@@ -3437,7 +3655,7 @@ impl App {
     }
 
     /// Apply a language-server feature response.
-    fn handle_lsp_response(&mut self, kind: RequestKind, result: Result<Value, String>) {
+    fn handle_lsp_response(&mut self, kind: RequestKind, id: i64, result: Result<Value, String>) {
         let value = match result {
             Ok(value) => value,
             Err(message) => {
@@ -3453,6 +3671,12 @@ impl App {
         };
         match kind {
             RequestKind::Completion => {
+                // Ignore a response that a newer request has superseded: the
+                // user typed on, so these candidates no longer match the cursor.
+                if self.completion_request != Some(id) {
+                    return;
+                }
+                self.completion_request = None;
                 let items = convert::completions(&value);
                 if let Some(state) = self.completion.as_mut() {
                     state.extend(items);
@@ -5625,6 +5849,146 @@ mod tests {
         app.execute_command(ids::COMPLETE);
         let state = app.completion.as_ref().expect("completion should open");
         assert!(state.items.iter().any(|item| item.label == "fn"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn typing_offers_completion_automatically() {
+        let dir = temp_project("complete-auto");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main() {\n    let value = 1;\n}\n").unwrap();
+
+        let mut app = app_with_file(&file);
+        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
+        assert!(
+            app.completion.is_none(),
+            "the popup waits for the typing pause"
+        );
+
+        std::thread::sleep(Duration::from_millis(160));
+        app.poll_auto_completion();
+        let state = app.completion.as_ref().expect("completion should open");
+        assert!(
+            state.items.iter().any(|item| item.label == "value"),
+            "the buffer identifier should be offered"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn typing_a_space_dismisses_completion() {
+        let dir = temp_project("complete-space");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main() {\n    let value = 1;\n}\n").unwrap();
+
+        let mut app = app_with_file(&file);
+        app.execute_command(ids::COMPLETE);
+        assert!(app.completion.is_some());
+        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert!(app.completion.is_none(), "a space should dismiss the popup");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn automatic_completion_is_silent_in_comments() {
+        let dir = temp_project("complete-comment");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "// a comment with words\nfn main() {}\n").unwrap();
+
+        let mut app = app_with_file(&file);
+        let end_of_comment = app
+            .editor
+            .active_document()
+            .unwrap()
+            .buffer
+            .line_text(0)
+            .chars()
+            .count();
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .move_to(Position::new(0, end_of_comment));
+        app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+
+        std::thread::sleep(Duration::from_millis(160));
+        app.poll_auto_completion();
+        assert!(
+            app.completion.is_none(),
+            "no popup should appear inside a comment"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn stale_completion_response_is_dropped() {
+        let dir = temp_project("complete-stale");
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+        app.execute_command(ids::COMPLETE);
+        assert!(app.completion.is_some());
+
+        // A newer request is outstanding; the older response must be ignored.
+        app.completion_request = Some(2);
+        app.handle_lsp_response(
+            RequestKind::Completion,
+            1,
+            Ok(serde_json::json!([{ "label": "stale_member" }])),
+        );
+        assert!(
+            !app.completion
+                .as_ref()
+                .unwrap()
+                .items
+                .iter()
+                .any(|item| item.label == "stale_member"),
+            "a superseded response must not be applied"
+        );
+
+        app.handle_lsp_response(
+            RequestKind::Completion,
+            2,
+            Ok(serde_json::json!([{ "label": "fresh_member" }])),
+        );
+        assert!(
+            app.completion
+                .as_ref()
+                .unwrap()
+                .items
+                .iter()
+                .any(|item| item.label == "fresh_member"),
+            "the current response should be applied"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn member_access_excludes_buffer_words() {
+        let dir = temp_project("complete-member");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main() {\n    total = counter.\n}\n").unwrap();
+
+        let mut app = app_with_file(&file);
+        // Put the cursor right after the `.` on line 1.
+        let line = app.editor.active_document().unwrap().buffer.line_text(1);
+        let col = line.chars().count();
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .move_to(Position::new(1, col));
+        assert!(app.open_completion_inner(false));
+
+        let state = app.completion.as_ref().unwrap();
+        assert!(
+            state
+                .items
+                .iter()
+                .any(|item| item.label == "fn" || item.label == "let"),
+            "language candidates remain available"
+        );
+        assert!(
+            !state.items.iter().any(|item| item.label == "total"),
+            "unrelated buffer words must not appear after a member operator"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 

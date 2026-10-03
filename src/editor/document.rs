@@ -929,6 +929,23 @@ impl Document {
         provider.highlight(&text, state).0
     }
 
+    /// The highlighted token at a character position.
+    ///
+    /// Used to keep automatic completion quiet inside comments and strings,
+    /// where document words would only be noise.
+    pub fn token_kind_at(
+        &mut self,
+        provider: &dyn LanguageProvider,
+        row: usize,
+        col: usize,
+    ) -> TokenKind {
+        self.highlight_spans(provider, row)
+            .into_iter()
+            .find(|span| span.range.contains(&col))
+            .map(|span| span.kind)
+            .unwrap_or(TokenKind::Plain)
+    }
+
     // ----------------------------------------------------------------------
     // Search
     // ----------------------------------------------------------------------

@@ -86,9 +86,11 @@ keep you productive **offline**.
 - **Diagnostics** — gutter markers, underlines, a statusline count, `F8`/`Shift+F8`
   navigation, a diagnostics list, and an optional inline note at the end of the
   affected line (**Toggle Inline Diagnostics**).
-- **Completion** — `Ctrl+Space`, instantly merging buffer identifiers, language
-  keywords, and server candidates. Matching is fuzzy and prefix-biased, so
-  `mrs` finds `main_result` while exact prefixes still rank first.
+- **Completion** — appears automatically as you type and merges buffer
+  identifiers, language keywords, and server candidates. Matching is fuzzy and
+  prefix-biased, so `mrs` finds `main_result` while exact prefixes still rank
+  first. It stays quiet in comments and strings; `Ctrl+Space` opens it manually
+  as a fallback.
 - **Hover** — `Ctrl+Shift+H`, with the symbol's kind, definition and usage count.
 - **Navigation** — `F12` go-to-definition and `Shift+F12` find-references,
   across files when a server is attached; without one, `F12` falls back to a
@@ -331,7 +333,7 @@ Koda reports what happened rather than deleting anything.
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
 | `Alt+Y` | Yank-pop: replace the last paste with an earlier kill |
-| `Ctrl+Space` | Complete the word being typed |
+| `Ctrl+Space` | Complete (manual; suggestions also appear as you type) |
 | `Ctrl+Shift+I` | Format the active file |
 | `Ctrl+Shift+H` | Hover: info about the symbol under the cursor |
 | `Ctrl+A` | Select all |

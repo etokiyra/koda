@@ -65,9 +65,12 @@ pub enum ServerEvent {
         path: PathBuf,
         diagnostics: Vec<Diagnostic>,
     },
-    /// The answer to a [`RequestKind`] request.
+    /// The answer to a [`RequestKind`] request. The `id` is the JSON-RPC id the
+    /// request was sent with, so callers can ignore a response that a newer
+    /// request has superseded (for example while typing).
     Response {
         kind: RequestKind,
+        id: i64,
         result: Result<Value, String>,
     },
     /// The server asked Koda to apply a workspace edit. The app must apply it
@@ -225,13 +228,15 @@ impl Server {
         self.versions.contains_key(path)
     }
 
-    /// Ask the server to complete at a position.
-    pub fn completion(&mut self, path: &Path, line: usize, col: usize) {
-        let _ = self.send_request(
+    /// Ask the server to complete at a position, returning the request id so a
+    /// caller can discard the response if it becomes stale.
+    pub fn completion(&mut self, path: &Path, line: usize, col: usize) -> Option<i64> {
+        self.send_request(
             RequestKind::Completion,
             "textDocument/completion",
             position_params(path, line, col),
-        );
+        )
+        .ok()
     }
 
     /// Ask the server for hover information at a position.
@@ -332,7 +337,11 @@ impl Server {
                             Some(error) => Err(error.message),
                             None => Ok(result.unwrap_or(Value::Null)),
                         };
-                        events.push(ServerEvent::Response { kind, result });
+                        events.push(ServerEvent::Response {
+                            kind,
+                            id: id_number,
+                            result,
+                        });
                     }
                 }
                 Ok(Message::Notification { method, params }) => {
