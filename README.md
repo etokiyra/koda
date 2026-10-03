@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-514%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-520%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -127,12 +127,13 @@ servers have no portable, user-local installer — `clangd` ships with the C/C++
 toolchain — so Koda uses them when present and says so plainly when they are
 not. Others need a whole toolchain, and Koda provisions it: the **.NET SDK** for
 C#, a **checksum-verified Eclipse Adoptium JDK** for Java, an isolated **JDK 21**
-for Kotlin, a **Dart SDK** for Dart, a **GPG-verified Swift toolchain** on
-supported Linux systems, a coordinated **Erlang/OTP + Elixir + ElixirLS** stack
-on glibc systems, a **`Perl::LanguageServer`** built into an isolated `local::lib`
-with a checksum-verified `cpanm`, and a self-contained **lua-language-server**.
-`sqls`, `solargraph`, `asm-lsp` and the npm-based servers use their own package
-managers. Everything lives under Koda's own data directory.
+for Kotlin, a **Dart SDK** for Dart, a **GPG-verified Swift toolchain** (native
+or the portable build with a compatibility layer), a coordinated **Erlang/OTP +
+Elixir + ElixirLS** stack on glibc systems, and **PLS** (or
+`Perl::LanguageServer`) built into an isolated `local::lib` with a
+checksum-verified `cpanm`. `sqls`, `solargraph`, `asm-lsp` and the npm-based
+servers use their own package managers. Everything lives under Koda's own data
+directory.
 **Language Setup…** in the command palette then lists every tool Koda knows
 about and installs a missing one with a single `Enter` — through the official
 channel, so provenance and integrity stay with the package manager:
@@ -153,10 +154,11 @@ channel, so provenance and integrity stay with the package manager:
 | `sqls` | SQL language server | `go install github.com/sqls-server/sqls@latest` |
 | `solargraph` | Ruby language server | `gem install solargraph` |
 | `asm-lsp` | Assembly language server | `cargo install asm-lsp` |
-| `sourcekit-lsp` | Swift language server | a **GPG-verified Swift toolchain** on swift.org's supported Linux distributions; detected otherwise |
+| `sourcekit-lsp` | Swift language server | a **GPG-verified Swift toolchain** (native or the portable UBI10 build plus a compatibility layer); detected otherwise |
 | `dart` analysis server | Dart/Flutter language server | a **managed Dart SDK** (Google `dart-archive`, checksum-verified) |
 | `elixir-ls` / `language_server.sh` | Elixir language server | a managed **Erlang/OTP + Elixir + ElixirLS** stack (`builds.hex.pm`, checksum-verified) |
-| `Perl::LanguageServer` | Perl language server | a checksum-verified `cpanm` into a Koda-managed `local::lib` (isolated from system Perl) |
+| `pls` | Perl language server (preferred) | a checksum-verified `cpanm` into a Koda-managed `local::lib` |
+| `Perl::LanguageServer` | Perl language server (fallback) | the same isolated `local::lib` (needs `Coro`, so on older Perls) |
 | `vscode-html-language-server` | HTML language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
 | `vscode-css-language-server` | CSS language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
 | `rustfmt` | Rust formatting | `rustup component add rustfmt` |
@@ -166,6 +168,7 @@ channel, so provenance and integrity stay with the package manager:
 | `shfmt` | Shell formatting | `go install mvdan.cc/sh/v3/cmd/shfmt@latest` |
 | `perltidy` | Perl formatting | `cpan Perl::Tidy` |
 | `dart format` | Dart formatting | ships with the managed Dart SDK (via a temporary-file contract) |
+| `mix format` | Elixir formatting | ships with the managed Erlang/Elixir runtime (stdin contract) |
 
 ### Managed toolchains
 
@@ -176,8 +179,8 @@ installation by running the real tool — never just because a file exists.
 
 | Component | Source | Integrity | Platforms |
 | --- | --- | --- | --- |
-| Swift toolchain | `download.swift.org` | GPG signature (`all-keys.asc`), fail-closed | Ubuntu 22.04/24.04/26.04, Debian 12/13, Fedora 39/41, Amazon Linux 2/2023 |
-| Erlang/OTP + Elixir | `builds.hex.pm` (Erlang Ecosystem Foundation) | SHA-256 from `builds.txt`, fail-closed | glibc Linux (best-effort Ubuntu 24.04 target where unnamed) |
+| Swift toolchain | `download.swift.org` | GPG signature (`all-keys.asc`), fail-closed | native builds for Ubuntu 22.04/24.04/26.04, Debian 12/13, Fedora 39/41, Amazon Linux 2/2023; the portable UBI10 build plus a compatibility layer on other glibc Linux |
+| Erlang/OTP + Elixir | `builds.hex.pm` (Erlang Ecosystem Foundation) | SHA-256 from `builds.txt`, fail-closed | glibc Linux (best-effort Ubuntu 24.04 target where unnamed; musl excluded) |
 | ElixirLS | official GitHub release | SHA-256 asset digest | same as Erlang/Elixir |
 | Dart SDK | Google `dart-archive` | sibling `.sha256sum`, fail-closed | Linux/macOS/Windows, x86_64/arm64 |
 | Node.js | `nodejs.org` | `SHASUMS256.txt` | Linux/macOS/Windows, x86_64/arm64 |
@@ -186,7 +189,15 @@ installation by running the real tool — never just because a file exists.
 | Kotlin | pinned server + managed JDK 21 | — | with a managed JDK |
 | Lua | `LuaLS` release | — | Linux/macOS/Windows |
 | OmniSharp | GitHub release + `dotnet-install.sh` | — | Linux/macOS/Windows |
-| `cpanm` for Perl | MetaCPAN | SHA-256 (MetaCPAN), fail-closed | wherever a system `perl` exists |
+| Perl (PLS, and `Perl::LanguageServer`) | CPAN, via a checksum-verified `cpanm` | SHA-256 (`App::cpanminus`), fail-closed | wherever a system `perl` exists |
+
+On a glibc distribution swift.org does not build for, Koda uses its **UBI10**
+toolchain and a **managed compatibility layer**: a `libncurses.so.6` alias to the
+system's `libncursesw.so.6` (the same library) and a link to the system's
+`libxml2.so.2`. Nothing in the system is copied or modified — the links live
+under Koda's data directory and are used through a scoped `LD_LIBRARY_PATH`. If
+the distribution's `libxml2.so.2` is missing, Koda names the package to install
+(on Arch: `libxml2-legacy`) and keeps built-in editing until it is present.
 
 A large managed download (the Swift toolchain, the Dart SDK) is described with an
 approximate size before it starts, and a platform Koda cannot build for is
@@ -210,6 +221,36 @@ runtimes on their `PATH` and a private, scoped environment (`DOTNET_ROOT`,
 environment is left untouched. Installation is serialised with an advisory lock
 (with stale-lock recovery), so two Koda instances cannot corrupt the same
 managed prefix.
+
+### Language setup status
+
+How Koda obtains each language server, based on the actual implementation (not
+marketing). "Automatic" means Koda downloads and verifies the tooling itself;
+"needs X" means Koda installs through an existing toolchain and reports the
+prerequisite when it is absent.
+
+| Language | Language server | Koda's setup |
+| --- | --- | --- |
+| Rust | `rust-analyzer` | automatic (`rustup`, bootstrapped if missing) |
+| Go | `gopls` | needs the Go toolchain (`go install`) |
+| Python | `pylsp` | automatic (Koda-managed virtualenv) |
+| TypeScript / JavaScript | `typescript-language-server` | automatic (Koda-managed Node.js) |
+| C / C++ | `clangd` | discovered (ships with the C/C++ toolchain) |
+| Java | `jdtls` | automatic (checksum-verified JDK 25) |
+| C# | `OmniSharp` | automatic (managed .NET SDK) |
+| PHP | `phpactor` | discovered (`composer`) |
+| Kotlin | `kotlin-language-server` | automatic (dedicated JDK 21) |
+| Lua | `lua-language-server` | automatic (self-contained archive) |
+| Ruby | `solargraph` | needs Ruby (`gem install`) |
+| SQL | `sqls` | needs Go (`go install`) |
+| Assembly | `asm-lsp` | needs Rust (`cargo install`) |
+| Swift | `sourcekit-lsp` | automatic (GPG-verified toolchain; native or portable + compatibility layer) |
+| Dart / Flutter | `dart language-server` | automatic (checksum-verified Dart SDK) |
+| Elixir | `ElixirLS` | automatic (Erlang/OTP + Elixir + ElixirLS) |
+| Perl | `PLS` (or `Perl::LanguageServer`) | automatic (checksum-verified `cpanm` + isolated `local::lib`) |
+| HTML | `vscode-html-language-server` | automatic (Koda-managed Node.js) |
+| CSS | `vscode-css-language-server` | automatic (Koda-managed Node.js) |
+| Markdown / JSON / TOML / YAML | — | offline built-in intelligence, no server needed |
 
 ### Supported languages
 

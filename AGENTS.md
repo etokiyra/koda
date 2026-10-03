@@ -268,6 +268,21 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   build uses a best-effort target and still verifies the result. Perl bootstraps a
   checksum-verified `cpanm` so an interactive, unconfigured `cpan` is never run,
   and installs into an isolated `local::lib` (`PERL5LIB`).
+- **Swift is portable, not allowlisted.** A distribution swift.org does not build
+  for gets the portable **UBI10** toolchain plus a managed compatibility layer:
+  `libncurses.so.6` is aliased to the system's `libncursesw.so.6` (the same
+  library, a different soname) and `libxml2.so.2` is linked from the system, both
+  from a directory under Koda's data directory and used through a scoped
+  `LD_LIBRARY_PATH`. The system is never modified and no library is bundled; if
+  the distribution cannot provide `libxml2.so.2`, Koda names the package instead
+  of downloading a toolchain that cannot run. `libc_is_musl` keeps the glibc
+  build off musl systems.
+- **A language may have more than one candidate server.** `Tool::ALL` order is the
+  preference order and `Tool::available_server` / `Tool::installable_server`
+  choose the first server that is actually available or installable. Perl is the
+  first user: **PLS** (no `Coro` dependency, so it builds on current Perls) is
+  preferred, with `Perl::LanguageServer` discovered as a fallback. The editor
+  still tracks one running server per language.
 - **Split editor.** The editor keeps a single active document; a split stores
   one document index per pane and `editor.active` follows the focused pane, so
   every existing editing path keeps working unchanged. Panes share the tab

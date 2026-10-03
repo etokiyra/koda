@@ -32,9 +32,9 @@ Lua → built-in, offline (managed lua-language-server)
 Kotlin → built-in, offline (managed JDK 21 + kotlin-language-server)
 Ruby / SQL → built-in, offline (solargraph / sqls installed when possible)
 Dart → built-in, offline (managed Dart SDK + analysis server)
-Perl → built-in, offline (bootstrapped cpanm + managed local::lib)
+Swift → built-in, offline (GPG-verified toolchain: native or portable + compat)
+Perl → built-in, offline (managed PLS / Perl::LanguageServer in a local::lib)
 Elixir → built-in, offline (managed Erlang/OTP + Elixir + built ElixirLS)
-Swift → built-in, offline (GPG-verified toolchain on supported distributions)
 Assembly → built-in, offline (asm-lsp installed when possible)
 HTML / CSS → built-in, offline (npm servers)
 then expand
@@ -251,12 +251,16 @@ command palette already reports which are available. Filling them in is additive
       their own package managers.
 - [x] First-class managed toolchains for the previously discovery-only languages.
       **Dart** provisions a checksum-verified SDK; **Swift** downloads and
-      GPG-verifies the official toolchain on the distributions swift.org builds
-      for; **Elixir** installs a checksum-verified Erlang/OTP + Elixir pair and
-      builds the official ElixirLS into a private Mix home; **Perl** bootstraps a
-      checksum-verified `cpanm` and installs `Perl::LanguageServer` into an
-      isolated `local::lib`. Each runs the real server to verify the result, and
-      every unsupported platform is reported instead of attempted.
+      GPG-verifies the official toolchain — the native build on swift.org's
+      distributions, or the portable UBI10 build plus a managed compatibility
+      layer on other glibc Linux (verified live on Arch) — and **Elixir** installs
+      a checksum-verified Erlang/OTP + Elixir pair and builds the official
+      ElixirLS into a private Mix home. **Perl** prefers **PLS** (no `Coro`
+      dependency, so it runs on current Perls) installed with a checksum-verified
+      `cpanm` into an isolated `local::lib`, with `Perl::LanguageServer` as a
+      discovered fallback. A language may have several candidate servers and Koda
+      picks the first that is available. Each runs the real server to verify the
+      result, and every unsupported platform is reported instead of attempted.
 - [x] Web tokenizer depth: regex literals (expression-position lookback) and
       single-line JSX tags, attributes, fragments and closing tags for
       JavaScript/TypeScript/JSX, with generics and comparisons kept as operators.
@@ -344,16 +348,17 @@ command palette already reports which are available. Filling them in is additive
   provisions an isolated, checksum-verified JDK 21 under `tools/kotlin-jdk` and
   launches the server with it; the JDK 25 used by `jdtls` is untouched. A live
   test guards the JDK 21 + server + LSP handshake path.
-- **Managed Swift is limited to swift.org's platforms, and Perl to older Perls.**
-  The official Swift Linux toolchains link against the distribution's libraries,
-  so Koda installs one only where swift.org builds for the running release
-  (Ubuntu, Debian, Fedora, Amazon Linux); elsewhere it discovers an existing
-  toolchain and explains the limitation. `Perl::LanguageServer` depends on `Coro`,
-  whose latest release does not compile on Perl ≥ 5.41, so Koda bootstraps a
-  checksum-verified `cpanm` and installs into an isolated `local::lib` on the
-  Perls that can build it, and reports the failure clearly otherwise. Every other
-  language is genuinely provisioned (Dart SDK, Erlang/OTP + Elixir + ElixirLS,
-  JDK 21/25, .NET SDK, Node.js, Lua).
+- **Swift uses the native build or the portable UBI10 build.** On Ubuntu, Debian,
+  Fedora and Amazon Linux Koda installs swift.org's build for that release. On
+  other glibc distributions it installs the portable UBI10 build and a managed
+  compatibility layer, which needs the distribution's `libxml2.so.2` (Arch:
+  `libxml2-legacy`). musl systems and non-Linux hosts fall back to discovery.
+  The download is ~1.1 GB and extracts to ~3.5 GB.
+- **Perl uses PLS on current Perls.** `Perl::LanguageServer` depends on `Coro`,
+  which does not compile on Perl ≥ 5.41, so Koda prefers PLS (no `Coro`) and keeps
+  `Perl::LanguageServer` as a discovered fallback. Both install into the same
+  isolated `local::lib`. Every other language is genuinely provisioned (Dart SDK,
+  Erlang/OTP + Elixir + ElixirLS, JDK 21/25, .NET SDK, Node.js, Lua).
 - `.gitignore` discovery is capped (256 nested files, 4096 directories) so
   opening a huge monorepo stays predictable; a rule beyond the cap is not
   applied.

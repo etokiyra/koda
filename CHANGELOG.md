@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Portable Swift, a working Perl server on modern Perl, and `mix format`
+
+- **Swift now runs on distributions swift.org does not build for, including
+  Arch.** On a supported distribution Koda still installs the native artifact; on
+  any other glibc Linux system it installs the portable **UBI10** build (the same
+  one the maintained Arch package uses) plus a **managed compatibility layer** —
+  a `libncurses.so.6` alias to the system's `libncursesw.so.6` and a link to the
+  system's `libxml2.so.2` — used through a scoped `LD_LIBRARY_PATH`. Nothing in
+  the system is copied or modified. When the distribution's `libxml2.so.2` is
+  missing, Koda names the package to install (Arch: `libxml2-legacy`) instead of
+  downloading a toolchain that cannot run. The download is GPG-verified against
+  swift.org's keys and is reused when it already verifies, so a retried install
+  does not re-download it. **Live-verified on Arch**: UBI10 install, compatible
+  launch, and the LSP handshake.
+- **Perl works on current Perl again.** `Perl::LanguageServer` depends on `Coro`,
+  whose latest release does not compile on Perl ≥ 5.41. Koda now prefers **PLS**
+  (a maintained, Coro-free Perl language server) — installed from CPAN with a
+  checksum-verified `cpanm` into the same isolated `local::lib` — and keeps
+  `Perl::LanguageServer` as a discovered fallback. A language can now have more
+  than one candidate server and Koda picks the first that is actually available,
+  in preference order. **Live-verified**: PLS `initialize` handshake and
+  completion/definition/symbol capabilities on Perl 5.42.
+- **Elixir formatting via `mix format`.** The Elixir provider exposes
+  `Formatting` and formats through `mix format -` (stdin → stdout) with Koda's
+  managed Erlang/Elixir and a private `MIX_HOME`, run from the enclosing Mix
+  project so `.formatter.exs` applies. **Live-verified** with the managed runtime.
+- **Shared reliability.** Downloads now retry transient network failures
+  (`--retry`) and reuse an already-verified GPG archive; libc is detected
+  explicitly (musl is reported unsupported rather than attempted); a
+  user-writable library directory lets a rootless user supply a compatibility
+  library.
+
 ### Managed Swift, Elixir and Perl — every discovery-only language made first-class
 
 - **Swift is now managed on supported systems.** On a distribution swift.org
