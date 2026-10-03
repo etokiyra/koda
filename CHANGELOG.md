@@ -49,6 +49,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Zero configuration
 
+- Tool installation is now **user-local, so a permission error can never block
+  it**. Koda installs npm-based tools (`bash-language-server`) into a prefix it
+  manages under the user's data directory (with a matching user-writable cache)
+  instead of the system-wide prefix that `npm install -g` uses by default, and
+  only falls back to the user's own global prefix (nvm, fnm, volta, …)
+  afterwards. pip tooling already used `--user`/`pipx`.
+- Koda only offers to install a tool when one of its package managers is
+  actually present, so it never promises an install it cannot perform. It also
+  searches more user bin directories (`~/go/bin`, pnpm, and its own managed npm
+  prefix), so a `go install` or a user-local npm install is found even when
+  those directories are not on `PATH`.
 - Tool discovery now searches `PATH` and then a handful of well-known user bin
   directories (`~/.cargo/bin`, `~/.local/bin`, `~/bin`, …). Koda is often
   launched from a GUI or a non-login shell whose `PATH` omits exactly the

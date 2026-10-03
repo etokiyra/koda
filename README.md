@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-264%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-266%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -134,6 +134,11 @@ channel, so provenance and integrity stay with the package manager:
 Servers start lazily, recover automatically if they exit, and fall back to the
 built-in providers whenever one is unavailable, so editing never depends on
 them.
+
+Every install targets a directory you can write to — `rustup` under
+`~/.cargo`, `go install` under `~/go`, `pip --user`/`pipx` under `~/.local`, and
+an npm prefix Koda manages under its own data directory — so Koda never needs
+`sudo` and a system-owned prefix can never make provisioning fail.
 
 ### Supported languages
 

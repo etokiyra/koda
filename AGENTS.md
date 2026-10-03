@@ -206,6 +206,12 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   creation is instant, offline and toolchain-independent. It never deletes a
   partial project: a failure returns the root so the UI can explain what
   happened.
+- **User-local tool installs.** Provisioning never writes to a system-owned
+  location: `rustup`/`go install` place tools in the user's home, pip uses
+  `--user`/`pipx`, and npm-based tools use a prefix Koda manages under its data
+  directory (with a matching cache). A missing permission therefore cannot make
+  an install fail, and every resulting bin directory is searched when locating
+  tools, alongside the usual user bin directories.
 - **Split editor.** The editor keeps a single active document; a split stores
   one document index per pane and `editor.active` follows the focused pane, so
   every existing editing path keeps working unchanged. Panes share the tab

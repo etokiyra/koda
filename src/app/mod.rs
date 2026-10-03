@@ -4321,7 +4321,7 @@ impl App {
         let Some(tool) = Tool::for_language(language, ToolPurpose::LanguageServer) else {
             return false;
         };
-        if tools.available(tool) || tool.install_command().is_none() {
+        if tools.available(tool) || !crate::language::tools::can_install(tool) {
             return false;
         }
         if !self.setup_offered.insert(language) {
@@ -4369,7 +4369,7 @@ impl App {
             let item = if status.available {
                 let detail = status.summary();
                 PickerItem::new(label, detail.clone(), PickerAction::Info(detail))
-            } else if tool.install_command().is_some() {
+            } else if crate::language::tools::can_install(tool) {
                 let hint = tool.install_hint();
                 PickerItem::new(label, hint.to_string(), PickerAction::InstallTool(tool))
                     .shortcut("Enter")
@@ -6000,11 +6000,12 @@ mod tests {
             app.apply_background_events();
             std::thread::sleep(Duration::from_millis(5));
         }
-        // Only meaningful when rust-analyzer is actually missing.
+        // Only meaningful when rust-analyzer is missing and rustup is present.
         if !app
             .tools
             .as_ref()
             .is_some_and(|tools| !tools.available(Tool::RustAnalyzer))
+            || !crate::language::tools::can_install(Tool::RustAnalyzer)
         {
             fs::remove_dir_all(&dir).ok();
             return;
@@ -6045,8 +6046,13 @@ mod tests {
             .tools
             .as_ref()
             .is_some_and(|tools| !tools.available(Tool::RustAnalyzer));
+        let installable = crate::language::tools::can_install(Tool::RustAnalyzer);
         let offered = app.maybe_offer_tool_setup();
-        assert_eq!(offered, missing, "the offer must track tool availability");
+        assert_eq!(
+            offered,
+            missing && installable,
+            "the offer must track tool availability and installability"
+        );
         if offered {
             let Overlay::Picker(picker) = &app.overlay else {
                 panic!("expected the install prompt");

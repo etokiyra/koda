@@ -109,7 +109,7 @@ impl Tool {
             Tool::RustAnalyzer => "install with `rustup component add rust-analyzer`",
             Tool::Gopls => "install with `go install golang.org/x/tools/gopls@latest`",
             Tool::Pylsp => "install with `pipx install python-lsp-server`",
-            Tool::BashLs => "install with `npm install -g bash-language-server`",
+            Tool::BashLs => "install with `npm` — Koda uses a user-local prefix",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
         }
@@ -123,49 +123,113 @@ impl Tool {
             .find(|tool| tool.language() == language && tool.purpose() == purpose)
     }
 
-    /// Candidate install commands, most preferred first.
+    /// The preferred install command, when one exists.
+    ///
+    /// This is the human-facing headline command — used to decide whether a
+    /// tool is installable and to describe it — while the actual attempt uses
+    /// [`Tool::install_plan`], which may choose a user-local target.
+    pub fn install_command(self) -> Option<(&'static str, &'static [&'static str])> {
+        match self {
+            Tool::RustAnalyzer => Some(("rustup", &["component", "add", "rust-analyzer"])),
+            Tool::Rustfmt => Some(("rustup", &["component", "add", "rustfmt"])),
+            Tool::Gopls => Some(("go", &["install", "golang.org/x/tools/gopls@latest"])),
+            Tool::Pylsp => Some(("pipx", &["install", "python-lsp-server"])),
+            Tool::BashLs => Some(("npm", &["install", "-g", "bash-language-server"])),
+            Tool::Gofmt => None,
+        }
+    }
+
+    /// The ordered commands Koda will actually run to install this tool.
     ///
     /// Koda runs only official acquisition paths — `rustup`, `go install`,
-    /// `pipx`/`pip` — so provenance and integrity stay with those tools rather
-    /// than a bespoke downloader. Python tooling is offered through several
-    /// package managers because no single one is available everywhere.
-    pub fn install_commands(self) -> &'static [(&'static str, &'static [&'static str])] {
+    /// `pipx`/`pip`, `npm` — so provenance stays with those tools. Every
+    /// strategy targets a location the user can write to, never a system-owned
+    /// prefix, so a missing permission can never block the install. The first
+    /// command that succeeds wins.
+    pub fn install_plan(self) -> Vec<InstallStep> {
         match self {
-            Tool::RustAnalyzer => &[("rustup", &["component", "add", "rust-analyzer"])],
-            Tool::Rustfmt => &[("rustup", &["component", "add", "rustfmt"])],
-            Tool::Gopls => &[("go", &["install", "golang.org/x/tools/gopls@latest"])],
-            Tool::BashLs => &[("npm", &["install", "-g", "bash-language-server"])],
-            Tool::Pylsp => &[
-                ("pipx", &["install", "python-lsp-server"]),
-                (
+            Tool::RustAnalyzer => {
+                vec![InstallStep::new(
+                    "rustup",
+                    &["component", "add", "rust-analyzer"],
+                )]
+            }
+            Tool::Rustfmt => vec![InstallStep::new("rustup", &["component", "add", "rustfmt"])],
+            Tool::Gopls => vec![InstallStep::new(
+                "go",
+                &["install", "golang.org/x/tools/gopls@latest"],
+            )],
+            Tool::Pylsp => vec![
+                InstallStep::new("pipx", &["install", "python-lsp-server"]),
+                InstallStep::new(
                     "python3",
                     &["-m", "pip", "install", "--user", "python-lsp-server"],
                 ),
-                ("pip3", &["install", "--user", "python-lsp-server"]),
-                (
+                InstallStep::new("pip3", &["install", "--user", "python-lsp-server"]),
+                InstallStep::new(
                     "python",
                     &["-m", "pip", "install", "--user", "python-lsp-server"],
                 ),
             ],
+            Tool::BashLs => {
+                // A user-local npm prefix always works; `npm install -g` into a
+                // root-owned prefix fails with EACCES on many systems. Try the
+                // user-local target first, then fall back to whatever global
+                // prefix the user's npm (nvm, fnm, volta, …) already uses.
+                let mut steps = Vec::new();
+                if let Some(prefix) = npm_prefix() {
+                    // A user-writable cache too: a `~/.npm` left root-owned by a
+                    // past `sudo npm` would otherwise fail with EACCES.
+                    let cache = prefix.with_file_name("npm-cache");
+                    steps.push(InstallStep {
+                        program: "npm".to_string(),
+                        args: vec![
+                            "install".to_string(),
+                            "-g".to_string(),
+                            "--prefix".to_string(),
+                            prefix.to_string_lossy().into_owned(),
+                            "--cache".to_string(),
+                            cache.to_string_lossy().into_owned(),
+                            "bash-language-server".to_string(),
+                        ],
+                    });
+                }
+                steps.push(InstallStep::new(
+                    "npm",
+                    &["install", "-g", "bash-language-server"],
+                ));
+                steps
+            }
             // `gofmt` ships with the Go toolchain; there is nothing to install.
-            Tool::Gofmt => &[],
+            Tool::Gofmt => Vec::new(),
         }
     }
+}
 
-    /// The preferred install command, when one exists.
-    pub fn install_command(self) -> Option<(&'static str, &'static [&'static str])> {
-        self.install_commands().first().copied()
+/// One command in an install plan.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InstallStep {
+    pub program: String,
+    pub args: Vec<String>,
+}
+
+impl InstallStep {
+    fn new(program: &str, args: &[&str]) -> Self {
+        InstallStep {
+            program: program.to_string(),
+            args: args.iter().map(|arg| (*arg).to_string()).collect(),
+        }
     }
 }
 
 /// Install a tool through its trusted package managers.
 ///
-/// Intended for the background worker. Tries each candidate command in turn and
+/// Intended for the background worker. Tries each planned command in turn and
 /// returns a short success message, or the most recent actionable error so the
 /// user sees what went wrong even when the network is unavailable.
 pub fn install(tool: Tool) -> Result<String, String> {
-    let commands = tool.install_commands();
-    if commands.is_empty() {
+    let plan = tool.install_plan();
+    if plan.is_empty() {
         return Err(format!(
             "{} cannot be installed automatically — {}",
             tool.label(),
@@ -174,8 +238,8 @@ pub fn install(tool: Tool) -> Result<String, String> {
     }
 
     let mut last_error = None;
-    for (program, args) in commands {
-        match Command::new(program).args(*args).output() {
+    for step in &plan {
+        match Command::new(&step.program).args(&step.args).output() {
             Ok(output) if output.status.success() => {
                 return Ok(format!("Installed {}", tool.label()));
             }
@@ -190,11 +254,21 @@ pub fn install(tool: Tool) -> Result<String, String> {
                 last_error = Some(format!("{}: {message}", tool.label()));
             }
             Err(err) => {
-                last_error = Some(format!("could not run {program}: {err}"));
+                last_error = Some(format!("could not run {}: {err}", step.program));
             }
         }
     }
     Err(last_error.unwrap_or_else(|| format!("could not install {}", tool.label())))
+}
+
+/// Whether any package manager in `tool`'s install plan is actually available.
+///
+/// Koda only offers to install a tool when it can really do it, so it never
+/// promises an install and then fails because no package manager exists.
+pub fn can_install(tool: Tool) -> bool {
+    tool.install_plan()
+        .iter()
+        .any(|step| locate(&step.program).is_some())
 }
 
 /// What Koda learned about one tool.
@@ -339,15 +413,41 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         dirs.push(home.join(".cargo/bin"));
         dirs.push(home.join(".local/bin"));
         dirs.push(home.join("bin"));
+        dirs.push(home.join("go/bin"));
         dirs.push(home.join(".bun/bin"));
         dirs.push(home.join(".deno/bin"));
         dirs.push(home.join(".npm-global/bin"));
+        dirs.push(home.join(".local/share/pnpm"));
+    }
+    // Tools Koda installed itself, plus the npm prefix it manages.
+    if let Some(tools) = tools_dir() {
+        if let Some(prefix) = npm_prefix() {
+            dirs.push(prefix.join("bin"));
+            dirs.push(prefix.join("node_modules/.bin"));
+            dirs.push(prefix);
+        }
+        dirs.push(tools.join("bin"));
     }
     dirs.push(PathBuf::from("/usr/local/bin"));
     dirs.push(PathBuf::from("/opt/homebrew/bin"));
     dirs.push(PathBuf::from("/usr/bin"));
     dirs.push(PathBuf::from("/bin"));
     dirs
+}
+
+/// Koda's own directory for tools it installs, kept under the user's data
+/// directory so no elevated permissions are ever required.
+pub fn tools_dir() -> Option<PathBuf> {
+    if let Some(data) = std::env::var_os("XDG_DATA_HOME") {
+        return Some(PathBuf::from(data).join("koda/tools"));
+    }
+    Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/share/koda/tools"))
+}
+
+/// The npm prefix Koda installs global packages into. It is user-writable, so
+/// `npm install -g --prefix` never hits a permission error.
+pub fn npm_prefix() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("npm"))
 }
 
 #[cfg(test)]
@@ -404,16 +504,53 @@ mod tests {
         );
         // Python tooling has pip fallbacks, so installation is attempted even
         // without pipx.
-        assert!(Tool::Pylsp.install_commands().len() >= 2);
-        for tool in Tool::ALL {
-            assert_eq!(
-                tool.install_command(),
-                tool.install_commands().first().copied()
-            );
-        }
+        assert!(Tool::Pylsp.install_plan().len() >= 2);
         assert_eq!(Tool::Gofmt.install_command(), None);
         // `gofmt` cannot be installed on its own.
         assert!(install(Tool::Gofmt).is_err());
+    }
+
+    #[test]
+    fn install_plans_never_need_elevated_permissions() {
+        // `npm install -g` into a root-owned prefix fails with EACCES, so the
+        // plan must offer a user-local prefix first.
+        let Some(prefix) = npm_prefix() else {
+            return; // No home directory; nothing to manage.
+        };
+        let plan = Tool::BashLs.install_plan();
+        let first = plan.first().expect("an npm install step");
+        assert_eq!(first.program, "npm");
+        assert!(
+            first.args.iter().any(|arg| arg == "--prefix"),
+            "the first npm step should use --prefix: {:?}",
+            first.args
+        );
+        assert!(
+            first
+                .args
+                .iter()
+                .any(|arg| arg == &prefix.to_string_lossy()),
+            "the prefix should be Koda's own user-local directory: {:?}",
+            first.args
+        );
+        // pipx and pip --user are likewise user-local.
+        for step in Tool::Pylsp.install_plan() {
+            let user_local = step.program == "pipx" || step.args.iter().any(|arg| arg == "--user");
+            assert!(user_local, "pylsp step is not user-local: {step:?}");
+        }
+    }
+
+    #[test]
+    fn user_tool_directories_are_searched() {
+        let dirs = known_bin_dirs();
+        assert!(dirs.iter().any(|dir| dir.ends_with(".cargo/bin")));
+        assert!(dirs.iter().any(|dir| dir.ends_with("go/bin")));
+        if let Some(prefix) = npm_prefix() {
+            assert!(
+                dirs.iter().any(|dir| dir == &prefix.join("bin")),
+                "the managed npm prefix should be searched"
+            );
+        }
     }
 
     #[test]
