@@ -49,6 +49,29 @@ const KOTLIN_LS_VERSION: &str = "1.3.13";
 /// published `.sha256sum` stay in step.
 const DART_SDK_VERSION: &str = "3.13.5";
 
+/// The Swift toolchain release Koda provisions on supported Linux systems.
+///
+/// Swift ships one signed toolchain tarball per distribution release; the exact
+/// asset is resolved from `/etc/os-release` at install time. The version is
+/// pinned so the download URL, the signature URL and the verified key stay in
+/// step.
+const SWIFT_VERSION: &str = "6.4.0";
+
+/// The ElixirLS release Koda provisions. Its launcher needs a matching
+/// Erlang/OTP and Elixir runtime, which Koda installs alongside it.
+const ELIXIR_LS_VERSION: &str = "0.31.1";
+
+/// The Erlang/OTP and Elixir releases Koda provisions. They are pinned as a
+/// compatible pair: the Elixir build is compiled for this OTP major.
+const OTP_VERSION: &str = "27.3.4";
+const ELIXIR_VERSION: &str = "1.18.4";
+
+/// `App::cpanminus`, the non-interactive CPAN client Koda bootstraps so Perl
+/// modules can be installed without an interactive `cpan` first run. The
+/// archive and its SHA-256 (from MetaCPAN) are pinned together.
+const CPANM_VERSION: &str = "1.7049";
+const CPANM_SHA256: &str = "b9ffb88e62a06aa91bd7d5a28ef6bdbb942608aea90e3969aa29b33640035214";
+
 /// The longest a single install command may run before it is killed. Package
 /// managers can legitimately take a while on a slow link, but a hung process
 /// must never wedge the background worker forever.
@@ -171,7 +194,7 @@ impl Tool {
     /// probes every name so an existing install is still found.
     pub fn candidates(self) -> &'static [&'static str] {
         match self {
-            Tool::ElixirLs => &["language_server.sh"],
+            Tool::ElixirLs => &["language_server.sh", "language_server.bat"],
             _ => &[],
         }
     }
@@ -385,11 +408,13 @@ impl Tool {
             Tool::RubyLs => "install with `gem install solargraph`",
             Tool::AsmLsp => "install with `cargo install asm-lsp`",
             Tool::PerlLs => {
-                "Koda installs Perl::LanguageServer with `cpanm` into an isolated local::lib"
+                "Koda bootstraps cpanm and installs Perl::LanguageServer into an isolated local::lib"
             }
             Tool::DartAnalyzer => "Koda can install a managed Dart SDK for the analysis server",
-            Tool::ElixirLs => "install ElixirLS; it needs your Erlang/Elixir toolchain",
-            Tool::SwiftLs => "install the Swift toolchain — it ships `sourcekit-lsp`",
+            Tool::ElixirLs => "Koda can install Erlang/OTP, Elixir and ElixirLS",
+            Tool::SwiftLs => {
+                "Koda can install a GPG-verified Swift toolchain on supported Linux distributions"
+            }
             Tool::HtmlLs | Tool::CssLs => "install with npm — Koda provisions Node.js if missing",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
@@ -397,6 +422,61 @@ impl Tool {
             Tool::ClangFormat => "it ships with the Clang/LLVM toolchain",
             Tool::Shfmt => "install it with `go install mvdan.cc/sh/v3/cmd/shfmt@latest`",
             Tool::PerlTidy => "install it with `cpan Perl::Tidy`",
+        }
+    }
+
+    /// A rough download size for a managed install, when Koda runs one.
+    ///
+    /// Used to warn about a large download before it starts. It is an estimate,
+    /// not a promise: the archive a distribution serves can change.
+    pub fn estimated_download_bytes(self) -> Option<u64> {
+        match self {
+            Tool::SwiftLs if swift_asset().is_some() => Some(1_150_000_000),
+            Tool::DartAnalyzer if dart_sdk_asset().is_some() => Some(240_000_000),
+            Tool::ElixirLs if bob_platform().is_some() => Some(90_000_000),
+            Tool::KotlinLs => Some(260_000_000),
+            Tool::Jdtls => Some(260_000_000),
+            Tool::OmniSharp => Some(280_000_000),
+            Tool::LuaLs => Some(15_000_000),
+            _ => None,
+        }
+    }
+
+    /// A precise, actionable reason a tool is not usable, for Language Setup.
+    ///
+    /// Unlike [`Tool::install_hint`] this distinguishes "Koda can install this",
+    /// "this platform is unsupported", and "a prerequisite is missing", so the
+    /// UI never tells the user to install something Koda would do itself.
+    pub fn setup_reason(self) -> String {
+        if can_install(self) {
+            let mut reason = self.install_hint().to_string();
+            if let Some(bytes) = self.estimated_download_bytes() {
+                reason.push_str(&format!(" (about {})", human_bytes(bytes)));
+            }
+            return reason;
+        }
+        match self {
+            Tool::SwiftLs if locate("gpg").is_none() => {
+                "install `gnupg` so Koda can verify the Swift toolchain signature".to_string()
+            }
+            Tool::SwiftLs => "swift.org publishes toolchains only for Ubuntu, Debian, Fedora, \
+                 Amazon Linux and RHEL; install the Swift toolchain for your distribution and \
+                 Koda will use it"
+                .to_string(),
+            Tool::ElixirLs => "no Erlang/Elixir build is published for this platform; install \
+                 Erlang and Elixir and Koda will use ElixirLS"
+                .to_string(),
+            Tool::PerlLs if locate("perl").is_none() => {
+                "install Perl and Koda can set up Perl::LanguageServer automatically".to_string()
+            }
+            _ => {
+                let missing = self.missing_prerequisites();
+                if missing.is_empty() {
+                    self.install_hint().to_string()
+                } else {
+                    format!("needs {} — {}", missing.join(" or "), self.install_hint())
+                }
+            }
         }
     }
 
@@ -439,10 +519,9 @@ impl Tool {
             Tool::Sqls => Some(("go", &["install", "github.com/sqls-server/sqls@latest"])),
             Tool::RubyLs => Some(("gem", &["install", "solargraph"])),
             Tool::AsmLsp => Some(("cargo", &["install", "asm-lsp"])),
-            // Perl, Dart, Elixir and Swift servers need a toolchain Koda does
-            // not manage; they are discovered when present.
-            Tool::PerlLs => Some(("cpanm", &["Perl::LanguageServer"])),
-            Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => None,
+            // Perl, Dart, Elixir and Swift servers are installed by Koda's own
+            // plans rather than a single package-manager command.
+            Tool::PerlLs | Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => None,
             // `jdtls` and `OmniSharp` are installed by Koda's own managed
             // download plan rather than a single package-manager command.
             Tool::Jdtls | Tool::OmniSharp => None,
@@ -481,11 +560,10 @@ impl Tool {
             Tool::Sqls => &["go"],
             Tool::RubyLs => &["gem"],
             Tool::AsmLsp => &["cargo"],
-            Tool::PerlLs => &["cpanm"],
-            // The Dart SDK is provided by Koda's managed download plan.
-            Tool::DartAnalyzer => &[],
-            Tool::ElixirLs => &["elixir"],
-            Tool::SwiftLs => &["swift"],
+            Tool::PerlLs => &["perl"],
+            // Dart, Erlang/Elixir and the Swift toolchain are provided by
+            // Koda's managed download plans.
+            Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => &[],
             // Formatters.
             Tool::Prettier => &[],
             Tool::Shfmt => &["go"],
@@ -547,11 +625,14 @@ impl Tool {
             )],
             // The Dart SDK is self-contained and managed by Koda.
             Tool::DartAnalyzer => dart_sdk_attempts(),
-            // `Perl::LanguageServer` installs into an isolated local::lib.
+            // `Perl::LanguageServer` bootstraps cpanm and installs into an
+            // isolated local::lib.
             Tool::PerlLs => perl_attempts(),
-            // These servers need a toolchain Koda does not manage; they are
-            // discovered when the user already has one.
-            Tool::ElixirLs | Tool::SwiftLs => Vec::new(),
+            // Erlang/OTP, Elixir and ElixirLS are installed as one toolchain.
+            Tool::ElixirLs => elixir_ls_attempts(),
+            // The Swift toolchain is GPG-verified and only offered where
+            // swift.org publishes a build for the running distribution.
+            Tool::SwiftLs => swift_attempts(),
             Tool::Jdtls => jdtls_attempts(),
             Tool::OmniSharp => omnisharp_attempts(),
             Tool::HtmlLs | Tool::CssLs => npm_attempts(&["vscode-langservers-extracted"]),
@@ -573,6 +654,12 @@ impl Tool {
 pub struct InstallCommand {
     pub program: String,
     pub args: Vec<String>,
+    /// Extra environment variables for this command (for example the managed
+    /// `MIX_HOME`/`HEX_HOME` an Elixir build needs).
+    pub env: Vec<(String, String)>,
+    /// Working directory for this command, when it must run somewhere specific
+    /// (the ElixirLS release directory its installer expects).
+    pub cwd: Option<PathBuf>,
 }
 
 impl InstallCommand {
@@ -580,6 +667,8 @@ impl InstallCommand {
         InstallCommand {
             program: program.to_string(),
             args: args.iter().map(|arg| (*arg).to_string()).collect(),
+            env: Vec::new(),
+            cwd: None,
         }
     }
 
@@ -587,7 +676,21 @@ impl InstallCommand {
         InstallCommand {
             program: program.into(),
             args,
+            env: Vec::new(),
+            cwd: None,
         }
+    }
+
+    /// Add an environment variable to this command.
+    fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.push((key.into(), value.into()));
+        self
+    }
+
+    /// Run this command from `dir`.
+    fn cwd(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.cwd = Some(dir.into());
+        self
     }
 }
 
@@ -602,6 +705,10 @@ pub enum InstallStep {
         dest: PathBuf,
         sha256: Option<String>,
     },
+    /// Download and verify an Erlang/OTP or Elixir build from `builds.hex.pm`,
+    /// whose SHA-256 the same service publishes in `builds.txt`. The archive
+    /// still needs an [`InstallStep::Extract`].
+    BobBuild { package: BobPackage, dest: PathBuf },
     /// Download and verify an Eclipse Adoptium JDK, whose checksum Adoptium
     /// publishes in the same JSON document that carries the link.
     AdoptiumJdk { feature: u32, dest: PathBuf },
@@ -613,6 +720,25 @@ pub enum InstallStep {
     /// publishes beside the archive. The archive still needs an
     /// [`InstallStep::Extract`].
     DartSdk { dest: PathBuf },
+    /// Download `url` and verify it against a detached GPG signature using the
+    /// public keys at `keys_url`. Used for toolchains whose only published
+    /// integrity data is a signature (the Swift toolchain). Fails closed: if
+    /// `gpg` is missing or the signature does not verify, nothing is kept.
+    DownloadGpg {
+        url: String,
+        dest: PathBuf,
+        signature_url: String,
+        keys_url: String,
+    },
+    /// Download a GitHub release asset and verify its SHA-256, which GitHub's
+    /// API now reports as an asset `digest`. The archive still needs an
+    /// [`InstallStep::Extract`].
+    GithubRelease {
+        repo: String,
+        tag: String,
+        asset: String,
+        dest: PathBuf,
+    },
     /// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`, optionally
     /// dropping `strip` leading path components.
     Extract {
@@ -626,6 +752,16 @@ impl From<InstallCommand> for InstallStep {
     fn from(command: InstallCommand) -> Self {
         InstallStep::Run(command)
     }
+}
+
+/// An Erlang/Elixir build distributed by `builds.hex.pm` (the Erlang Ecosystem
+/// Foundation's `bob` build service, which also backs `setup-beam`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BobPackage {
+    /// An Erlang/OTP runtime.
+    Erlang,
+    /// An Elixir distribution compiled for a specific OTP major.
+    Elixir,
 }
 
 /// A strategy for installing a tool: an ordered command sequence that Koda runs
@@ -943,7 +1079,7 @@ pub fn install(tool: Tool) -> Result<String, String> {
         return Err(format!(
             "{} cannot be installed automatically — {}",
             tool.label(),
-            tool.install_hint()
+            tool.setup_reason()
         ));
     }
     let _lock = InstallLock::acquire()?;
@@ -960,8 +1096,16 @@ pub fn install(tool: Tool) -> Result<String, String> {
         }
         // Only a strategy whose steps all succeeded may be trusted, even if a
         // stale binary from a previous attempt happens to probe as available.
-        if completed && probe(tool).available {
-            return Ok(format!("Installed {}", tool.label()));
+        if completed {
+            let status = probe(tool);
+            if status.available {
+                return Ok(format!("Installed {}", tool.label()));
+            }
+            // The steps worked but the tool does not run: keep the reason (a
+            // missing library, a broken launcher) rather than a generic failure.
+            if let Some(detail) = status.error {
+                last_error = Some(format!("{}: {detail}", tool.label()));
+            }
         }
     }
     Err(last_error.unwrap_or_else(|| format!("could not install {}", tool.label())))
@@ -972,9 +1116,22 @@ fn run_step(step: &InstallStep) -> Result<(), String> {
     match step {
         InstallStep::Run(command) => run_command(command),
         InstallStep::Download { url, dest, sha256 } => download(url, dest, sha256.as_deref()),
+        InstallStep::BobBuild { package, dest } => bob_build(*package, dest),
         InstallStep::AdoptiumJdk { feature, dest } => adoptium_jdk(*feature, dest),
         InstallStep::NodeRuntime { dest } => node_runtime(dest),
         InstallStep::DartSdk { dest } => dart_sdk(dest),
+        InstallStep::DownloadGpg {
+            url,
+            dest,
+            signature_url,
+            keys_url,
+        } => download_gpg(url, dest, signature_url, keys_url),
+        InstallStep::GithubRelease {
+            repo,
+            tag,
+            asset,
+            dest,
+        } => github_release(repo, tag, asset, dest),
         InstallStep::Extract {
             archive,
             dest,
@@ -991,18 +1148,45 @@ fn run_step(step: &InstallStep) -> Result<(), String> {
 /// removes that vector while leaving the user's own `~/.npmrc` and similar
 /// configuration in effect.
 ///
-/// A Koda-managed Node.js runtime (once provisioned) is put on `PATH`, so its
-/// bundled `npm` and any `#!/usr/bin/env node` server launcher work even when
-/// the user has no system Node.js.
+/// Koda's managed runtimes (Node.js, Erlang/OTP, Elixir, Dart, Perl, Swift) are
+/// put on `PATH`, so a managed `elixir`, `npm` or `perl` and any
+/// `#!/usr/bin/env` launcher work even before the user has installed anything.
 fn install_command(program: &str) -> Command {
     let mut command = Command::new(program);
     if let Some(dir) = install_work_dir() {
         command.current_dir(dir);
     }
-    if let Some(node) = node_bin_dir() {
-        command.env("PATH", prepend_path(&node.to_string_lossy()));
+    if let Some(path) = managed_path() {
+        command.env("PATH", path);
     }
     command
+}
+
+/// `PATH` with every Koda-managed runtime bin directory first.
+fn managed_path() -> Option<String> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(node) = node_bin_dir() {
+        dirs.push(node);
+    }
+    if let Some(tools) = tools_dir() {
+        dirs.push(tools.join("otp/bin"));
+        dirs.push(tools.join("elixir/bin"));
+        dirs.push(tools.join("dart-sdk/bin"));
+        dirs.push(tools.join("perl5/bin"));
+        dirs.push(tools.join("swift/usr/bin"));
+        dirs.push(tools.join("kotlin-jdk/bin"));
+        dirs.push(tools.join("jdk/bin"));
+        dirs.push(tools.join("dotnet"));
+    }
+    if dirs.is_empty() {
+        return None;
+    }
+    let prefix: Vec<String> = dirs
+        .iter()
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .collect();
+    let existing = std::env::var("PATH").unwrap_or_default();
+    Some(format!("{}:{existing}", prefix.join(":")))
 }
 
 /// The directory install subprocesses run from, created on demand.
@@ -1020,8 +1204,17 @@ fn install_work_dir() -> Option<PathBuf> {
 fn run_command(command: &InstallCommand) -> Result<(), String> {
     use std::process::Stdio;
 
-    let mut child = install_command(&command.program)
-        .args(&command.args)
+    let mut child = install_command(&command.program);
+    child.args(&command.args);
+    if let Some(dir) = &command.cwd {
+        std::fs::create_dir_all(dir)
+            .map_err(|err| format!("could not create {}: {err}", dir.display()))?;
+        child.current_dir(dir);
+    }
+    for (key, value) in &command.env {
+        child.env(key, value);
+    }
+    let mut child = child
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1037,7 +1230,9 @@ fn run_command(command: &InstallCommand) -> Result<(), String> {
             COMMAND_TIMEOUT.as_secs() / 60
         )),
         Some(status) if status.success() => Ok(()),
-        Some(_) => Err(first_stderr_line(&captured.stderr)),
+        // Package managers print the actual error last (the syntax error, the
+        // missing module), so the tail line is the useful one.
+        Some(_) => Err(last_stderr_line(&captured.stderr)),
     }
 }
 
@@ -1055,10 +1250,21 @@ fn download(url: &str, dest: &Path, sha256: Option<&str>) -> Result<(), String> 
         "-L",
         "--fail",
         "-sS",
+        // Decode a gzip transfer encoding. Some CDNs compress text responses
+        // (for example a PGP key block) regardless of the file extension; without
+        // this the downloaded key file is gzip bytes and the signature check fails.
+        "--compressed",
         "--connect-timeout",
         "30",
         "--max-time",
-        "600",
+        "3600",
+        // Abort a genuinely stalled transfer (under 1 KiB/s for a minute) rather
+        // than letting it sit until the hour-long cap, while still allowing a
+        // large managed toolchain to finish on a slow-but-steady link.
+        "--speed-limit",
+        "1024",
+        "--speed-time",
+        "60",
     ]);
     command
         .arg("--max-filesize")
@@ -1295,6 +1501,326 @@ fn dart_sdk(dest: &Path) -> Result<(), String> {
     download(&base, dest, Some(&checksum))
 }
 
+/// Fetch a small text/JSON document over HTTPS with `curl`.
+///
+/// Used to read checksums and API responses; it never writes to disk, and the
+/// body is bounded by the caller through `--max-filesize`.
+fn curl_text(url: &str) -> Result<String, String> {
+    let output = install_command("curl")
+        .args([
+            "--proto",
+            "=https",
+            "--tlsv1.2",
+            "-sS",
+            "-L",
+            "--fail",
+            "--compressed",
+            "--connect-timeout",
+            "30",
+            "--max-time",
+            "120",
+            "-H",
+            "Accept: application/vnd.github+json",
+            "--max-filesize",
+            "1048576",
+        ])
+        .arg(url)
+        .output()
+        .map_err(|err| format!("could not run curl: {err}"))?;
+    if !output.status.success() {
+        return Err(first_stderr_line(&output.stderr));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Download a file and verify it against a detached GPG signature.
+///
+/// The keys are imported into a private keyring under Koda's tools directory, so
+/// the user's own GPG configuration is never touched. Verification is
+/// fail-closed: a missing `gpg`, a missing signature, or a signature that does
+/// not match leaves no downloaded file behind.
+fn download_gpg(url: &str, dest: &Path, signature_url: &str, keys_url: &str) -> Result<(), String> {
+    if locate("gpg").is_none() {
+        return Err(
+            "gpg is required to verify this download — install gnupg and try again".to_string(),
+        );
+    }
+    let Some(home) = gnupg_home() else {
+        return Err("could not locate Koda's data directory for a GPG keyring".to_string());
+    };
+    let Some(downloads) = downloads_dir() else {
+        return Err("could not locate Koda's download directory".to_string());
+    };
+    let keys = downloads.join("release-keys.asc");
+    let signature = append_extension(dest, "sig");
+    std::fs::create_dir_all(&downloads)
+        .map_err(|err| format!("could not create {}: {err}", downloads.display()))?;
+
+    // Fetch the keys and the signature first, then the archive, so a failure
+    // never leaves a large unverified file on disk.
+    download(keys_url, &keys, None)?;
+    download(signature_url, &signature, None)?;
+    download(url, dest, None)?;
+
+    let result = verify_signature(&home, &keys, &signature, dest);
+    let _ = std::fs::remove_file(&signature);
+    if result.is_err() {
+        // Never keep an archive whose provenance could not be proven.
+        let _ = std::fs::remove_file(dest);
+    }
+    result
+}
+
+/// Import `keys` into the isolated keyring at `home` and check `signature`
+/// against `file`.
+fn verify_signature(home: &Path, keys: &Path, signature: &Path, file: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(home)
+        .map_err(|err| format!("could not create {}: {err}", home.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(home, std::fs::Permissions::from_mode(0o700));
+    }
+
+    let imported = install_command("gpg")
+        .env("GNUPGHOME", home)
+        .args(["--batch", "--quiet", "--import"])
+        .arg(keys)
+        .output()
+        .map_err(|err| format!("could not run gpg: {err}"))?;
+    if !imported.status.success() {
+        return Err(format!(
+            "could not import the release key: {}",
+            first_stderr_line(&imported.stderr)
+        ));
+    }
+
+    let verified = install_command("gpg")
+        .env("GNUPGHOME", home)
+        .args(["--batch", "--status-fd", "1", "--verify"])
+        .arg(signature)
+        .arg(file)
+        .output()
+        .map_err(|err| format!("could not run gpg: {err}"))?;
+    let status = String::from_utf8_lossy(&verified.stdout);
+    let trusted = status.contains("VALIDSIG") || status.contains("GOODSIG");
+    if !verified.status.success() || !trusted {
+        return Err(format!(
+            "signature verification failed for {}: {}",
+            file.display(),
+            first_stderr_line(&verified.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// The SHA-256 GitHub's API reports for a release asset, if present.
+///
+/// GitHub added a `digest` field (`sha256:<hex>`) to release assets, which lets
+/// Koda verify an asset without a separately published checksum file.
+fn github_asset_sha256(body: &str, asset: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let assets = value.get("assets")?.as_array()?;
+    for entry in assets {
+        if entry.get("name").and_then(|name| name.as_str()) != Some(asset) {
+            continue;
+        }
+        let digest = entry.get("digest").and_then(|digest| digest.as_str())?;
+        let hex = digest.strip_prefix("sha256:")?;
+        if hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Some(hex.to_string());
+        }
+    }
+    None
+}
+
+/// Download a pinned GitHub release asset, verifying the digest the API reports.
+fn github_release(repo: &str, tag: &str, asset: &str, dest: &Path) -> Result<(), String> {
+    let api = format!("https://api.github.com/repos/{repo}/releases/tags/{tag}");
+    let body = curl_text(&api)
+        .map_err(|err| format!("could not query the {repo} release metadata: {err}"))?;
+    // Fail closed: an unverified asset is never run.
+    let checksum = github_asset_sha256(&body, asset)
+        .ok_or_else(|| format!("GitHub published no checksum digest for {asset}"))?;
+    let url = format!("https://github.com/{repo}/releases/download/{tag}/{asset}");
+    download(&url, dest, Some(&checksum))
+}
+
+/// A sibling path with an extra extension appended (`a.tar.gz` → `a.tar.gz.sig`).
+fn append_extension(path: &Path, extension: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".");
+    name.push(extension);
+    PathBuf::from(name)
+}
+
+/// Read `/etc/os-release` into `(ID, ID_LIKE, VERSION_ID)`.
+///
+/// This is how Koda picks the right toolchain artifact for the running
+/// distribution without guessing from a kernel version.
+fn os_release() -> Option<(String, String, String)> {
+    let text = std::fs::read_to_string("/etc/os-release").ok()?;
+    let mut id = String::new();
+    let mut id_like = String::new();
+    let mut version = String::new();
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = value.trim().trim_matches('"').to_string();
+        match key {
+            "ID" => id = value,
+            "ID_LIKE" => id_like = value,
+            "VERSION_ID" => version = value,
+            _ => {}
+        }
+    }
+    if id.is_empty() {
+        return None;
+    }
+    Some((id, id_like, version))
+}
+
+/// Map a distribution to the swift.org platform tag and artifact suffix.
+///
+/// swift.org publishes one toolchain per distribution release, and the official
+/// binaries link against that distribution's libraries. Mapping the running
+/// system (including common derivatives through `ID_LIKE`) is what makes a
+/// managed install reliable instead of a shot in the dark.
+fn swift_platform(
+    id: &str,
+    id_like: &str,
+    version: &str,
+    arch: &str,
+) -> Option<(&'static str, &'static str)> {
+    if arch != "x86_64" && arch != "aarch64" {
+        return None;
+    }
+    let candidates = std::iter::once(id).chain(id_like.split_whitespace());
+    for candidate in candidates {
+        let mapped = match (candidate, version) {
+            ("ubuntu", "22.04") => ("ubuntu2204", "ubuntu22.04"),
+            ("ubuntu", "24.04") => ("ubuntu2404", "ubuntu24.04"),
+            ("ubuntu", "26.04") => ("ubuntu2604", "ubuntu26.04"),
+            ("debian", "12") => ("debian12", "debian12"),
+            ("debian", "13") => ("debian13", "debian13"),
+            ("fedora", "39") => ("fedora39", "fedora39"),
+            ("fedora", "41") => ("fedora41", "fedora41"),
+            ("amzn", "2") => ("amazonlinux2", "amazonlinux2"),
+            ("amzn", "2023") => ("amazonlinux2023", "amazonlinux2023"),
+            _ => continue,
+        };
+        return Some(mapped);
+    }
+    None
+}
+
+/// The swift.org platform tag for this host, if swift.org builds for it.
+fn swift_asset() -> Option<(&'static str, &'static str)> {
+    if std::env::consts::OS != "linux" {
+        return None;
+    }
+    let (id, id_like, version) = os_release()?;
+    swift_platform(&id, &id_like, &version, std::env::consts::ARCH)
+}
+
+/// The `builds.hex.pm` platform directory for this host, if `bob` publishes one.
+fn bob_platform() -> Option<&'static str> {
+    if std::env::consts::OS != "linux" {
+        return None;
+    }
+    let Some((id, id_like, version)) = os_release() else {
+        return bob_fallback_platform();
+    };
+    bob_platform_for(&id, &id_like, &version).or_else(bob_fallback_platform)
+}
+
+/// A best-effort `bob` platform for glibc distributions it does not name.
+///
+/// `bob`'s Ubuntu 24.04 builds link against a modern glibc and OpenSSL 3, which
+/// current rolling distributions ship, so they run on many systems that have no
+/// explicit build. Koda still verifies the result by launching the real server,
+/// so an incompatible system fails with a clear message instead of a false
+/// success. musl systems (Alpine) are excluded because the glibc build cannot
+/// run there at all.
+fn bob_fallback_platform() -> Option<&'static str> {
+    if Path::new("/etc/alpine-release").exists() {
+        return None;
+    }
+    Some("ubuntu-24.04")
+}
+
+/// Map a distribution to the `bob` build directory (see [`bob_platform`]).
+fn bob_platform_for(id: &str, id_like: &str, version: &str) -> Option<&'static str> {
+    let candidates = std::iter::once(id).chain(id_like.split_whitespace());
+    for candidate in candidates {
+        let mapped = match (candidate, version) {
+            ("ubuntu", "20.04") => "ubuntu-20.04",
+            ("ubuntu", "22.04") => "ubuntu-22.04",
+            ("ubuntu", "24.04") => "ubuntu-24.04",
+            ("debian", "11") => "debian-11",
+            ("debian", "12") => "debian-12",
+            ("debian", "13") => "debian-13",
+            ("fedora", "39") => "fedora-39",
+            ("fedora", "41") => "fedora-41",
+            _ => continue,
+        };
+        return Some(mapped);
+    }
+    None
+}
+
+/// The major version of an OTP release (`27.3.4` → `27`).
+fn otp_major(version: &str) -> &str {
+    version.split('.').next().unwrap_or(version)
+}
+
+/// Download and verify an Erlang/OTP or Elixir build from `builds.hex.pm`.
+///
+/// The service publishes the SHA-256 next to the build in its `builds.txt`, so
+/// the checksum is read for the pinned version and verified before anything is
+/// extracted. The archive still has to be extracted by a later step.
+fn bob_build(package: BobPackage, dest: &Path) -> Result<(), String> {
+    let platform = bob_platform().ok_or_else(|| {
+        "no Erlang/Elixir build is published for this platform; install Erlang and Elixir manually"
+            .to_string()
+    })?;
+    let (key, file, sums_url, base) = match package {
+        BobPackage::Erlang => (
+            format!("OTP-{OTP_VERSION}"),
+            format!("OTP-{OTP_VERSION}.tar.gz"),
+            format!("https://builds.hex.pm/builds/otp/{platform}/builds.txt"),
+            format!("https://builds.hex.pm/builds/otp/{platform}"),
+        ),
+        BobPackage::Elixir => {
+            let version = format!("v{ELIXIR_VERSION}-otp-{}", otp_major(OTP_VERSION));
+            (
+                version.clone(),
+                format!("{version}.zip"),
+                "https://builds.hex.pm/builds/elixir/builds.txt".to_string(),
+                "https://builds.hex.pm/builds/elixir".to_string(),
+            )
+        }
+    };
+    let body = curl_text(&sums_url)?;
+    let expected = builds_txt_checksum(&body, &key)
+        .ok_or_else(|| format!("builds.hex.pm published no checksum for {key}"))?;
+    // Fail closed: an unverified runtime is never extracted or run.
+    download(&format!("{base}/{file}"), dest, Some(&expected))
+}
+
+/// Find the SHA-256 for `key` in a `builds.hex.pm` `builds.txt` body.
+///
+/// The body is one build per line, `<name> <git-sha> <timestamp> <sha256>`;
+/// older entries omit the checksum column and are treated as unavailable.
+fn builds_txt_checksum(body: &str, key: &str) -> Option<String> {
+    body.lines()
+        .find(|line| line.split_whitespace().next() == Some(key))
+        .and_then(|line| line.split_whitespace().nth(3))
+        .filter(|hash| hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()))
+        .map(str::to_string)
+}
+
 /// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`.
 ///
 /// `tar` supports `--strip-components`; `unzip` does not, so a stripped zip is
@@ -1434,6 +1960,17 @@ fn file_sha256(path: &Path) -> Result<String, String> {
     Err("no SHA-256 tool found (looked for sha256sum and shasum)".to_string())
 }
 
+/// Render a byte count for a download warning (`1.1 GB`, `240 MB`).
+pub fn human_bytes(bytes: u64) -> String {
+    const MB: u64 = 1_000_000;
+    const GB: u64 = 1_000_000_000;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else {
+        format!("{} MB", bytes.div_ceil(MB))
+    }
+}
+
 fn first_stderr_line(stderr: &[u8]) -> String {
     String::from_utf8_lossy(stderr)
         .lines()
@@ -1441,6 +1978,33 @@ fn first_stderr_line(stderr: &[u8]) -> String {
         .unwrap_or("installation failed")
         .trim()
         .to_string()
+}
+
+/// The most useful line of a failed install command's stderr.
+///
+/// Package managers print the concrete error (the missing module, the compiler
+/// error) before a trailing summary, so prefer the last line that names a
+/// failure and otherwise fall back to the last line.
+fn last_stderr_line(stderr: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    lines
+        .iter()
+        .rev()
+        .find(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.contains("error")
+                || lower.contains("failed")
+                || lower.contains("fatal")
+                || lower.contains("cannot")
+                || lower.contains("not found")
+        })
+        .or_else(|| lines.last())
+        .map(|line| line.trim().to_string())
+        .unwrap_or_else(|| "installation failed".to_string())
 }
 
 /// Whether every step of at least one install strategy can run here.
@@ -1462,12 +2026,22 @@ pub fn can_install(tool: Tool) -> bool {
 fn step_available(step: &InstallStep) -> bool {
     match step {
         InstallStep::Run(command) => {
-            locate(&command.program).is_some() || is_user_bin_program(&command.program)
+            locate(&command.program).is_some()
+                || is_user_bin_program(&command.program)
+                // A program supplied by a Koda-managed runtime an earlier step
+                // in the same attempt installs (for example `elixir` before the
+                // ElixirLS build).
+                || is_koda_provided_program(&command.program)
         }
         InstallStep::Download { .. }
         | InstallStep::AdoptiumJdk { .. }
         | InstallStep::NodeRuntime { .. }
-        | InstallStep::DartSdk { .. } => locate("curl").is_some(),
+        | InstallStep::DartSdk { .. }
+        | InstallStep::GithubRelease { .. } => locate("curl").is_some(),
+        // A `bob` build also needs a supported platform directory.
+        InstallStep::BobBuild { .. } => locate("curl").is_some() && bob_platform().is_some(),
+        // A signature-verified download also needs `gpg`.
+        InstallStep::DownloadGpg { .. } => locate("curl").is_some() && locate("gpg").is_some(),
         InstallStep::Extract { archive, .. } => {
             let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
             locate(if zip { "unzip" } else { "tar" }).is_some()
@@ -1487,6 +2061,14 @@ fn is_user_bin_program(program: &str) -> bool {
     path.is_absolute() && known_bin_dirs().iter().any(|dir| path.starts_with(dir))
 }
 
+/// Whether a program is supplied by a runtime Koda installs itself.
+///
+/// An install attempt may run one of these after an earlier step has produced
+/// it, so a missing binary is not a reason to withhold the offer.
+fn is_koda_provided_program(program: &str) -> bool {
+    matches!(program, "elixir" | "mix" | "erl" | "escript")
+}
+
 /// What Koda learned about one tool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolStatus {
@@ -1498,6 +2080,9 @@ pub struct ToolStatus {
     /// The resolved executable path, when one was found. Tools installed in a
     /// user bin directory may not be on the process `PATH`.
     pub path: Option<PathBuf>,
+    /// Why a present-but-unusable tool failed to run (a missing shared library,
+    /// a broken launcher), so install failures can explain themselves.
+    pub error: Option<String>,
 }
 
 impl ToolStatus {
@@ -1592,6 +2177,7 @@ fn probe(tool: Tool) -> ToolStatus {
             available: false,
             version: None,
             path: None,
+            error: None,
         };
     };
     let mut command = Command::new(&path);
@@ -1617,6 +2203,7 @@ fn probe(tool: Tool) -> ToolStatus {
             available: false,
             version: None,
             path: Some(path),
+            error: None,
         };
     };
     match wait_captured(&mut child, PROBE_TIMEOUT, MAX_TOOL_OUTPUT) {
@@ -1634,13 +2221,22 @@ fn probe(tool: Tool) -> ToolStatus {
                 available: true,
                 version,
                 path: Some(path),
+                error: None,
             }
         }
-        _ => ToolStatus {
+        Ok(captured) => ToolStatus {
             tool,
             available: false,
             version: None,
             path: Some(path),
+            error: probe_error(&captured.stderr),
+        },
+        Err(_) => ToolStatus {
+            tool,
+            available: false,
+            version: None,
+            path: Some(path),
+            error: None,
         },
     }
 }
@@ -1664,28 +2260,45 @@ fn probe_server(tool: Tool, path: PathBuf, mut command: Command) -> ToolStatus {
             available: false,
             version: None,
             path: Some(path),
+            error: None,
         };
     };
     // Hold the write end so the server does not see EOF and shut down at once.
     let _stdin = child.stdin.take();
-    let available = alive_or_clean(&mut child);
+    let (available, error) = alive_or_clean(&mut child);
     ToolStatus {
         tool,
         available,
         version: None,
         path: Some(path),
+        error,
     }
 }
 
 /// Whether a launched process is a usable server: still running when the window
 /// elapses, or already exited cleanly. A process that fails immediately (the
-/// exact symptom of a broken Node launcher) is rejected.
-fn alive_or_clean(child: &mut std::process::Child) -> bool {
-    matches!(
-        wait_captured(child, PROBE_ALIVE_WINDOW, MAX_TOOL_OUTPUT),
-        Ok(captured) if captured.status.is_none()
-            || captured.status.is_some_and(|status| status.success())
-    )
+/// exact symptom of a broken Node launcher or a missing shared library) is
+/// rejected, and its first stderr line is kept for the error message.
+fn alive_or_clean(child: &mut std::process::Child) -> (bool, Option<String>) {
+    match wait_captured(child, PROBE_ALIVE_WINDOW, MAX_TOOL_OUTPUT) {
+        Ok(captured) => {
+            let available =
+                captured.status.is_none() || captured.status.is_some_and(|status| status.success());
+            let error = if available {
+                None
+            } else {
+                probe_error(&captured.stderr)
+            };
+            (available, error)
+        }
+        Err(_) => (false, None),
+    }
+}
+
+/// The first meaningful line of a failed probe's stderr, if any.
+fn probe_error(stderr: &[u8]) -> Option<String> {
+    let line = first_stderr_line(stderr);
+    (!line.is_empty() && line != "installation failed").then_some(line)
 }
 
 /// Locate a tool's executable, trying its primary name and any alternates.
@@ -1769,6 +2382,11 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         dirs.push(tools.join("kotlin-language-server/bin"));
         dirs.push(tools.join("dart-sdk/bin"));
         dirs.push(tools.join("perl5/bin"));
+        dirs.push(tools.join("cpanm/bin"));
+        dirs.push(tools.join("swift/usr/bin"));
+        dirs.push(tools.join("otp/bin"));
+        dirs.push(tools.join("elixir/bin"));
+        dirs.push(tools.join("elixir-ls"));
         dirs.push(tools.join("jdk/bin"));
         dirs.push(tools.join("dotnet"));
         dirs.push(tools.join("bin"));
@@ -1888,6 +2506,44 @@ pub fn perl_local_lib_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("perl5"))
 }
 
+/// Koda's managed Swift toolchain directory. The archive extracts a `usr/`
+/// subtree, so the launcher is `tools/swift/usr/bin/sourcekit-lsp`.
+pub fn swift_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("swift"))
+}
+
+/// Koda's managed Erlang/OTP installation directory.
+pub fn otp_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("otp"))
+}
+
+/// Koda's managed Elixir installation directory.
+pub fn elixir_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("elixir"))
+}
+
+/// Koda's managed ElixirLS installation directory (the release launcher).
+pub fn elixir_ls_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("elixir-ls"))
+}
+
+/// Koda's private GPG keyring, used only to verify downloaded release
+/// signatures. Keeping it separate means the user's `~/.gnupg` is untouched and
+/// a stale key in it can never be trusted by mistake.
+fn gnupg_home() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("gnupg"))
+}
+
+/// Koda's private Mix/Hex home for the managed Elixir runtime and ElixirLS.
+fn mix_home() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("mix"))
+}
+
+/// Where Koda keeps the checksum-verified `cpanm` it bootstraps.
+fn cpanm_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("cpanm"))
+}
+
 /// Scratch space for downloaded archives.
 fn downloads_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("downloads"))
@@ -1938,6 +2594,40 @@ pub fn launch_env(tool: Tool) -> Vec<(String, String)> {
                 env.push(("PATH".to_string(), prepend_path(&format!("{lib}/bin"))));
             }
         }
+        // ElixirLS is a shell launcher that runs `elixir`; it needs the managed
+        // OTP and Elixir runtimes on `PATH` and a private Mix/Hex home so the
+        // user's `~/.mix` and `~/.hex` are never touched.
+        Tool::ElixirLs => {
+            let mut bins: Vec<String> = Vec::new();
+            if let Some(dir) = elixir_ls_dir() {
+                bins.push(dir.to_string_lossy().into_owned());
+            }
+            if let Some(dir) = elixir_dir() {
+                bins.push(dir.join("bin").to_string_lossy().into_owned());
+            }
+            if let Some(dir) = otp_dir() {
+                bins.push(dir.join("bin").to_string_lossy().into_owned());
+            }
+            if !bins.is_empty() {
+                let joined = bins.join(":");
+                env.push(("PATH".to_string(), prepend_colon(&joined)));
+            }
+            if let Some(home) = mix_home() {
+                let home = home.to_string_lossy().into_owned();
+                env.push(("MIX_HOME".to_string(), home.clone()));
+                env.push(("HEX_HOME".to_string(), home));
+            }
+        }
+        // The managed Swift toolchain's `sourcekit-lsp` finds its sibling
+        // libraries through the toolchain's own `usr/bin` directory.
+        Tool::SwiftLs => {
+            if let Some(dir) = swift_dir() {
+                env.push((
+                    "PATH".to_string(),
+                    prepend_path(&dir.join("usr/bin").to_string_lossy()),
+                ));
+            }
+        }
         _ => {}
     }
     env
@@ -1947,6 +2637,14 @@ fn prepend_path(dir: &str) -> String {
     match std::env::var_os("PATH") {
         Some(existing) => format!("{dir}:{}", existing.to_string_lossy()),
         None => dir.to_string(),
+    }
+}
+
+/// Prepend a colon-separated list of directories to `PATH`.
+fn prepend_colon(dirs: &str) -> String {
+    match std::env::var_os("PATH") {
+        Some(existing) => format!("{dirs}:{}", existing.to_string_lossy()),
+        None => dirs.to_string(),
     }
 }
 
@@ -2099,25 +2797,193 @@ fn kotlin_ls_attempts() -> Vec<InstallAttempt> {
 
 /// Install `Perl::LanguageServer` into an isolated `local::lib`.
 ///
-/// `cpanm --local-lib` never touches the system Perl; it compiles the module and
-/// its dependencies (some XS) under Koda's data directory. If `cpanm` is not
-/// present Koda reports the requirement instead of running an interactive
-/// `cpan`.
+/// Koda bootstraps `cpanm` from a checksum-verified `App::cpanminus` archive —
+/// so an interactive, unconfigured `cpan` is never run — and uses it with
+/// `--local-lib`, which never touches the system Perl. A system `perl` is still
+/// required to run `cpanm`; Koda does not build a Perl runtime.
 fn perl_attempts() -> Vec<InstallAttempt> {
-    let Some(dest) = perl_local_lib_dir() else {
+    if locate("perl").is_none() {
+        return Vec::new();
+    }
+    let (Some(downloads), Some(lib), Some(cpanm)) =
+        (downloads_dir(), perl_local_lib_dir(), cpanm_dir())
+    else {
         return Vec::new();
     };
-    vec![InstallAttempt::one(
-        "cpanm (isolated local::lib)",
-        InstallCommand::with_args(
-            "cpanm",
-            vec![
-                "--local-lib".to_string(),
-                dest.to_string_lossy().into_owned(),
-                "--notest".to_string(),
-                "Perl::LanguageServer".to_string(),
-            ],
-        ),
+    let archive = downloads.join(format!("App-cpanminus-{CPANM_VERSION}.tar.gz"));
+    let url = format!(
+        "https://cpan.metacpan.org/authors/id/M/MI/MIYAGAWA/App-cpanminus-{CPANM_VERSION}.tar.gz"
+    );
+    let cpanm_script = cpanm.join("bin/cpanm");
+    vec![InstallAttempt::managed(
+        "a checksum-verified cpanm and an isolated local::lib",
+        vec![
+            InstallStep::Download {
+                url,
+                dest: archive.clone(),
+                sha256: Some(CPANM_SHA256.to_string()),
+            },
+            InstallStep::Extract {
+                archive,
+                dest: cpanm,
+                strip: 1,
+            },
+            InstallStep::Run(
+                InstallCommand::with_args(
+                    "perl",
+                    vec![
+                        cpanm_script.to_string_lossy().into_owned(),
+                        "--local-lib".to_string(),
+                        lib.to_string_lossy().into_owned(),
+                        "--notest".to_string(),
+                        "Perl::LanguageServer".to_string(),
+                    ],
+                )
+                // Some Makefile.PLs prompt; take the default answer instead of
+                // hanging a background install.
+                .env("PERL_MM_USE_DEFAULT", "1"),
+            ),
+        ],
+    )]
+}
+
+/// The Swift toolchain archive URL and its detached signature URL.
+fn swift_toolchain_urls(tag: &str, suffix: &str) -> (String, String) {
+    let asset = format!("swift-{SWIFT_VERSION}-RELEASE-{suffix}.tar.gz");
+    let url = format!(
+        "https://download.swift.org/swift-{SWIFT_VERSION}-release/{tag}/swift-{SWIFT_VERSION}-RELEASE/{asset}"
+    );
+    (url.clone(), format!("{url}.sig"))
+}
+
+/// A GPG-verified Swift toolchain from swift.org.
+///
+/// swift.org publishes one toolchain per distribution release and signs it with
+/// a detached signature, so Koda resolves the artifact from `/etc/os-release`,
+/// verifies the signature against swift.org's published keys, and extracts the
+/// `usr/` tree. On a distribution swift.org does not build for, the attempt is
+/// empty and Koda explains why instead of downloading something that cannot run.
+fn swift_attempts() -> Vec<InstallAttempt> {
+    let Some((tag, suffix)) = swift_asset() else {
+        return Vec::new();
+    };
+    let (Some(downloads), Some(dest)) = (downloads_dir(), swift_dir()) else {
+        return Vec::new();
+    };
+    let (url, signature_url) = swift_toolchain_urls(tag, suffix);
+    let archive = downloads.join(format!("swift-{SWIFT_VERSION}-RELEASE-{suffix}.tar.gz"));
+    vec![InstallAttempt::managed(
+        "a GPG-verified Swift toolchain",
+        vec![
+            InstallStep::DownloadGpg {
+                url,
+                signature_url,
+                keys_url: "https://www.swift.org/keys/all-keys.asc".to_string(),
+                dest: archive.clone(),
+            },
+            InstallStep::Extract {
+                archive,
+                dest,
+                strip: 1,
+            },
+        ],
+    )]
+}
+
+/// A coordinated Erlang/OTP + Elixir + ElixirLS toolchain.
+///
+/// Erlang/OTP and Elixir come from `builds.hex.pm` (the Erlang Ecosystem
+/// Foundation's build service, which also backs the official `setup-beam`
+/// action) and are checksum-verified; the OTP tree gets its `Install -minimal`
+/// pass so `erl`/`erlc` exist. ElixirLS is the official release, built once at
+/// install time with the managed Mix so the first launch is fast. Everything is
+/// isolated: a private `MIX_HOME`/`HEX_HOME`, and runtimes on a scoped `PATH`.
+fn elixir_ls_attempts() -> Vec<InstallAttempt> {
+    // Only offered where `bob` publishes Erlang/Elixir builds for this platform.
+    if bob_platform().is_none() {
+        return Vec::new();
+    }
+    let (Some(downloads), Some(otp), Some(elixir), Some(ls)) =
+        (downloads_dir(), otp_dir(), elixir_dir(), elixir_ls_dir())
+    else {
+        return Vec::new();
+    };
+    let Some(mix) = mix_home() else {
+        return Vec::new();
+    };
+    let otp_archive = downloads.join(format!("OTP-{OTP_VERSION}.tar.gz"));
+    let elixir_archive = downloads.join(format!(
+        "v{ELIXIR_VERSION}-otp-{}.zip",
+        otp_major(OTP_VERSION)
+    ));
+    let ls_archive = downloads.join(format!("elixir-ls-v{ELIXIR_LS_VERSION}.zip"));
+    let installer = otp.join("Install");
+    let quiet_install = ls.join("quiet_install.exs");
+    vec![InstallAttempt::managed(
+        "Erlang/OTP, Elixir and a built ElixirLS",
+        vec![
+            InstallStep::BobBuild {
+                package: BobPackage::Erlang,
+                dest: otp_archive.clone(),
+            },
+            InstallStep::Extract {
+                archive: otp_archive,
+                dest: otp.clone(),
+                strip: 1,
+            },
+            // `bob` ships the Erlang source layout; `Install -minimal` creates
+            // the `bin/erl` wrappers without compiling anything.
+            InstallStep::Run(
+                InstallCommand::with_args(
+                    "sh",
+                    vec![
+                        installer.to_string_lossy().into_owned(),
+                        "-minimal".to_string(),
+                        otp.to_string_lossy().into_owned(),
+                    ],
+                )
+                .cwd(otp.clone()),
+            ),
+            InstallStep::BobBuild {
+                package: BobPackage::Elixir,
+                dest: elixir_archive.clone(),
+            },
+            InstallStep::Extract {
+                archive: elixir_archive,
+                dest: elixir,
+                strip: 0,
+            },
+            // Install Hex and rebar into the private Mix home so the build never
+            // prompts and never writes to the user's `~/.mix`.
+            InstallStep::Run(
+                InstallCommand::new("mix", &["local.hex", "--force"])
+                    .env("MIX_HOME", mix.to_string_lossy().into_owned()),
+            ),
+            InstallStep::Run(
+                InstallCommand::new("mix", &["local.rebar", "--force"])
+                    .env("MIX_HOME", mix.to_string_lossy().into_owned()),
+            ),
+            InstallStep::GithubRelease {
+                repo: "elixir-lsp/elixir-ls".to_string(),
+                tag: format!("v{ELIXIR_LS_VERSION}"),
+                asset: format!("elixir-ls-v{ELIXIR_LS_VERSION}.zip"),
+                dest: ls_archive.clone(),
+            },
+            InstallStep::Extract {
+                archive: ls_archive,
+                dest: ls.clone(),
+                strip: 0,
+            },
+            // Build the release once, with the managed runtime and a private
+            // Mix/Hex home, so launching the server never has to compile.
+            InstallStep::Run(
+                InstallCommand::new("elixir", &[quiet_install.to_string_lossy().as_ref()])
+                    .cwd(ls.clone())
+                    .env("MIX_HOME", mix.to_string_lossy().into_owned())
+                    .env("HEX_HOME", mix.to_string_lossy().into_owned())
+                    .env("MIX_ENV", "prod"),
+            ),
+        ],
     )]
 }
 
@@ -2333,25 +3199,53 @@ mod tests {
             Tool::AsmLsp.install_command(),
             Some(("cargo", &["install", "asm-lsp"][..]))
         );
-        // Toolchains Koda does not manage are discovered, never promised.
-        for tool in [Tool::ElixirLs, Tool::SwiftLs] {
+        // The multi-component toolchains are managed, so they advertise no
+        // single package-manager command; whether they can be installed depends
+        // on the platform and on the base tools being present.
+        for tool in [
+            Tool::ElixirLs,
+            Tool::SwiftLs,
+            Tool::PerlLs,
+            Tool::DartAnalyzer,
+        ] {
             assert!(
                 tool.install_command().is_none(),
-                "{tool:?} must not advertise an installer"
+                "{tool:?} must not advertise a package-manager command"
             );
-            assert!(!can_install(tool), "{tool:?} must not promise an install");
         }
-        // Perl installs into an isolated local::lib when `cpanm` is present.
-        assert_eq!(can_install(Tool::PerlLs), locate("cpanm").is_some());
+        let archives =
+            locate("curl").is_some() && locate("tar").is_some() && locate("unzip").is_some();
+        // Perl bootstraps cpanm; it needs a system perl plus the archive tools.
+        assert_eq!(
+            can_install(Tool::PerlLs),
+            locate("perl").is_some() && archives
+        );
+        // Elixir is managed only where `bob` publishes builds.
+        assert_eq!(
+            can_install(Tool::ElixirLs),
+            bob_platform().is_some() && archives
+        );
         // The Dart SDK is managed, so Koda can install it where published.
-        assert!(Tool::DartAnalyzer.install_command().is_none());
-        assert!(
-            can_install(Tool::DartAnalyzer) || dart_sdk_asset().is_none(),
-            "Dart should be installable where an SDK is published"
+        assert_eq!(
+            can_install(Tool::DartAnalyzer),
+            dart_sdk_asset().is_some() && locate("curl").is_some() && locate("unzip").is_some()
+        );
+        // Swift is managed only where swift.org publishes a signed toolchain,
+        // and only when its signature can actually be verified.
+        assert_eq!(
+            can_install(Tool::SwiftLs),
+            swift_asset().is_some()
+                && locate("curl").is_some()
+                && locate("gpg").is_some()
+                && locate("tar").is_some()
         );
         assert_eq!(
             Tool::for_language(LanguageId::Dart, ToolPurpose::LanguageServer),
             Some(Tool::DartAnalyzer)
+        );
+        assert_eq!(
+            Tool::for_language(LanguageId::Elixir, ToolPurpose::LanguageServer),
+            Some(Tool::ElixirLs)
         );
         assert_eq!(
             Tool::for_language(LanguageId::Swift, ToolPurpose::LanguageServer),
@@ -2417,6 +3311,190 @@ mod tests {
             Some("ea864bc64df30a6b8bdf30b2e32550f7717d9a890de8f40293aeabb924fe232b")
         );
         assert_eq!(checksum_for(body, "missing.zip"), None);
+    }
+
+    #[test]
+    fn swift_platform_maps_supported_distributions() {
+        assert_eq!(
+            swift_platform("ubuntu", "", "24.04", "x86_64"),
+            Some(("ubuntu2404", "ubuntu24.04"))
+        );
+        assert_eq!(
+            swift_platform("debian", "", "12", "aarch64"),
+            Some(("debian12", "debian12"))
+        );
+        // Derivatives are mapped through ID_LIKE.
+        assert_eq!(
+            swift_platform("pop", "ubuntu", "22.04", "x86_64"),
+            Some(("ubuntu2204", "ubuntu22.04"))
+        );
+        // Unsupported distribution or architecture is reported, never guessed.
+        assert_eq!(swift_platform("endeavouros", "arch", "", "x86_64"), None);
+        assert_eq!(swift_platform("ubuntu", "", "24.04", "riscv64"), None);
+    }
+
+    #[test]
+    fn bob_platform_maps_supported_distributions() {
+        assert_eq!(
+            bob_platform_for("ubuntu", "", "24.04"),
+            Some("ubuntu-24.04")
+        );
+        assert_eq!(
+            bob_platform_for("linuxmint", "ubuntu debian", "22.04"),
+            Some("ubuntu-22.04")
+        );
+        assert_eq!(bob_platform_for("endeavouros", "arch", ""), None);
+    }
+
+    #[test]
+    fn github_asset_digest_is_parsed() {
+        let hash = "a".repeat(64);
+        let body = format!(
+            r#"{{"assets":[{{"name":"a.zip","digest":"sha256:{hash}"}},{{"name":"b.zip","digest":null}}]}}"#
+        );
+        assert_eq!(
+            github_asset_sha256(&body, "a.zip").as_deref(),
+            Some(&hash[..])
+        );
+        assert_eq!(github_asset_sha256(&body, "b.zip"), None);
+        assert_eq!(github_asset_sha256(&body, "missing.zip"), None);
+        assert_eq!(github_asset_sha256("not json", "a.zip"), None);
+    }
+
+    #[test]
+    fn builds_txt_checksum_reads_the_hex_column() {
+        let hash = "b".repeat(64);
+        let body = format!(
+            "OTP-27.3.3 10e20b1dbe39b056fab430e50b08cb4f3696ae87 2025-04-16T14:41:39Z d45ab837970f6c40596285441432e968c2932544eeb0ae0cf792ea0b30a90923\nOTP-27.3.4 c388a2d1b3f9918652276d4798692dd4d8ef97fc 2025-05-09T18:03:06Z {hash}\nOTP-24.3 0863bd30aabd035c83158c78046c5ffda16127e1 2024-04-26T03:41:09Z\n"
+        );
+        assert_eq!(
+            builds_txt_checksum(&body, "OTP-27.3.4").as_deref(),
+            Some(&hash[..])
+        );
+        // An entry without a checksum column is not trusted.
+        assert_eq!(builds_txt_checksum(&body, "OTP-24.3"), None);
+        assert_eq!(builds_txt_checksum(&body, "OTP-99"), None);
+    }
+
+    #[test]
+    fn install_errors_prefer_the_concrete_failure() {
+        let stderr = b"Building Coro-6.57 ... ! Installing Coro failed. See build.log\n! Installing the dependencies failed: Module 'Coro' is not installed\n! Bailing out\nFAIL\n";
+        let message = last_stderr_line(stderr);
+        assert!(message.contains("Coro"), "unexpected message: {message}");
+        assert_eq!(last_stderr_line(b""), "installation failed");
+    }
+
+    #[test]
+    fn swift_toolchain_urls_match_swift_org() {
+        let (url, signature) = swift_toolchain_urls("ubuntu2404", "ubuntu24.04");
+        assert_eq!(
+            url,
+            "https://download.swift.org/swift-6.4.0-release/ubuntu2404/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE-ubuntu24.04.tar.gz"
+        );
+        assert_eq!(signature, format!("{url}.sig"));
+    }
+
+    #[test]
+    fn every_tool_has_an_actionable_setup_reason() {
+        for tool in Tool::ALL {
+            assert!(
+                !tool.setup_reason().is_empty(),
+                "{tool:?} must explain how to set it up"
+            );
+        }
+    }
+
+    #[test]
+    fn human_bytes_is_readable() {
+        assert_eq!(human_bytes(240_000_000), "240 MB");
+        assert_eq!(human_bytes(1_150_000_000), "1.1 GB");
+    }
+
+    #[test]
+    fn otp_major_is_the_first_component() {
+        assert_eq!(otp_major("27.3.4"), "27");
+        assert_eq!(otp_major("29.1"), "29");
+    }
+
+    #[test]
+    fn swift_plan_is_gpg_verified() {
+        let attempts = Tool::SwiftLs.install_attempts();
+        if swift_asset().is_none() || tools_dir().is_none() {
+            assert!(attempts.is_empty());
+            return;
+        }
+        let steps = &attempts.first().expect("a Swift plan").steps;
+        let (url, signature_url, keys_url) = steps
+            .iter()
+            .find_map(|step| match step {
+                InstallStep::DownloadGpg {
+                    url,
+                    signature_url,
+                    keys_url,
+                    ..
+                } => Some((url.clone(), signature_url.clone(), keys_url.clone())),
+                _ => None,
+            })
+            .expect("Swift must verify a GPG signature");
+        assert!(url.ends_with(".tar.gz"), "unexpected URL: {url}");
+        assert_eq!(signature_url, format!("{url}.sig"));
+        assert!(
+            keys_url.contains("swift.org"),
+            "unexpected key URL: {keys_url}"
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| matches!(step, InstallStep::Extract { strip: 1, .. })),
+            "the toolchain archive root must be stripped: {steps:?}"
+        );
+    }
+
+    #[test]
+    fn elixir_plan_is_a_coordinated_toolchain() {
+        let attempts = Tool::ElixirLs.install_attempts();
+        if bob_platform().is_none() || tools_dir().is_none() {
+            assert!(attempts.is_empty());
+            return;
+        }
+        let steps = &attempts.first().expect("an Elixir plan").steps;
+        assert!(
+            steps.iter().any(|step| matches!(
+                step,
+                InstallStep::BobBuild {
+                    package: BobPackage::Erlang,
+                    ..
+                }
+            )),
+            "an Erlang/OTP build is required: {steps:?}"
+        );
+        assert!(
+            steps.iter().any(|step| matches!(
+                step,
+                InstallStep::BobBuild {
+                    package: BobPackage::Elixir,
+                    ..
+                }
+            )),
+            "an Elixir build is required: {steps:?}"
+        );
+        assert!(
+            steps.iter().any(|step| matches!(
+                step,
+                InstallStep::GithubRelease { asset, .. } if asset.contains("elixir-ls")
+            )),
+            "the official ElixirLS release is required: {steps:?}"
+        );
+        // The server is built once with the managed Elixir and a private Mix.
+        assert!(
+            steps.iter().any(|step| matches!(
+                step,
+                InstallStep::Run(command)
+                    if command.program == "elixir"
+                        && command.env.iter().any(|(key, _)| key == "MIX_HOME")
+            )),
+            "ElixirLS must be built with a private MIX_HOME: {steps:?}"
+        );
     }
 
     #[test]
@@ -2755,6 +3833,7 @@ mod tests {
             available: true,
             version: Some("rustfmt 1.8.0".to_string()),
             path: None,
+            error: None,
         };
         assert_eq!(available.summary(), "rustfmt 1.8.0");
 
@@ -2763,6 +3842,7 @@ mod tests {
             available: false,
             version: None,
             path: None,
+            error: None,
         };
         assert!(missing.summary().contains("rustup"));
     }
@@ -2847,7 +3927,7 @@ mod tests {
             .stderr(Stdio::piped())
             .spawn()
             .expect("spawn sleep");
-        assert!(alive_or_clean(&mut live));
+        assert!(alive_or_clean(&mut live).0);
 
         // A launcher that fails immediately (the broken-Node symptom) is not.
         let mut broken = Command::new("sh")
@@ -2857,7 +3937,7 @@ mod tests {
             .stderr(Stdio::piped())
             .spawn()
             .expect("spawn sh");
-        assert!(!alive_or_clean(&mut broken));
+        assert!(!alive_or_clean(&mut broken).0);
 
         // A clean one-shot exit is still a usable binary.
         let mut clean = Command::new("sh")
@@ -2867,7 +3947,7 @@ mod tests {
             .stderr(Stdio::piped())
             .spawn()
             .expect("spawn sh");
-        assert!(alive_or_clean(&mut clean));
+        assert!(alive_or_clean(&mut clean).0);
     }
 
     #[test]
