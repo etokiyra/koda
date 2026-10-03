@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Build and test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Formatting
+        run: cargo fmt --check
+      - name: Lints
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --all-targets -- --test-threads=1
+
+  # A rolling-release, non-Ubuntu, glibc distribution. This is where Swift's
+  # portable UBI10 path, the managed Go/clangd bundles and the distro-neutral
+  # tool plan are exercised for real.
+  arch:
+    name: Library tests (Arch Linux container)
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install tooling
+        run: pacman -Syu --noconfirm git curl rustup
+      - name: Select the stable toolchain
+        run: rustup default stable
+      - uses: actions/checkout@v4
+      - name: Library tests
+        run: cargo test --lib -- --test-threads=1
