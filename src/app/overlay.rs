@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::editor::Position;
+use crate::filesystem;
 use crate::language::completion::Completion;
 
 /// What happens when a picker item is chosen.
@@ -217,11 +218,177 @@ pub enum Overlay {
     Prompt(Prompt),
     /// The keyboard-shortcuts cheatsheet.
     Help(Help),
+    /// A directory browser, used to open a project.
+    DirPicker(DirPicker),
+    /// The guided "create a new project" flow.
+    NewProject(NewProject),
 }
 
 impl Overlay {
     pub fn is_none(&self) -> bool {
         matches!(self, Overlay::None)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Directory browsing
+// ---------------------------------------------------------------------------
+
+/// What a row in the directory browser represents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirEntryKind {
+    /// Confirm the directory currently being browsed.
+    ChooseCurrent,
+    /// Move to the parent directory.
+    Parent,
+    /// Descend into a subdirectory.
+    Directory,
+}
+
+/// A row in the directory browser.
+#[derive(Clone, Debug)]
+pub struct DirEntry {
+    pub name: String,
+    pub path: PathBuf,
+    pub kind: DirEntryKind,
+}
+
+/// A keyboard directory browser: navigate with the arrows, descend with Enter,
+/// and confirm the current folder with the `ChooseCurrent` row.
+pub struct DirBrowser {
+    pub current: PathBuf,
+    pub entries: Vec<DirEntry>,
+    pub selected: usize,
+    /// A message shown when the directory could not be read.
+    pub error: Option<String>,
+}
+
+impl DirBrowser {
+    pub fn new(start: &Path) -> Self {
+        let mut browser = DirBrowser {
+            current: start.to_path_buf(),
+            entries: Vec::new(),
+            selected: 0,
+            error: None,
+        };
+        browser.refresh();
+        browser
+    }
+
+    /// Re-read the current directory's subdirectories.
+    pub fn refresh(&mut self) {
+        let mut entries = vec![DirEntry {
+            name: "use this folder".to_string(),
+            path: self.current.clone(),
+            kind: DirEntryKind::ChooseCurrent,
+        }];
+        if let Some(parent) = self.current.parent() {
+            entries.push(DirEntry {
+                name: "..".to_string(),
+                path: parent.to_path_buf(),
+                kind: DirEntryKind::Parent,
+            });
+        }
+        match filesystem::read_dir_sorted(&self.current) {
+            Ok(list) => {
+                self.error = None;
+                for entry in list.into_iter().filter(|entry| entry.is_dir) {
+                    entries.push(DirEntry {
+                        name: entry.name,
+                        path: entry.path,
+                        kind: DirEntryKind::Directory,
+                    });
+                }
+            }
+            Err(err) => {
+                self.error = Some(format!("cannot read this folder: {err}"));
+            }
+        }
+        self.entries = entries;
+        if self.selected >= self.entries.len() {
+            self.selected = self.entries.len().saturating_sub(1);
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if self.selected + 1 < self.entries.len() {
+            self.selected += 1;
+        }
+    }
+
+    pub fn selected(&self) -> Option<&DirEntry> {
+        self.entries.get(self.selected)
+    }
+
+    /// Activate the highlighted row. Returns the chosen directory when the user
+    /// confirmed the current folder; navigating returns `None`.
+    pub fn activate(&mut self) -> Option<PathBuf> {
+        let entry = self.selected()?.clone();
+        match entry.kind {
+            DirEntryKind::ChooseCurrent => Some(self.current.clone()),
+            DirEntryKind::Parent | DirEntryKind::Directory => {
+                self.current = entry.path;
+                self.selected = 0;
+                self.refresh();
+                None
+            }
+        }
+    }
+}
+
+/// A directory picker overlay, used by "Open Project…".
+pub struct DirPicker {
+    pub browser: DirBrowser,
+}
+
+impl DirPicker {
+    pub fn new(start: &Path) -> Self {
+        DirPicker {
+            browser: DirBrowser::new(start),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// New project flow
+// ---------------------------------------------------------------------------
+
+/// Which step of the new-project flow is active.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NewProjectStep {
+    Parent,
+    Name,
+    Language,
+}
+
+/// State for the guided "create a new project" flow.
+pub struct NewProject {
+    pub step: NewProjectStep,
+    pub browser: DirBrowser,
+    /// The chosen parent directory (updated when step one completes).
+    pub parent: PathBuf,
+    pub name: String,
+    pub error: Option<String>,
+    /// Index into [`crate::project::create::CREATABLE`].
+    pub language: usize,
+}
+
+impl NewProject {
+    pub fn new(start: &Path) -> Self {
+        NewProject {
+            step: NewProjectStep::Parent,
+            browser: DirBrowser::new(start),
+            parent: start.to_path_buf(),
+            name: String::new(),
+            error: None,
+            language: 0,
+        }
     }
 }
 

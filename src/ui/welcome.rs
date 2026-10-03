@@ -1,15 +1,18 @@
-//! The welcome screen — Koda's little terminal art scene.
+//! The welcome screen — Koda's home screen and little terminal art scene.
 //!
-//! Shown when no file is open. The composition adapts to the terminal: a full
-//! scene when there is room, a compact wordmark when there is not.
+//! Shown whenever no file is open. Besides the animated Koda familiar and the
+//! wordmark, it presents a keyboard-navigable menu: open a file, open a
+//! project, create a new project, resume the workspace's last session, and
+//! reopen recent projects or files. The composition budgets its space so the
+//! menu always fits, and degrades to a compact wordmark on small terminals.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Modifier;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 
-use crate::app::App;
+use crate::app::{App, WelcomeItem};
 use crate::ui::art;
 use crate::ui::theme;
 
@@ -22,102 +25,152 @@ fn compose(area: Rect, app: &App) -> Vec<Line<'static>> {
     let width = area.width as usize;
     let height = area.height as usize;
 
-    let project_empty = app.workspace.tree.is_empty();
-    let open_hint = if project_empty {
-        "Ctrl+O to open"
-    } else {
-        "Ctrl+P to open"
-    };
-
     // Tiny terminals: just the mark and one hint.
     if width < 30 || height < 6 {
         return center_vertically(
             vec![
                 art::wordmark(),
                 Line::from(""),
-                Line::from(Span::styled(open_hint, theme::muted())).centered(),
+                Line::from(Span::styled(
+                    "Ctrl+O open  ·  Ctrl+Shift+P commands",
+                    theme::muted(),
+                ))
+                .centered(),
             ],
             height,
         );
     }
 
-    let pose = if project_empty && app.workspace.project.markers.is_empty() {
-        art::CAT_ASLEEP
-    } else if app.anim_phase % 12 == 7 {
-        // A rare blink keeps the familiar alive without being distracting.
-        art::CAT_BLINK
-    } else {
-        art::CAT
-    };
-
-    let roomy = width >= 46;
+    let items = app.welcome_items();
+    let roomy = width >= 44;
     let show_context = width >= 40;
 
-    // Budget the optional blocks so the whole composition always fits. Priority:
-    // shortcuts (discovery) first, then the mascot, then the scene, then stars.
-    let core = if show_context { 5 } else { 4 };
-    let available = height.saturating_sub(core);
-    let show_shortcuts = roomy && available >= 7;
-    let mut remaining = available - if show_shortcuts { 7 } else { 0 };
-    let show_cat = roomy && remaining >= 5;
-    if show_cat {
-        remaining -= 5;
-    }
-    let show_window = roomy && remaining >= 7;
-    if show_window {
-        remaining -= 7;
-    }
-    let show_stars = roomy && remaining >= 2;
-
-    let mut lines: Vec<Line<'static>> = Vec::new();
-
-    if show_stars {
-        lines.push(art::star_scatter());
-        lines.push(Line::from(""));
-    }
-    if show_window {
-        lines.extend(art::code_window().into_iter().map(Line::centered));
-        lines.push(Line::from(""));
-    }
-    if show_cat {
-        lines.extend(art::art_lines(pose, theme::soft()));
-        lines.push(Line::from(""));
-    }
-
-    lines.push(art::wordmark());
+    // Header: wordmark and tagline.
     let tagline = if width >= 34 {
         "your cozy little coding space"
     } else {
         "cozy coding space"
     };
-    lines.push(
+    let header: Vec<Line<'static>> = vec![
+        art::wordmark(),
         Line::from(Span::styled(
             tagline,
             theme::muted().add_modifier(Modifier::ITALIC),
         ))
         .centered(),
-    );
-    lines.push(Line::from(""));
+        Line::from(""),
+    ];
 
-    if show_shortcuts {
-        lines.extend(shortcuts());
-        lines.push(Line::from(""));
-    }
-
-    let hint = if project_empty && width >= 40 {
-        "no files yet · press Ctrl+O to open one"
-    } else if width >= 34 {
-        "press Ctrl+P to open a file"
+    // Footer: navigation hint and (when there is room) the project context.
+    let hint = if width >= 44 {
+        "↑↓ choose  ·  Enter open  ·  Ctrl+Shift+P commands"
+    } else if width >= 32 {
+        "↑↓ choose  ·  Enter open"
     } else {
-        open_hint
+        "↑↓ · Enter"
     };
-    lines.push(Line::from(Span::styled(hint, theme::muted())).centered());
+    let mut footer: Vec<Line<'static>> =
+        vec![Line::from(Span::styled(hint, theme::dim())).centered()];
     if show_context {
-        lines.push(context_line(app));
+        footer.push(context_line(app));
     }
 
-    // Center vertically for a deliberate, balanced composition.
+    // Optional art blocks, added in priority order while the menu still fits.
+    let min_list = items.len().clamp(3, 6);
+    let available_art = height.saturating_sub(header.len() + footer.len() + min_list + 1);
+    let mut art_block: Vec<Line<'static>> = Vec::new();
+    let mut remaining = available_art;
+    if roomy && remaining >= 2 {
+        art_block.push(art::star_scatter());
+        art_block.push(Line::from(""));
+        remaining -= 2;
+    }
+    if roomy && remaining >= 5 {
+        art_block.extend(art::art_lines(cat_pose(app), theme::soft()));
+        art_block.push(Line::from(""));
+        remaining -= 5;
+    }
+    if roomy && remaining >= 7 {
+        art_block.extend(art::code_window().into_iter().map(Line::centered));
+        art_block.push(Line::from(""));
+    }
+
+    let list_rows = height
+        .saturating_sub(header.len() + footer.len() + art_block.len() + 1)
+        .max(3);
+    let selected = app.welcome_selected.min(items.len().saturating_sub(1));
+    let list = action_list(&items, selected, width, list_rows);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.extend(art_block);
+    lines.extend(header);
+    lines.extend(list);
+    lines.push(Line::from(""));
+    lines.extend(footer);
+
     center_vertically(lines, height)
+}
+
+/// The familiar's pose: asleep on an empty project, otherwise alive.
+fn cat_pose(app: &App) -> &'static [&'static str] {
+    if app.workspace.tree.is_empty() && app.workspace.project.markers.is_empty() {
+        art::CAT_ASLEEP
+    } else if app.anim_phase % 12 == 7 {
+        art::CAT_BLINK
+    } else {
+        art::CAT
+    }
+}
+
+/// The keyboard-navigable welcome menu, centred as a block.
+fn action_list(
+    items: &[WelcomeItem],
+    selected: usize,
+    width: usize,
+    rows: usize,
+) -> Vec<Line<'static>> {
+    if items.is_empty() || rows == 0 {
+        return Vec::new();
+    }
+    let panel = width.saturating_sub(6).clamp(24, 58);
+    let start = if selected >= rows {
+        selected + 1 - rows
+    } else {
+        0
+    };
+    let mut lines = Vec::new();
+    for (index, item) in items.iter().enumerate().skip(start).take(rows) {
+        let highlighted = index == selected;
+        // Only spend width on the detail when the label still has room.
+        let detail_len = item.detail.chars().count();
+        let label_with_detail =
+            panel.saturating_sub(2 + detail_len + usize::from(detail_len > 0) * 2);
+        let show_detail = detail_len > 0 && label_with_detail >= 10;
+        let detail_len = if show_detail { detail_len } else { 0 };
+        let label_budget = panel.saturating_sub(2 + detail_len + usize::from(detail_len > 0) * 2);
+        let label = truncate(&item.label, label_budget.max(6));
+        let used = 2 + label.chars().count();
+        let pad = panel.saturating_sub(used + detail_len);
+        let label_style = if highlighted {
+            theme::bright_bold()
+        } else {
+            theme::text()
+        };
+        let mut spans = vec![
+            Span::styled(if highlighted { "❯ " } else { "  " }, theme::star()),
+            Span::styled(label, label_style),
+            Span::raw(" ".repeat(pad)),
+        ];
+        if show_detail {
+            spans.push(Span::styled(item.detail.clone(), theme::dim()));
+        }
+        let mut line = Line::from(spans);
+        if highlighted {
+            line = line.style(Style::default().bg(theme::MENU_SELECTED_BG));
+        }
+        lines.push(line.centered());
+    }
+    lines
 }
 
 fn center_vertically(mut lines: Vec<Line<'static>>, height: usize) -> Vec<Line<'static>> {
@@ -130,41 +183,6 @@ fn center_vertically(mut lines: Vec<Line<'static>>, height: usize) -> Vec<Line<'
     lines
 }
 
-fn shortcuts() -> Vec<Line<'static>> {
-    let rows = [
-        ("Ctrl+P", "quick open"),
-        ("Ctrl+Shift+P", "command palette"),
-        ("Ctrl+O", "open file"),
-        ("Ctrl+B", "toggle files"),
-        ("Ctrl+F", "find"),
-        ("Ctrl+S", "save"),
-    ];
-    // Pad both columns so every row has an identical width and centering keeps
-    // the key/description columns aligned.
-    let key_width = rows
-        .iter()
-        .map(|(key, _)| key.chars().count())
-        .max()
-        .unwrap_or(0)
-        + 2;
-    let desc_width = rows
-        .iter()
-        .map(|(_, description)| description.chars().count())
-        .max()
-        .unwrap_or(0);
-
-    rows.iter()
-        .map(|(key, description)| {
-            Line::from(vec![
-                Span::styled("  · ", theme::dim()),
-                Span::styled(format!("{key:<key_width$}"), theme::accent()),
-                Span::styled(format!("{description:<desc_width$}"), theme::muted()),
-            ])
-            .centered()
-        })
-        .collect()
-}
-
 fn context_line(app: &App) -> Line<'static> {
     Line::from(vec![
         Span::styled("☾  ", theme::accent()),
@@ -173,4 +191,19 @@ fn context_line(app: &App) -> Line<'static> {
         Span::styled(app.workspace.root().display().to_string(), theme::muted()),
     ])
     .centered()
+}
+
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    if max == 0 {
+        return String::new();
+    }
+    if max == 1 {
+        return "…".to_string();
+    }
+    let mut out: String = text.chars().take(max - 1).collect();
+    out.push('…');
+    out
 }

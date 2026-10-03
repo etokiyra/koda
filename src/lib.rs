@@ -27,6 +27,7 @@ pub mod filesystem;
 pub mod git;
 pub mod language;
 pub mod project;
+pub mod recent;
 pub mod regex;
 pub mod search;
 pub mod session;

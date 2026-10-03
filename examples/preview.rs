@@ -5,13 +5,21 @@
 //!
 //! ```text
 //! cargo run --example preview -- [width] [height] [mode]
-//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols | completion | hover | help | setup
+//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols | completion | hover | help | setup | split | toast | newproject
 //! ```
 
 use koda::app::App;
 use koda::commands::ids;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+
+/// Build an app with `path` open, as the editor previews expect.
+fn file_app(path: &std::path::Path) -> App {
+    let mut app = App::new(Some(path)).expect("app");
+    app.open_path(path.to_path_buf());
+    app.pump_background(std::time::Duration::from_millis(300));
+    app
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -22,25 +30,25 @@ fn main() {
     let root = std::env::current_dir().expect("cwd");
 
     let mut app = match mode {
-        "file" => App::new(Some(&root.join("src/main.rs"))).expect("app"),
+        "file" => file_app(&root.join("src/main.rs")),
         "palette" => {
-            let mut app = App::new(Some(&root.join("src/main.rs"))).expect("app");
+            let mut app = file_app(&root.join("src/main.rs"));
             app.execute_command(ids::PALETTE);
             app
         }
         "quick" => {
-            let mut app = App::new(Some(&root.join("src/main.rs"))).expect("app");
+            let mut app = file_app(&root.join("src/main.rs"));
             app.execute_command(ids::QUICK_OPEN);
             app
         }
         "split" => {
-            let mut app = App::new(Some(&root.join("src/main.rs"))).expect("app");
+            let mut app = file_app(&root.join("src/main.rs"));
             app.open_path(root.join("src/ui/mod.rs"));
             app.execute_command(ids::SPLIT);
             app
         }
         "toast" => {
-            let mut app = App::new(Some(&root.join("src/main.rs"))).expect("app");
+            let mut app = file_app(&root.join("src/main.rs"));
             app.push_toast(koda::app::ToastKind::Success, "Formatted src/main.rs");
             app.push_toast(
                 koda::app::ToastKind::Error,
@@ -49,12 +57,12 @@ fn main() {
             app
         }
         "find" => {
-            let mut app = App::new(Some(&root.join("src/main.rs"))).expect("app");
+            let mut app = file_app(&root.join("src/main.rs"));
             app.execute_command(ids::FIND);
             app
         }
         "replace" => {
-            let mut app = App::new(Some(&root.join("src/main.rs"))).expect("app");
+            let mut app = file_app(&root.join("src/main.rs"));
             app.execute_command(ids::REPLACE);
             app
         }
@@ -64,10 +72,15 @@ fn main() {
             std::fs::create_dir_all(&dir).unwrap();
             App::new(Some(&dir)).expect("app")
         }
+        "newproject" => {
+            let mut app = App::new(Some(&root)).expect("app");
+            app.execute_command(ids::NEW_PROJECT);
+            app
+        }
         "bracket" => {
             let path = std::env::temp_dir().join("koda-preview-bracket.rs");
             std::fs::write(&path, "fn main() {\n    let x = (1 + 2);\n}\n").unwrap();
-            let mut app = App::new(Some(&path)).expect("app");
+            let mut app = file_app(&path);
             app.editor
                 .active_document_mut()
                 .unwrap()
@@ -75,7 +88,7 @@ fn main() {
             app
         }
         "tabs" => {
-            let mut app = App::new(Some(&root.join("src/main.rs"))).expect("app");
+            let mut app = file_app(&root.join("src/main.rs"));
             for file in [
                 "src/app/mod.rs",
                 "src/editor/document.rs",
@@ -102,7 +115,7 @@ fn main() {
         "empty" => {
             let path = std::env::temp_dir().join("koda-preview-empty.rs");
             std::fs::write(&path, "").unwrap();
-            App::new(Some(&path)).expect("app")
+            file_app(&path)
         }
         "diagnostics" => {
             let path = std::env::temp_dir().join("koda-preview-diagnostics.rs");
@@ -111,7 +124,7 @@ fn main() {
                 "fn main() {\n    let values = [1, 2, 3;\n    println!(\"hi\");\n}\n",
             )
             .unwrap();
-            let mut app = App::new(Some(&path)).expect("app");
+            let mut app = file_app(&path);
             let text = app.editor.active_document().unwrap().buffer.text();
             let language = app.editor.active_document().unwrap().buffer.language;
             let diagnostics = app.language.provider(language).diagnostics(&text);
@@ -143,7 +156,7 @@ fn main() {
                 "fn main() {\n    helper();\n    helper();\n}\n\nfn helper() {}\n",
             )
             .unwrap();
-            let mut app = App::new(Some(&path)).expect("app");
+            let mut app = file_app(&path);
             app.editor
                 .active_document_mut()
                 .unwrap()

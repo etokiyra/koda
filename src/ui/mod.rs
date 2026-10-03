@@ -55,6 +55,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Overlay::Help(help) => {
             overlay::render_help(frame, area, help, &app.commands, app.anim_phase)
         }
+        Overlay::DirPicker(picker) => overlay::render_dir_picker(frame, area, picker),
+        Overlay::NewProject(flow) => overlay::render_new_project(frame, area, flow),
     }
 
     if app.overlay.is_none() {

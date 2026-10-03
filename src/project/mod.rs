@@ -4,6 +4,7 @@
 //! that establishes language context, discovered by walking up from the file or
 //! directory the user opened.
 
+pub mod create;
 pub mod file_tree;
 
 use std::path::{Path, PathBuf};

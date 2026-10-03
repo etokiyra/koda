@@ -28,6 +28,15 @@ fn temp_project(name: &str) -> PathBuf {
     dir
 }
 
+/// Build an app and open `file`, settling detection, as these editor-rendering
+/// tests expect a document to be active.
+fn app_with_file(file: &Path) -> App {
+    let mut app = App::new(Some(file)).unwrap();
+    app.open_path(file.to_path_buf());
+    app.pump_background(std::time::Duration::from_millis(300));
+    app
+}
+
 fn draw(app: &mut App) -> String {
     draw_at(app, 120, 30)
 }
@@ -57,7 +66,7 @@ fn cleanup(dir: &Path) {
 fn renders_project_tree_and_rust_file() {
     let dir = temp_project("editor");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
 
     let screen = draw(&mut app);
     assert!(screen.contains("koda"), "header missing:\n{screen}");
@@ -73,7 +82,7 @@ fn renders_project_tree_and_rust_file() {
 fn renders_inline_diagnostics() {
     let dir = temp_project("inline-diag");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     {
         let doc = app.editor.active_document_mut().unwrap();
         doc.set_lsp_diagnostics(vec![Diagnostic::new(
@@ -101,8 +110,8 @@ fn renders_welcome_when_no_file_open() {
     let screen = draw(&mut app);
     assert!(screen.contains("K O D A"), "welcome missing:\n{screen}");
     assert!(
-        screen.contains("quick open"),
-        "shortcuts missing:\n{screen}"
+        screen.contains("Create a new project"),
+        "welcome menu missing:\n{screen}"
     );
 
     cleanup(&dir);
@@ -112,7 +121,7 @@ fn renders_welcome_when_no_file_open() {
 fn command_palette_renders_overlay() {
     let dir = temp_project("palette");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     app.execute_command(ids::PALETTE);
 
     let screen = draw(&mut app);
@@ -133,7 +142,7 @@ fn command_palette_renders_overlay() {
 fn picker_empty_state_is_personable() {
     let dir = temp_project("picker-empty");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     app.execute_command(ids::QUICK_OPEN);
     if let Overlay::Picker(picker) = &mut app.overlay {
         picker.query = "zzzzzzzz".to_string();
@@ -154,7 +163,7 @@ fn picker_empty_state_is_personable() {
 fn prompt_shows_confirm_hint() {
     let dir = temp_project("prompt-hint");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     app.execute_command(ids::GOTO_LINE);
 
     let screen = draw(&mut app);
@@ -173,7 +182,7 @@ fn split_renders_both_documents() {
     let b = dir.join("src/lib.rs");
     fs::write(&a, "fn main() {}\n").unwrap();
     fs::write(&b, "pub fn koda_split() {}\n").unwrap();
-    let mut app = App::new(Some(&a)).unwrap();
+    let mut app = app_with_file(&a);
     app.open_path(b.clone());
     app.execute_command(ids::SPLIT);
 
@@ -192,7 +201,7 @@ fn split_renders_both_documents() {
 fn renders_toast_notification() {
     let dir = temp_project("toast-render");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     app.push_toast(ToastKind::Success, "Formatted main.rs");
 
     let screen = draw(&mut app);
@@ -208,7 +217,7 @@ fn renders_toast_notification() {
 fn statusline_uses_mellow_panel_background() {
     let dir = temp_project("statusbg");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -234,7 +243,7 @@ fn bracket_match_is_highlighted() {
     let dir = temp_project("bracket");
     let file = dir.join("src/main.rs");
     fs::write(&file, "fn main() {\n    let x = (1 + 2);\n}\n").unwrap();
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     app.editor
         .active_document_mut()
         .unwrap()
@@ -262,7 +271,7 @@ fn bracket_match_is_highlighted() {
 fn editor_background_stays_transparent() {
     let dir = temp_project("transparent");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -351,7 +360,7 @@ fn tree_filter_lists_matching_files() {
 fn statusline_shows_selection_size() {
     let dir = temp_project("selection-status");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     {
         let doc = app.editor.active_document_mut().unwrap();
         doc.selection = Some(koda::editor::Selection::new(koda::editor::Position::new(
@@ -372,7 +381,7 @@ fn statusline_shows_selection_size() {
 fn gutter_and_statusline_show_diagnostics() {
     let dir = temp_project("diagnostics-ui");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     {
         let doc = app.editor.active_document_mut().unwrap();
         doc.set_diagnostics_revision(1);
@@ -410,7 +419,7 @@ fn gutter_and_statusline_show_diagnostics() {
 fn diagnostics_underline_the_affected_characters() {
     let dir = temp_project("diagnostics-underline");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     {
         let doc = app.editor.active_document_mut().unwrap();
         doc.set_diagnostics_revision(1);
@@ -455,7 +464,7 @@ fn diagnostics_underline_the_affected_characters() {
 fn completion_popup_is_drawn() {
     let dir = temp_project("completion-ui");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     app.execute_command(ids::COMPLETE);
 
     let screen = draw_at(&mut app, 100, 24);
@@ -470,7 +479,7 @@ fn completion_popup_is_drawn() {
 fn hover_popup_is_drawn() {
     let dir = temp_project("hover-ui");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     app.editor
         .active_document_mut()
         .unwrap()
@@ -492,7 +501,7 @@ fn editor_keeps_context_below_the_cursor() {
     let source: String = (0..40).map(|line| format!("line {line}\n")).collect();
     fs::write(&file, source).unwrap();
 
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     app.editor
         .active_document_mut()
         .unwrap()
@@ -512,7 +521,7 @@ fn statusline_shows_the_line_ending() {
     let file = dir.join("src/main.rs");
     fs::write(&file, "fn main() {\r\n}\r\n").unwrap();
 
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     let screen = draw_at(&mut app, 100, 20);
     assert!(
         screen.contains("CRLF"),
@@ -547,7 +556,7 @@ fn welcome_mascot_blinks_on_later_frames() {
 fn help_overlay_lists_shortcuts() {
     let dir = temp_project("help");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     app.execute_command(ids::HELP);
 
     let screen = draw_at(&mut app, 100, 30);
@@ -566,7 +575,7 @@ fn help_overlay_lists_shortcuts() {
 fn command_palette_shows_a_no_matches_state() {
     let dir = temp_project("palette-empty");
     let file = dir.join("src/main.rs");
-    let mut app = App::new(Some(&file)).unwrap();
+    let mut app = app_with_file(&file);
     app.execute_command(ids::PALETTE);
     if let Overlay::Picker(picker) = &mut app.overlay {
         for c in "zzzzzz".chars() {

@@ -29,13 +29,15 @@ use crate::language::symbols::is_ident_char as is_word_char;
 use crate::language::tools::{Tool, ToolPurpose, ToolRegistry};
 use crate::language::{Capability, LanguageId, LanguageService, WorkspaceSymbol};
 use crate::project::Workspace;
+use crate::project::create::{self, CreateOutcome};
+use crate::recent::Recent;
 use crate::search::SearchMatch;
 use crate::session::{self, Session};
 use crate::terminal;
 use crate::ui;
 use overlay::{
-    CompletionState, Help, HoverState, Overlay, Picker, PickerAction, PickerItem, Prompt,
-    PromptKind, Search, SearchField, TreeFilter,
+    CompletionState, DirPicker, Help, HoverState, NewProject, NewProjectStep, Overlay, Picker,
+    PickerAction, PickerItem, Prompt, PromptKind, Search, SearchField, TreeFilter,
 };
 
 /// How long typing must pause before diagnostics are recomputed. Short enough to
@@ -121,6 +123,25 @@ pub struct Toast {
     created: Instant,
 }
 
+/// An action offered on the welcome screen.
+pub enum WelcomeAction {
+    OpenFile,
+    OpenProject,
+    NewProject,
+    Resume,
+    OpenTarget(PathBuf),
+    OpenRecentProject(PathBuf),
+    OpenRecentFile(PathBuf),
+    Help,
+}
+
+/// A row on the welcome screen.
+pub struct WelcomeItem {
+    pub label: String,
+    pub detail: String,
+    pub action: WelcomeAction,
+}
+
 /// The root application object.
 pub struct App {
     pub workspace: Workspace,
@@ -138,6 +159,19 @@ pub struct App {
     /// The region produced by the last paste, so `Alt+Y` can replace it.
     last_yank: Option<Yank>,
     pub recent_files: Vec<PathBuf>,
+    /// Global recent projects and files, shown on the welcome screen.
+    pub recent: Recent,
+    /// The path supplied on the command line, offered from the welcome screen.
+    welcome_target: Option<PathBuf>,
+    /// A session loaded for the current workspace, offered as "Resume".
+    resume_session: Option<Session>,
+    /// Selected row on the welcome screen.
+    pub welcome_selected: usize,
+    /// Whether the user engaged with a project this session. Gates session
+    /// saving so starting Koda and quitting does not wipe an untouched session.
+    engaged: bool,
+    /// Whether a project creation is running on the worker.
+    pending_project: bool,
     /// Inline file-tree filter, when active.
     pub tree_filter: Option<TreeFilter>,
     /// Completion popup, when open.
@@ -236,6 +270,7 @@ impl App {
         let result = app.run(&mut terminal);
         terminal::restore();
         app.save_session();
+        app.recent.save();
         result
     }
 
@@ -257,6 +292,12 @@ impl App {
             kill_index: 0,
             last_yank: None,
             recent_files: Vec::new(),
+            recent: Recent::default(),
+            welcome_target: None,
+            resume_session: None,
+            welcome_selected: 0,
+            engaged: false,
+            pending_project: false,
             tree_filter: None,
             completion: None,
             hover: None,
@@ -304,15 +345,16 @@ impl App {
             setup_offered: std::collections::HashSet::new(),
         };
 
-        if let Some(path) = target
-            && path.is_file()
-        {
-            app.open_path(path.to_path_buf());
-        } else if let Some(path) = session::session_path(app.workspace.root())
-            && let Some(session) = Session::load_from(&path)
-        {
-            app.restore_session(session);
-        }
+        // The welcome screen is always the first view. A path from the command
+        // line is preserved as an obvious action rather than opened
+        // immediately, and a saved session for the workspace is offered as a
+        // "Resume" action instead of being restored silently.
+        app.recent = Recent::load();
+        app.welcome_target =
+            target.map(|path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
+        app.resume_session =
+            session::session_path(app.workspace.root()).and_then(|path| Session::load_from(&path));
+
         app.request_git_refresh();
         // Probe for external tools on the worker so startup never waits on it.
         app.background.discover_tools();
@@ -473,6 +515,8 @@ impl App {
             Some("installing")
         } else if self.pending_commit {
             Some("committing")
+        } else if self.pending_project {
+            Some("creating project")
         } else if self.lsp_status == LspStatus::Starting {
             Some("connecting")
         } else {
@@ -510,6 +554,7 @@ impl App {
         }
         match self.focus {
             Focus::FileTree => self.handle_tree_key(key),
+            Focus::Editor if self.editor.is_empty() => self.handle_welcome_key(key),
             Focus::Editor => self.handle_editor_key(key),
         }
     }
@@ -627,6 +672,14 @@ impl App {
                 return;
             }
             Overlay::Help(_) => return,
+            Overlay::DirPicker(_) => return,
+            Overlay::NewProject(flow) => {
+                if flow.step == NewProjectStep::Name {
+                    flow.name.push_str(text);
+                    flow.error = None;
+                }
+                return;
+            }
             Overlay::None => {}
         }
         self.completion = None;
@@ -809,6 +862,12 @@ impl App {
             Run(PickerAction, Option<String>),
             Submit(PromptKind, String),
             Stage(PathBuf, bool),
+            OpenDir(PathBuf),
+            CreateProject {
+                parent: PathBuf,
+                name: String,
+                language: LanguageId,
+            },
         }
 
         let outcome = match &mut self.overlay {
@@ -862,6 +921,124 @@ impl App {
                 }
                 _ => Outcome::Nothing,
             },
+            Overlay::DirPicker(picker) => match key.code {
+                KeyCode::Esc => Outcome::Close,
+                KeyCode::Up => {
+                    picker.browser.move_up();
+                    Outcome::Nothing
+                }
+                KeyCode::Down => {
+                    picker.browser.move_down();
+                    Outcome::Nothing
+                }
+                KeyCode::Backspace | KeyCode::Left => {
+                    if let Some(parent) = picker.browser.current.parent() {
+                        picker.browser.current = parent.to_path_buf();
+                        picker.browser.selected = 0;
+                        picker.browser.refresh();
+                    }
+                    Outcome::Nothing
+                }
+                KeyCode::Enter => match picker.browser.activate() {
+                    Some(directory) => Outcome::OpenDir(directory),
+                    None => Outcome::Nothing,
+                },
+                _ => Outcome::Nothing,
+            },
+            Overlay::NewProject(flow) => match flow.step {
+                NewProjectStep::Parent => match key.code {
+                    KeyCode::Esc => Outcome::Close,
+                    KeyCode::Up => {
+                        flow.browser.move_up();
+                        Outcome::Nothing
+                    }
+                    KeyCode::Down => {
+                        flow.browser.move_down();
+                        Outcome::Nothing
+                    }
+                    KeyCode::Backspace | KeyCode::Left => {
+                        if let Some(parent) = flow.browser.current.parent() {
+                            flow.browser.current = parent.to_path_buf();
+                            flow.browser.selected = 0;
+                            flow.browser.refresh();
+                        }
+                        Outcome::Nothing
+                    }
+                    KeyCode::Enter => {
+                        if let Some(directory) = flow.browser.activate() {
+                            flow.parent = directory;
+                            flow.step = NewProjectStep::Name;
+                            flow.error = None;
+                        }
+                        Outcome::Nothing
+                    }
+                    _ => Outcome::Nothing,
+                },
+                NewProjectStep::Name => match key.code {
+                    KeyCode::Esc => {
+                        flow.step = NewProjectStep::Parent;
+                        flow.error = None;
+                        Outcome::Nothing
+                    }
+                    KeyCode::Enter => {
+                        match validate_project_name(&flow.parent, &flow.name) {
+                            Ok(()) => {
+                                flow.name = flow.name.trim().to_string();
+                                flow.step = NewProjectStep::Language;
+                                flow.error = None;
+                            }
+                            Err(message) => flow.error = Some(message),
+                        }
+                        Outcome::Nothing
+                    }
+                    KeyCode::Backspace => {
+                        flow.name.pop();
+                        flow.error = None;
+                        Outcome::Nothing
+                    }
+                    KeyCode::Char(c) if !ctrl => {
+                        flow.name.push(c);
+                        flow.error = None;
+                        Outcome::Nothing
+                    }
+                    _ => Outcome::Nothing,
+                },
+                NewProjectStep::Language => match key.code {
+                    KeyCode::Esc => {
+                        flow.step = NewProjectStep::Name;
+                        flow.error = None;
+                        Outcome::Nothing
+                    }
+                    KeyCode::Up => {
+                        flow.language = flow.language.saturating_sub(1);
+                        flow.error = None;
+                        Outcome::Nothing
+                    }
+                    KeyCode::Down => {
+                        if flow.language + 1 < create::CREATABLE.len() {
+                            flow.language += 1;
+                        }
+                        flow.error = None;
+                        Outcome::Nothing
+                    }
+                    KeyCode::Enter => {
+                        let index = flow.language.min(create::CREATABLE.len().saturating_sub(1));
+                        let language = create::CREATABLE[index];
+                        match validate_project_name(&flow.parent, &flow.name) {
+                            Ok(()) => Outcome::CreateProject {
+                                parent: flow.parent.clone(),
+                                name: flow.name.trim().to_string(),
+                                language,
+                            },
+                            Err(message) => {
+                                flow.error = Some(message);
+                                Outcome::Nothing
+                            }
+                        }
+                    }
+                    _ => Outcome::Nothing,
+                },
+            },
             Overlay::Help(help) => match key.code {
                 KeyCode::Esc => Outcome::Close,
                 KeyCode::Up => {
@@ -899,6 +1076,18 @@ impl App {
                 self.submit_prompt(kind, input);
             }
             Outcome::Stage(path, staged) => self.dispatch_stage(path, staged, true),
+            Outcome::OpenDir(directory) => {
+                self.overlay = Overlay::None;
+                self.open_project(directory);
+            }
+            Outcome::CreateProject {
+                parent,
+                name,
+                language,
+            } => {
+                self.overlay = Overlay::None;
+                self.start_project_creation(parent, name, language);
+            }
         }
     }
 
@@ -1172,6 +1361,9 @@ impl App {
             ids::DUPLICATE_FILE => self.duplicate_file(),
             ids::COPY_FILE => self.copy_file(),
             ids::QUIT => self.request_quit(),
+            ids::HOME => self.go_home(),
+            ids::OPEN_PROJECT => self.open_dir_picker(),
+            ids::NEW_PROJECT => self.open_new_project(),
             ids::UNDO => self.with_doc(|d| d.undo()),
             ids::REDO => self.with_doc(|d| d.redo()),
             ids::SELECT_ALL => self.with_doc(|d| d.select_all()),
@@ -1618,6 +1810,7 @@ impl App {
                 self.workspace.tree.select_path(&path);
                 self.focus = Focus::Editor;
                 self.close_armed = None;
+                self.engaged = true;
                 self.remember_recent(&path);
                 self.set_status(format!("Opened {}", path.display()));
             }
@@ -1630,10 +1823,298 @@ impl App {
         self.recent_files.retain(|existing| {
             existing.canonicalize().unwrap_or_else(|_| existing.clone()) != canonical
         });
-        self.recent_files.push(canonical);
+        self.recent_files.push(canonical.clone());
         if self.recent_files.len() > 20 {
             self.recent_files.remove(0);
         }
+        if canonical.is_file() {
+            self.recent.add_file(&canonical);
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Welcome screen and project opening
+    // ----------------------------------------------------------------------
+
+    /// Whether the welcome screen is the active surface.
+    pub fn welcome_active(&self) -> bool {
+        self.editor.is_empty() && self.overlay.is_none() && !self.search.open
+    }
+
+    /// The actions offered on the welcome screen, best first.
+    pub fn welcome_items(&self) -> Vec<WelcomeItem> {
+        let mut items = vec![
+            WelcomeItem {
+                label: "Open a file…".to_string(),
+                detail: "Ctrl+O".to_string(),
+                action: WelcomeAction::OpenFile,
+            },
+            WelcomeItem {
+                label: "Open a project…".to_string(),
+                detail: "choose a folder".to_string(),
+                action: WelcomeAction::OpenProject,
+            },
+            WelcomeItem {
+                label: "Create a new project…".to_string(),
+                detail: "Rust · Go · Python · Shell".to_string(),
+                action: WelcomeAction::NewProject,
+            },
+        ];
+
+        if let Some(session) = &self.resume_session {
+            let name = self
+                .workspace
+                .root()
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("project");
+            items.push(WelcomeItem {
+                label: format!("Resume “{name}”"),
+                detail: format!("{} file(s)", session.files.len()),
+                action: WelcomeAction::Resume,
+            });
+        }
+
+        if let Some(target) = &self.welcome_target {
+            let is_workspace = target == self.workspace.root();
+            if target.is_file() || !is_workspace {
+                let verb = if target.is_file() {
+                    "Open"
+                } else {
+                    "Open project"
+                };
+                items.push(WelcomeItem {
+                    label: format!("{verb} {}", display_path(target)),
+                    detail: "from the command line".to_string(),
+                    action: WelcomeAction::OpenTarget(target.clone()),
+                });
+            }
+        }
+
+        for project in &self.recent.projects {
+            if project == self.workspace.root() || !project.is_dir() {
+                continue;
+            }
+            items.push(WelcomeItem {
+                label: format!("Project {}", display_path(project)),
+                detail: String::new(),
+                action: WelcomeAction::OpenRecentProject(project.clone()),
+            });
+        }
+
+        for file in &self.recent.files {
+            if !file.is_file() {
+                continue;
+            }
+            items.push(WelcomeItem {
+                label: format!("File {}", display_path(file)),
+                detail: String::new(),
+                action: WelcomeAction::OpenRecentFile(file.clone()),
+            });
+        }
+
+        items.push(WelcomeItem {
+            label: "Keyboard shortcuts".to_string(),
+            detail: "F1".to_string(),
+            action: WelcomeAction::Help,
+        });
+        items
+    }
+
+    fn handle_welcome_key(&mut self, key: KeyEvent) {
+        let count = self.welcome_items().len();
+        match key.code {
+            KeyCode::Up => {
+                if self.welcome_selected > 0 {
+                    self.welcome_selected -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if self.welcome_selected + 1 < count {
+                    self.welcome_selected += 1;
+                }
+            }
+            KeyCode::Home => self.welcome_selected = 0,
+            KeyCode::End => self.welcome_selected = count.saturating_sub(1),
+            KeyCode::Enter => {
+                if let Some(item) = self.welcome_items().into_iter().nth(self.welcome_selected) {
+                    self.activate_welcome(item.action);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn activate_welcome(&mut self, action: WelcomeAction) {
+        match action {
+            WelcomeAction::OpenFile => self.execute_command(ids::OPEN),
+            WelcomeAction::OpenProject => self.open_dir_picker(),
+            WelcomeAction::NewProject => self.open_new_project(),
+            WelcomeAction::Resume => {
+                if let Some(session) = self.resume_session.take() {
+                    self.restore_session(session);
+                }
+                self.welcome_selected = 0;
+            }
+            WelcomeAction::OpenTarget(path) => self.open_target(path),
+            WelcomeAction::OpenRecentProject(path) => self.open_project(path),
+            WelcomeAction::OpenRecentFile(path) => self.open_recent_file(path),
+            WelcomeAction::Help => self.toggle_help(),
+        }
+    }
+
+    /// Open a path from the command line: a file directly, a directory as a
+    /// project.
+    fn open_target(&mut self, path: PathBuf) {
+        if path.is_file() {
+            self.open_recent_file(path);
+        } else if path.is_dir() {
+            self.open_project(path);
+        } else {
+            self.set_error(format!("{} no longer exists", path.display()));
+        }
+    }
+
+    /// Open `path`, switching the workspace first if it belongs to another
+    /// project.
+    fn open_recent_file(&mut self, path: PathBuf) {
+        if !path.is_file() {
+            self.set_error(format!("{} no longer exists", path.display()));
+            return;
+        }
+        let root = crate::project::Project::detect(&path).root;
+        if root != self.workspace.root() && !self.open_workspace(root) {
+            return;
+        }
+        self.open_path(path);
+    }
+
+    /// Open a project directory, restoring its session when one is available.
+    fn open_project(&mut self, root: PathBuf) {
+        if !self.open_workspace(root) {
+            return;
+        }
+        if let Some(session) = self.resume_session.take() {
+            self.restore_session(session);
+        } else {
+            let name = self
+                .workspace
+                .root()
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("project")
+                .to_string();
+            self.set_status(format!("Opened project {name}"));
+        }
+    }
+
+    /// Begin the "Open Project…" directory picker.
+    fn open_dir_picker(&mut self) {
+        self.overlay = Overlay::DirPicker(DirPicker::new(&self.welcome_start_dir()));
+    }
+
+    /// Begin the guided "Create a new project" flow.
+    fn open_new_project(&mut self) {
+        self.overlay = Overlay::NewProject(NewProject::new(&self.welcome_start_dir()));
+    }
+
+    /// Where a picker should start browsing.
+    fn welcome_start_dir(&self) -> PathBuf {
+        if let Some(directory) = self
+            .editor
+            .active_document()
+            .and_then(|doc| doc.buffer.path.as_ref())
+            .and_then(|path| path.parent())
+            .filter(|parent| parent.is_dir())
+        {
+            return directory.to_path_buf();
+        }
+        std::env::current_dir().unwrap_or_else(|_| self.workspace.root().to_path_buf())
+    }
+
+    /// Replace the workspace with the project rooted at `root`.
+    ///
+    /// Returns `false` when the workspace could not be opened (an error status
+    /// is set).
+    pub fn open_workspace(&mut self, root: PathBuf) -> bool {
+        // Persist the current project before leaving it.
+        self.save_session();
+        let workspace = match Workspace::open(Some(&root)) {
+            Ok(workspace) => workspace,
+            Err(err) => {
+                self.set_error(format!("Could not open the project: {err}"));
+                return false;
+            }
+        };
+        self.workspace = workspace;
+        self.reset_for_new_workspace();
+        self.recent.add_project(self.workspace.root());
+        self.engaged = true;
+        self.resume_session =
+            session::session_path(self.workspace.root()).and_then(|path| Session::load_from(&path));
+        self.request_git_refresh();
+        self.background.discover_tools();
+        true
+    }
+
+    /// Clear per-project state when the workspace changes.
+    fn reset_for_new_workspace(&mut self) {
+        self.editor = Editor::new();
+        self.split = false;
+        self.pane_left = 0;
+        self.pane_right = None;
+        self.focus_pane = Pane::Primary;
+        self.focus = Focus::Editor;
+        self.overlay = Overlay::None;
+        self.search = Search::default();
+        self.tree_filter = None;
+        self.completion = None;
+        self.hover = None;
+        self.cursor_screen = None;
+        self.close_armed = None;
+        self.diagnostics_dirty_at = None;
+        self.pending_format = None;
+        self.pending_workspace_symbols = None;
+        self.pending_workspace_symbols_query = None;
+        self.pending_project_search = None;
+        self.pending_rename = None;
+        self.pending_code_actions.clear();
+        self.lsp = None;
+        self.lsp_language = None;
+        self.lsp_start_at = None;
+        self.lsp_started_at = None;
+        self.lsp_restarts = 0;
+        self.lsp_status = LspStatus::Offline;
+        self.welcome_target = None;
+        self.welcome_selected = 0;
+    }
+
+    /// Send a create-project request to the background worker.
+    fn start_project_creation(&mut self, parent: PathBuf, name: String, language: LanguageId) {
+        if self.pending_project {
+            self.set_status("A project is already being created");
+            return;
+        }
+        self.pending_project = true;
+        self.background
+            .create_project(parent, name.clone(), language);
+        self.set_status(format!("Creating {name}…"));
+    }
+
+    /// Return to the welcome screen by closing every tab.
+    fn go_home(&mut self) {
+        if self.editor.has_unsaved() {
+            self.set_error("Unsaved changes — save first (Ctrl+S)");
+            return;
+        }
+        self.editor.close_all();
+        self.pane_left = 0;
+        self.pane_right = None;
+        self.split = false;
+        self.focus_pane = Pane::Primary;
+        self.welcome_selected = 0;
+        self.focus = Focus::Editor;
+        self.set_status("Welcome");
     }
 
     // ----------------------------------------------------------------------
@@ -1667,6 +2148,7 @@ impl App {
 
     /// Restore a saved session into the current workspace.
     fn restore_session(&mut self, session: Session) {
+        self.engaged = true;
         if session.show_hidden && !self.workspace.tree.show_hidden {
             self.workspace.tree.toggle_hidden();
         }
@@ -1697,7 +2179,14 @@ impl App {
     }
 
     /// Persist the session for the active project. Errors are non-fatal.
+    ///
+    /// Only writes once the user has engaged with a project, so starting Koda
+    /// and quitting without opening anything does not overwrite an untouched
+    /// session.
     pub fn save_session(&self) {
+        if !self.engaged {
+            return;
+        }
         let Some(path) = session::session_path(self.workspace.root()) else {
             return;
         };
@@ -2230,6 +2719,45 @@ impl App {
                     }
                     Err(message) => {
                         let text = format!("Install failed — {message}");
+                        self.set_error(text.clone());
+                        self.push_toast(ToastKind::Error, text);
+                    }
+                }
+                true
+            }
+            BackgroundEvent::ProjectCreated {
+                name,
+                language: _,
+                outcome,
+            } => {
+                self.pending_project = false;
+                match outcome {
+                    CreateOutcome::Created { root, files } => {
+                        self.push_toast(ToastKind::Success, format!("Created {name}"));
+                        self.recent.add_project(&root);
+                        if !self.open_workspace(root) {
+                            return true;
+                        }
+                        if let Some(entry) = entry_file(&files) {
+                            self.open_path(entry);
+                        }
+                    }
+                    CreateOutcome::Failed {
+                        root: Some(root),
+                        message,
+                    } => {
+                        let text = format!(
+                            "Could not finish creating {name}: {message}. A partial project is at {}",
+                            root.display()
+                        );
+                        self.set_error(text.clone());
+                        self.push_toast(ToastKind::Error, text);
+                    }
+                    CreateOutcome::Failed {
+                        root: None,
+                        message,
+                    } => {
+                        let text = format!("Could not create {name}: {message}");
                         self.set_error(text.clone());
                         self.push_toast(ToastKind::Error, text);
                     }
@@ -3393,7 +3921,10 @@ impl App {
     }
 
     /// Wait up to `timeout` for startup background work to settle.
-    fn pump_background(&mut self, timeout: Duration) {
+    ///
+    /// Exposed so embedders (and tests) can drive pending detection and git
+    /// work deterministically before rendering.
+    pub fn pump_background(&mut self, timeout: Duration) {
         let deadline = Instant::now() + timeout;
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -4207,6 +4738,47 @@ fn unique_copy_path(path: &Path) -> PathBuf {
     parent.join(format!("{stem} copy"))
 }
 
+/// A compact display path, using `~` for the home directory when possible.
+fn display_path(path: &Path) -> String {
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
+        && let Ok(relative) = path.strip_prefix(&home)
+    {
+        return format!("~/{}", relative.display());
+    }
+    path.display().to_string()
+}
+
+/// Validate a project name against the chosen parent directory.
+fn validate_project_name(parent: &Path, name: &str) -> Result<(), String> {
+    create::validate_name(name)?;
+    let target = parent.join(name.trim());
+    if target.exists() {
+        return Err(format!("{} already exists", target.display()));
+    }
+    Ok(())
+}
+
+/// Pick a sensible file to open in a freshly created project.
+fn entry_file(files: &[PathBuf]) -> Option<PathBuf> {
+    const PREFERRED: &[&str] = &["main.rs", "main.go", "__main__.py", "main.py"];
+    files
+        .iter()
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| PREFERRED.contains(&name))
+        })
+        .or_else(|| {
+            files.iter().find(|path| {
+                matches!(
+                    path.extension().and_then(|extension| extension.to_str()),
+                    Some("rs" | "go" | "py" | "sh" | "bash")
+                )
+            })
+        })
+        .cloned()
+}
+
 /// Whether two optional/actual paths refer to the same file.
 fn same_file(a: Option<&Path>, b: &Path) -> bool {
     let Some(a) = a else {
@@ -4216,8 +4788,6 @@ fn same_file(a: Option<&Path>, b: &Path) -> bool {
     let b = b.canonicalize().unwrap_or_else(|_| b.to_path_buf());
     a == b
 }
-
-/// Apply LSP text edits to a string, from the end so offsets stay valid.
 fn apply_text_edits(text: &str, edits: &[convert::TextEdit]) -> String {
     let mut chars: Vec<char> = text.chars().collect();
     // Character offset where each line begins.
@@ -4278,11 +4848,20 @@ mod tests {
         dir
     }
 
+    /// Build an app and open `file`, settling detection, as tests expect a
+    /// document to be active. Koda itself launches into the welcome screen.
+    fn app_with_file(file: &Path) -> App {
+        let mut app = App::new(Some(file)).unwrap();
+        app.open_path(file.to_path_buf());
+        app.pump_background(Duration::from_millis(300));
+        app
+    }
+
     #[test]
     fn opens_rust_file_and_detects_language() {
         let dir = temp_project("open");
         let file = dir.join("src/main.rs");
-        let app = App::new(Some(&file)).unwrap();
+        let app = app_with_file(&file);
         assert_eq!(app.editor.len(), 1);
         assert_eq!(
             app.editor.active_document().unwrap().buffer.language,
@@ -4295,7 +4874,7 @@ mod tests {
     fn saves_and_marks_clean() {
         let dir = temp_project("save");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.editor
             .active_document_mut()
             .unwrap()
@@ -4312,7 +4891,7 @@ mod tests {
     fn revert_discards_edits_and_reloads_from_disk() {
         let dir = temp_project("revert");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.editor
             .active_document_mut()
             .unwrap()
@@ -4331,7 +4910,7 @@ mod tests {
     fn new_file_creates_and_opens_it() {
         let dir = temp_project("new-file");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.execute_command(ids::NEW_FILE);
         assert!(matches!(app.overlay, Overlay::Prompt(_)));
@@ -4350,7 +4929,7 @@ mod tests {
     fn duplicate_file_creates_a_copy_and_opens_it() {
         let dir = temp_project("duplicate");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.execute_command(ids::DUPLICATE_FILE);
         let copy = dir.join("src/main copy.rs");
@@ -4366,7 +4945,7 @@ mod tests {
     fn copy_file_prompts_and_writes_the_copy() {
         let dir = temp_project("copy-file");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.execute_command(ids::COPY_FILE);
         assert!(matches!(
@@ -4382,7 +4961,7 @@ mod tests {
     fn rename_updates_the_open_document() {
         let dir = temp_project("rename-file");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.execute_command(ids::RENAME_FILE);
         assert!(matches!(app.overlay, Overlay::Prompt(_)));
@@ -4404,7 +4983,7 @@ mod tests {
         let a = dir.join("src/main.rs");
         let b = dir.join("src/extra.rs");
         fs::write(&b, "pub fn extra() {}\n").unwrap();
-        let mut app = App::new(Some(&a)).unwrap();
+        let mut app = app_with_file(&a);
         app.open_path(b.clone());
         assert_eq!(app.editor.len(), 2);
 
@@ -4419,7 +4998,7 @@ mod tests {
         let dir = temp_project("kill-ring");
         let file = dir.join("src/main.rs");
         fs::write(&file, "").unwrap();
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.push_kill("first");
         app.push_kill("second");
@@ -4444,7 +5023,7 @@ mod tests {
         let dir = temp_project("yank-edit");
         let file = dir.join("src/main.rs");
         fs::write(&file, "").unwrap();
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.push_kill("first");
         app.push_kill("second");
         app.paste();
@@ -4463,7 +5042,7 @@ mod tests {
     fn toggle_comment_adds_prefix() {
         let dir = temp_project("comment");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.editor
             .active_document_mut()
             .unwrap()
@@ -4480,7 +5059,7 @@ mod tests {
     fn command_palette_opens() {
         let dir = temp_project("palette");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.execute_command(ids::PALETTE);
         assert!(!app.overlay.is_none());
         fs::remove_dir_all(&dir).ok();
@@ -4493,7 +5072,7 @@ mod tests {
         let b = dir.join("src/lib.rs");
         fs::write(&a, "fn main() {}\n").unwrap();
         fs::write(&b, "pub fn lib() {}\n").unwrap();
-        let mut app = App::new(Some(&a)).unwrap();
+        let mut app = app_with_file(&a);
         app.open_path(b.clone());
         assert_eq!(app.editor.len(), 2);
         let active = app.editor.active_index();
@@ -4533,7 +5112,7 @@ mod tests {
         let a = dir.join("src/main.rs");
         let b = dir.join("src/lib.rs");
         fs::write(&b, "pub fn lib() {}\n").unwrap();
-        let mut app = App::new(Some(&a)).unwrap();
+        let mut app = app_with_file(&a);
         app.open_path(b.clone());
 
         app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::ALT));
@@ -4552,7 +5131,7 @@ mod tests {
         let b = dir.join("src/lib.rs");
         fs::write(&a, "fn main() {}\n").unwrap();
         fs::write(&b, "pub fn lib() {}\n").unwrap();
-        let mut app = App::new(Some(&a)).unwrap();
+        let mut app = app_with_file(&a);
         app.open_path(b.clone());
         app.execute_command(ids::SPLIT);
         assert!(app.split);
@@ -4586,7 +5165,7 @@ mod tests {
     fn palette_marks_unavailable_commands() {
         let dir = temp_project("palette-avail");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.execute_command(ids::PALETTE);
 
         let Overlay::Picker(picker) = &app.overlay else {
@@ -4623,7 +5202,7 @@ mod tests {
         let b = dir.join("src/lib.rs");
         fs::write(&b, "pub fn lib() {}\n").unwrap();
 
-        let mut app = App::new(Some(&a)).unwrap();
+        let mut app = app_with_file(&a);
         app.open_path(b.clone());
         app.execute_command(ids::QUICK_OPEN);
 
@@ -4644,7 +5223,7 @@ mod tests {
     fn closing_a_dirty_tab_asks_first() {
         let dir = temp_project("close-dirty");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.editor
             .active_document_mut()
             .unwrap()
@@ -4665,7 +5244,7 @@ mod tests {
         let b = dir.join("src/lib.rs");
         fs::write(&b, "pub fn f() {}\n").unwrap();
 
-        let mut app = App::new(Some(&a)).unwrap();
+        let mut app = app_with_file(&a);
         app.open_path(b.clone());
         app.editor.documents[0].insert_text("// a\n");
         app.editor.documents[1].insert_text("// b\n");
@@ -4691,7 +5270,7 @@ mod tests {
     fn refresh_picks_up_new_files() {
         let dir = temp_project("refresh");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         assert!(
             !app.workspace
                 .tree
@@ -4716,7 +5295,7 @@ mod tests {
     fn find_prefills_from_the_selection() {
         let dir = temp_project("find-prefill");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         {
             let doc = app.editor.active_document_mut().unwrap();
             doc.selection = Some(Selection::new(Position::new(0, 0)));
@@ -4734,7 +5313,7 @@ mod tests {
         let dir = temp_project("search-options");
         let file = dir.join("src/main.rs");
         fs::write(&file, "Foo foo food foo\n").unwrap();
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.execute_command(ids::FIND);
         app.search.query = "foo".to_string();
@@ -4759,7 +5338,7 @@ mod tests {
         let dir = temp_project("search-regex");
         let file = dir.join("src/main.rs");
         fs::write(&file, "let count = 42;\nlet total = 7;\n").unwrap();
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.execute_command(ids::FIND);
         app.handle_search_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::ALT));
@@ -4784,7 +5363,7 @@ mod tests {
         let dir = temp_project("replace-all");
         let file = dir.join("src/main.rs");
         fs::write(&file, "foo foo foo\nbar foo\n").unwrap();
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.execute_command(ids::REPLACE);
         app.search.query = "foo".to_string();
@@ -4829,7 +5408,7 @@ mod tests {
         let file = dir.join("src/main.rs");
         fs::write(&file, "fn main() {\n    let x = 1;\n").unwrap();
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         assert_eq!(
             app.editor.active_document().unwrap().buffer.language,
             LanguageId::Rust
@@ -4852,7 +5431,7 @@ mod tests {
         let file = dir.join("src/main.rs");
         fs::write(&file, "fn main() {\n    let x = 1;\n").unwrap();
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.poll_diagnostics();
         wait_for_diagnostics(&mut app);
         app.editor
@@ -4872,7 +5451,7 @@ mod tests {
         let file = dir.join("src/main.rs");
         fs::write(&file, "fn main() {\n").unwrap();
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.poll_diagnostics();
         wait_for_diagnostics(&mut app);
 
@@ -4889,7 +5468,7 @@ mod tests {
         let dir = temp_project("symbols");
         let file = dir.join("src/main.rs");
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.execute_command(ids::SHOW_SYMBOLS);
 
         let Overlay::Picker(picker) = &app.overlay else {
@@ -4909,7 +5488,7 @@ mod tests {
         let file = dir.join("src/main.rs");
         fs::write(&file, "fn main() {\n    helper();\n}\n\nfn helper() {}\n").unwrap();
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.editor
             .active_document_mut()
             .unwrap()
@@ -4928,7 +5507,7 @@ mod tests {
         let b = dir.join("src/lib.rs");
         fs::write(&a, "fn main() {\n    helper();\n}\n").unwrap();
         fs::write(&b, "pub fn helper() {}\n").unwrap();
-        let mut app = App::new(Some(&a)).unwrap();
+        let mut app = app_with_file(&a);
         app.editor
             .active_document_mut()
             .unwrap()
@@ -4964,7 +5543,7 @@ mod tests {
         let file = dir.join("src/main.rs");
         fs::write(&file, "fn main() {\n    helper();\n}\n\nfn helper() {}\n").unwrap();
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.editor
             .active_document_mut()
             .unwrap()
@@ -4984,7 +5563,7 @@ mod tests {
         let file = dir.join("src/main.rs");
         fs::write(&file, "let counter = 0;\ncount\n").unwrap();
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.editor
             .active_document_mut()
             .unwrap()
@@ -5009,7 +5588,7 @@ mod tests {
         let dir = temp_project("complete-keywords");
         let file = dir.join("src/main.rs");
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.execute_command(ids::COMPLETE);
         let state = app.completion.as_ref().expect("completion should open");
         assert!(state.items.iter().any(|item| item.label == "fn"));
@@ -5022,7 +5601,7 @@ mod tests {
         let file = dir.join("src/main.rs");
         fs::write(&file, "fn main(){let x=1;}\n").unwrap();
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         let before = app.editor.active_document().unwrap().buffer.text();
         app.apply_formatted(&file, "fn main() {\n    let x = 1;\n}\n");
         assert_eq!(
@@ -5042,7 +5621,7 @@ mod tests {
         let file = dir.join("notes.txt");
         fs::write(&file, "hello\n").unwrap();
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.format_document();
         assert!(
             app.pending_format.is_none(),
@@ -5064,7 +5643,7 @@ mod tests {
         let file = dir.join("src/main.rs");
         fs::write(&file, "fn main(){let x=1;}\n").unwrap();
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.format_document();
 
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -5090,7 +5669,7 @@ mod tests {
         let file = dir.join("src/main.rs");
         fs::write(&file, "fn main() {\n    helper();\n}\n\nfn helper() {}\n").unwrap();
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.editor
             .active_document_mut()
             .unwrap()
@@ -5110,7 +5689,7 @@ mod tests {
         let b = dir.join("src/lib.rs");
         fs::write(&b, "pub fn beta() {}\n").unwrap();
 
-        let mut app = App::new(Some(&a)).unwrap();
+        let mut app = app_with_file(&a);
         app.open_workspace_symbols();
 
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -5148,7 +5727,7 @@ mod tests {
         fs::write(&a, "fn main() { needle(); }\n").unwrap();
         fs::write(&b, "pub fn needle() {}\n").unwrap();
 
-        let mut app = App::new(Some(&a)).unwrap();
+        let mut app = app_with_file(&a);
         app.execute_command(ids::PROJECT_SEARCH);
         assert!(matches!(app.overlay, Overlay::Prompt(_)));
         app.submit_prompt(PromptKind::ProjectSearch, "needle".to_string());
@@ -5172,7 +5751,7 @@ mod tests {
     fn changed_files_lists_git_status() {
         let dir = temp_project("changed-files");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         let mut files = std::collections::HashMap::new();
         files.insert(file.clone(), GitFileStatus::Modified);
         let mut staged = std::collections::HashSet::new();
@@ -5205,7 +5784,7 @@ mod tests {
     fn commit_flow_reports_state_and_prompts() {
         let dir = temp_project("commit");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         // Not a repository: the command explains instead of prompting.
         app.workspace.git = crate::git::GitInfo::default();
@@ -5241,7 +5820,7 @@ mod tests {
     fn space_in_changed_files_stages_the_selected_file() {
         let dir = temp_project("stage-space");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         let mut files = std::collections::HashMap::new();
         files.insert(file.clone(), GitFileStatus::Modified);
         app.workspace.git = crate::git::GitInfo {
@@ -5270,7 +5849,7 @@ mod tests {
     fn ctrl_shift_s_opens_save_as() {
         let dir = temp_project("save-as");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.handle_key(KeyEvent::new(
             KeyCode::Char('s'),
@@ -5287,7 +5866,7 @@ mod tests {
     fn ctrl_n_opens_the_new_file_prompt() {
         let dir = temp_project("ctrl-n");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
         assert!(matches!(
@@ -5302,7 +5881,7 @@ mod tests {
         let dir = temp_project("alt-m");
         let file = dir.join("src/main.rs");
         fs::write(&file, "fn main() {}\n").unwrap();
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.editor
             .active_document_mut()
             .unwrap()
@@ -5321,7 +5900,7 @@ mod tests {
         let dir = temp_project("f3");
         let file = dir.join("src/main.rs");
         fs::write(&file, "foo\nfoo\nfoo\n").unwrap();
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.execute_command(ids::FIND);
         app.search.query = "foo".to_string();
         app.refresh_search_matches();
@@ -5338,7 +5917,7 @@ mod tests {
     fn toasts_deduplicate_and_cap() {
         let dir = temp_project("toasts");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.push_toast(ToastKind::Success, "Saved");
         app.push_toast(ToastKind::Success, "Saved");
@@ -5355,7 +5934,7 @@ mod tests {
     fn busy_reports_pending_background_work() {
         let dir = temp_project("busy");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         assert!(app.busy().is_none());
 
         app.pending_format = Some((file.clone(), 1));
@@ -5371,7 +5950,7 @@ mod tests {
     fn language_setup_lists_discovered_tools() {
         let dir = temp_project("setup");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         // Tool discovery happens on the worker; wait briefly for it.
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -5393,7 +5972,7 @@ mod tests {
     fn installing_a_tool_reports_progress() {
         let dir = temp_project("install");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.install_tool(Tool::Gofmt);
         assert_eq!(app.busy(), Some("installing"));
@@ -5413,7 +5992,7 @@ mod tests {
     fn language_setup_offers_install_for_missing_tools() {
         let dir = temp_project("setup-install");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         let deadline = Instant::now() + Duration::from_secs(5);
         while app.tools.is_none() && Instant::now() < deadline {
@@ -5453,7 +6032,7 @@ mod tests {
     fn offers_to_install_a_missing_language_server_once() {
         let dir = temp_project("offer-install");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         let deadline = Instant::now() + Duration::from_secs(5);
         while app.tools.is_none() && Instant::now() < deadline {
@@ -5486,7 +6065,7 @@ mod tests {
     fn lsp_handshake_timeout_falls_back_to_builtin() {
         let dir = temp_project("lsp-timeout");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.lsp_status = LspStatus::Starting;
         app.lsp_language = Some(LanguageId::Rust);
         app.lsp_started_at = Some(Instant::now() - Duration::from_secs(60));
@@ -5502,7 +6081,7 @@ mod tests {
     fn automatic_restart_stops_after_the_budget() {
         let dir = temp_project("restart-budget");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.lsp_start_at = None;
         app.lsp_restarts = MAX_LSP_RESTARTS;
 
@@ -5516,7 +6095,7 @@ mod tests {
         let dir = temp_project("restart-server");
         let file = dir.join("notes.txt");
         fs::write(&file, "hello\n").unwrap();
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         app.execute_command(ids::RESTART_SERVER);
         assert!(app.lsp.is_none());
@@ -5563,7 +6142,7 @@ cat >/dev/null
         perms.set_mode(0o755);
         fs::set_permissions(&script, perms).unwrap();
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.start_lsp(
             LanguageId::Rust,
             script.to_str().unwrap(),
@@ -5641,7 +6220,7 @@ done
         perms.set_mode(0o755);
         fs::set_permissions(&script, perms).unwrap();
 
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.editor
             .active_document_mut()
             .unwrap()
@@ -5771,7 +6350,7 @@ done
         let b = dir.join("src/lib.rs");
         fs::write(&b, "pub fn lib() {\n    let x = 1;\n}\n").unwrap();
 
-        let mut app = App::new(Some(&a)).unwrap();
+        let mut app = app_with_file(&a);
         app.open_path(b.clone());
         app.editor
             .active_document_mut()
@@ -5797,7 +6376,7 @@ done
     fn reloads_clean_files_changed_on_disk() {
         let dir = temp_project("external-clean");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
 
         std::thread::sleep(Duration::from_millis(10));
         fs::write(&file, "fn changed() {}\n").unwrap();
@@ -5822,13 +6401,13 @@ done
         for (name, content, expected) in cases {
             let file = dir.join(name);
             fs::write(&file, content).unwrap();
-            let app = App::new(Some(&file)).unwrap();
+            let app = app_with_file(&file);
             let language = app.editor.active_document().unwrap().buffer.language;
             assert_eq!(language, expected, "detected {name} as {language:?}");
         }
         // `Cargo.toml` is a TOML file, even though it marks a Rust project.
         let manifest = dir.join("Cargo.toml");
-        let app = App::new(Some(&manifest)).unwrap();
+        let app = app_with_file(&manifest);
         assert_eq!(
             app.editor.active_document().unwrap().buffer.language,
             LanguageId::Toml
@@ -5841,7 +6420,7 @@ done
         let dir = temp_project("python");
         let file = dir.join("app.py");
         fs::write(&file, "def main():\n    pass\n").unwrap();
-        let app = App::new(Some(&file)).unwrap();
+        let app = app_with_file(&file);
         assert_eq!(
             app.editor.active_document().unwrap().buffer.language,
             LanguageId::Python
@@ -5850,7 +6429,7 @@ done
         // An extensionless script is recognised from its shebang.
         let script = dir.join("tool");
         fs::write(&script, "#!/usr/bin/env python3\nprint('hi')\n").unwrap();
-        let app = App::new(Some(&script)).unwrap();
+        let app = app_with_file(&script);
         assert_eq!(
             app.editor.active_document().unwrap().buffer.language,
             LanguageId::Python
@@ -5863,7 +6442,7 @@ done
         let dir = temp_project("shell");
         let file = dir.join("build.sh");
         fs::write(&file, "#!/usr/bin/env bash\necho hi\n").unwrap();
-        let app = App::new(Some(&file)).unwrap();
+        let app = app_with_file(&file);
         assert_eq!(
             app.editor.active_document().unwrap().buffer.language,
             LanguageId::Shell
@@ -5875,7 +6454,7 @@ done
     fn warns_when_a_dirty_file_changes_on_disk() {
         let dir = temp_project("external-dirty");
         let file = dir.join("src/main.rs");
-        let mut app = App::new(Some(&file)).unwrap();
+        let mut app = app_with_file(&file);
         app.editor
             .active_document_mut()
             .unwrap()
@@ -5901,6 +6480,251 @@ done
                 .text()
                 .starts_with("// mine")
         );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // ------------------------------------------------------------------
+    // Welcome screen and project creation
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn startup_shows_the_welcome_screen_for_a_file_target() {
+        let dir = temp_project("startup-file");
+        let file = dir.join("src/main.rs");
+        let app = App::new(Some(&file)).unwrap();
+
+        assert!(
+            app.editor.is_empty(),
+            "a CLI file must not be opened automatically"
+        );
+        assert!(app.welcome_active());
+        let labels: Vec<String> = app
+            .welcome_items()
+            .into_iter()
+            .map(|item| item.label)
+            .collect();
+        assert!(labels.iter().any(|label| label.contains("Open a file")));
+        assert!(
+            labels
+                .iter()
+                .any(|label| label.contains("Create a new project"))
+        );
+        assert!(
+            labels.iter().any(|label| label.starts_with("Open ")),
+            "the CLI target should be offered: {labels:?}"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn startup_shows_the_welcome_screen_for_a_directory_target() {
+        let dir = temp_project("startup-dir");
+        let app = App::new(Some(&dir)).unwrap();
+        assert!(app.editor.is_empty());
+        assert!(app.welcome_active());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn welcome_target_action_opens_the_file() {
+        let dir = temp_project("welcome-open");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        // Find and activate the command-line target row.
+        let action = app
+            .welcome_items()
+            .into_iter()
+            .find(|item| matches!(item.action, WelcomeAction::OpenTarget(_)))
+            .expect("a target action");
+        app.activate_welcome(action.action);
+        assert_eq!(app.editor.len(), 1);
+        app.pump_background(Duration::from_millis(300));
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.language,
+            LanguageId::Rust
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resume_restores_the_saved_session() {
+        let dir = temp_project("welcome-resume");
+        let file = dir.join("src/main.rs");
+        let app = app_with_file(&file);
+        app.save_session();
+
+        let mut fresh = App::new(Some(&file)).unwrap();
+        assert!(
+            fresh.resume_session.is_some(),
+            "a saved session should be offered"
+        );
+        assert!(fresh.editor.is_empty());
+        fresh.activate_welcome(WelcomeAction::Resume);
+        assert_eq!(fresh.editor.len(), 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn starting_and_quitting_without_engaging_keeps_the_session() {
+        let dir = temp_project("welcome-keep");
+        let file = dir.join("src/main.rs");
+
+        // Establish a session.
+        let engaged = app_with_file(&file);
+        engaged.save_session();
+        let session_path = session::session_path(engaged.workspace.root()).unwrap();
+        let before = Session::load_from(&session_path).expect("a session");
+
+        // A fresh start that quits untouched must not overwrite it.
+        let untouched = App::new(Some(&file)).unwrap();
+        untouched.save_session();
+        assert_eq!(Session::load_from(&session_path), Some(before));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn home_command_returns_to_the_welcome_screen() {
+        let dir = temp_project("welcome-home");
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+        assert!(!app.editor.is_empty());
+
+        app.execute_command(ids::HOME);
+        assert!(app.editor.is_empty());
+        assert!(app.welcome_active());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Drive the new-project flow up to the language step with `name`.
+    fn new_project_to_language(app: &mut App, parent: &Path, name: &str) {
+        app.execute_command(ids::NEW_PROJECT);
+        if let Overlay::NewProject(flow) = &mut app.overlay {
+            flow.browser.current = parent.to_path_buf();
+            flow.browser.selected = 0;
+            flow.browser.refresh();
+        }
+        // Choose the current folder.
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        for c in name.chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn new_project_flow_creates_and_opens_a_project() {
+        let dir = temp_project("new-project");
+        let parent = dir.join("projects");
+        fs::create_dir_all(&parent).unwrap();
+        let mut app = App::new(Some(&dir)).unwrap();
+
+        new_project_to_language(&mut app, &parent, "myapp");
+        // Language step defaults to Rust; Enter starts creation.
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.pending_project);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.pending_project && Instant::now() < deadline {
+            app.pump_background(Duration::from_millis(20));
+        }
+        app.pump_background(Duration::from_millis(300));
+
+        let root = parent.join("myapp");
+        assert!(root.join("Cargo.toml").is_file(), "project not created");
+        assert_eq!(
+            app.workspace.root().canonicalize().unwrap(),
+            root.canonicalize().unwrap()
+        );
+        assert_eq!(app.editor.len(), 1, "the entry file should be open");
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.language,
+            LanguageId::Rust
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn new_project_rejects_invalid_and_existing_names() {
+        let dir = temp_project("new-project-errors");
+        let parent = dir.join("projects");
+        fs::create_dir_all(parent.join("taken")).unwrap();
+        let mut app = App::new(Some(&dir)).unwrap();
+
+        // A traversal-style name stays on the name step with an error.
+        new_project_to_language(&mut app, &parent, "..");
+        assert!(matches!(
+            &app.overlay,
+            Overlay::NewProject(flow) if flow.step == NewProjectStep::Name && flow.error.is_some()
+        ));
+
+        // An existing directory is refused too.
+        if let Overlay::NewProject(flow) = &mut app.overlay {
+            flow.name.clear();
+        }
+        for c in "taken".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(
+            &app.overlay,
+            Overlay::NewProject(flow) if flow.error.as_deref().is_some_and(|e| e.contains("exists"))
+        ));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn new_project_can_be_cancelled_and_stepped_back() {
+        let dir = temp_project("new-project-cancel");
+        let parent = dir.join("projects");
+        fs::create_dir_all(&parent).unwrap();
+        let mut app = App::new(Some(&dir)).unwrap();
+
+        new_project_to_language(&mut app, &parent, "cancelme");
+        // On the language step, Esc goes back to the name step.
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(
+            &app.overlay,
+            Overlay::NewProject(flow) if flow.step == NewProjectStep::Name
+        ));
+        // Then back to the parent step, then cancel.
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(
+            &app.overlay,
+            Overlay::NewProject(flow) if flow.step == NewProjectStep::Parent
+        ));
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.overlay.is_none());
+
+        // Cancelling left nothing behind.
+        assert!(!parent.join("cancelme").exists());
+        assert!(!app.pending_project);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn opening_a_project_switches_the_workspace() {
+        let dir = temp_project("switch");
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+
+        // A second project with its own Cargo.toml and source.
+        let other = dir.join("other");
+        fs::create_dir_all(other.join("src")).unwrap();
+        fs::write(other.join("Cargo.toml"), "[package]\nname = \"other\"\n").unwrap();
+        fs::write(other.join("src/lib.rs"), "pub fn other() {}\n").unwrap();
+
+        assert!(app.open_workspace(other.clone()));
+        app.pump_background(Duration::from_millis(300));
+        assert_eq!(
+            app.workspace.root().canonicalize().unwrap(),
+            other.canonicalize().unwrap()
+        );
+        assert!(
+            app.editor.is_empty(),
+            "the editor resets for the new project"
+        );
+        assert!(app.welcome_active());
         fs::remove_dir_all(&dir).ok();
     }
 }

@@ -22,6 +22,7 @@ pub mod ids {
     pub const DUPLICATE_FILE: &str = "file.duplicate";
     pub const COPY_FILE: &str = "file.copy";
     pub const QUIT: &str = "app.quit";
+    pub const HOME: &str = "app.home";
 
     pub const UNDO: &str = "edit.undo";
     pub const REDO: &str = "edit.redo";
@@ -60,6 +61,8 @@ pub mod ids {
 
     pub const WORKSPACE_SYMBOLS: &str = "project.symbols";
     pub const PROJECT_SEARCH: &str = "project.search";
+    pub const OPEN_PROJECT: &str = "project.openDir";
+    pub const NEW_PROJECT: &str = "project.new";
     pub const CHANGED_FILES: &str = "git.changedFiles";
     pub const GIT_COMMIT: &str = "git.commit";
     pub const GIT_TOGGLE_STAGE: &str = "git.toggleStage";
@@ -174,6 +177,8 @@ impl CommandRegistry {
             Command::new(COPY_FILE, "Copy File…", "File", None)
                 .describes("Copy the selected file to a chosen path"),
             Command::new(QUIT, "Quit", "File", Some("Ctrl+Q")).describes("Leave Koda"),
+            Command::new(HOME, "Welcome Screen", "File", None)
+                .describes("Close all tabs and return to the home screen"),
             Command::new(UNDO, "Undo", "Edit", Some("Ctrl+Z"))
                 .describes("Undo the last change")
                 .needs_doc(),
@@ -325,6 +330,10 @@ impl CommandRegistry {
                 Some("Ctrl+Shift+F"),
             )
             .describes("Find text across every file in the project"),
+            Command::new(OPEN_PROJECT, "Open Project…", "Project", None)
+                .describes("Open a folder as a project"),
+            Command::new(NEW_PROJECT, "Create New Project…", "Project", None)
+                .describes("Scaffold a new Rust, Go, Python or Shell project"),
             Command::new(CHANGED_FILES, "Changed Files…", "Git", Some("Ctrl+Shift+G"))
                 .describes("List the files changed in the working tree"),
             Command::new(GIT_COMMIT, "Commit Changes…", "Git", None)

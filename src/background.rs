@@ -63,6 +63,12 @@ enum Request {
         path: PathBuf,
         staged: bool,
     },
+    /// Scaffold a new project.
+    CreateProject {
+        parent: PathBuf,
+        name: String,
+        language: LanguageId,
+    },
 }
 
 /// A finished piece of background work.
@@ -108,6 +114,12 @@ pub enum Event {
         path: PathBuf,
         staged: bool,
         result: Result<(), String>,
+    },
+    /// The result of scaffolding a new project.
+    ProjectCreated {
+        name: String,
+        language: LanguageId,
+        outcome: crate::project::create::CreateOutcome,
     },
 }
 
@@ -207,6 +219,18 @@ impl Background {
                             });
                             let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
                         }
+                        Request::CreateProject {
+                            parent,
+                            name,
+                            language,
+                        } => {
+                            let outcome = crate::project::create::create(&parent, &name, language);
+                            let _ = event_tx.send(Event::ProjectCreated {
+                                name,
+                                language,
+                                outcome,
+                            });
+                        }
                     }
                 }
             });
@@ -283,6 +307,15 @@ impl Background {
     /// Ask to stage or unstage one path.
     pub fn stage_path(&self, root: PathBuf, path: PathBuf, staged: bool) {
         let _ = self.requests.send(Request::GitStage { root, path, staged });
+    }
+
+    /// Ask to scaffold a new project.
+    pub fn create_project(&self, parent: PathBuf, name: String, language: LanguageId) {
+        let _ = self.requests.send(Request::CreateProject {
+            parent,
+            name,
+            language,
+        });
     }
 
     /// Take the next finished event, if any.

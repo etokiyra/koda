@@ -11,9 +11,13 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 
-use crate::app::overlay::{CompletionState, Help, HoverState, Picker, Prompt, Search, SearchField};
+use crate::app::overlay::{
+    CompletionState, DirEntryKind, DirPicker, Help, HoverState, NewProject, NewProjectStep, Picker,
+    Prompt, Search, SearchField,
+};
 use crate::app::{Toast, ToastKind};
 use crate::commands::CommandRegistry;
+use crate::project::create;
 use crate::ui::{art, centered, theme};
 
 /// Render a filterable list (command palette / quick open).
@@ -590,6 +594,346 @@ pub fn render_search(frame: &mut Frame, area: Rect, search: &Search) {
     let cursor_x = area.x + 7 + cursor_col as u16;
     if cursor_x < area.x + area.width {
         frame.set_cursor_position((cursor_x, cursor_y));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Directory picker and new-project flow
+// ---------------------------------------------------------------------------
+
+/// Draw a rounded panel with a title, returning its inner rect.
+fn draw_panel(
+    frame: &mut Frame,
+    area: Rect,
+    title: Line<'static>,
+    width: u16,
+    height: u16,
+) -> Rect {
+    let rect = centered(area, width, height);
+    frame.render_widget(Clear, rect);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme::accent())
+        .style(Style::default().bg(theme::PANEL_BG))
+        .title(title);
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+    inner
+}
+
+fn panel_title(text: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("✦ ", theme::star()),
+        Span::styled(text.to_string(), theme::accent_bold()),
+        Span::styled(" ✦", theme::star()),
+    ])
+}
+
+fn panel_subtitle(text: &str, width: u16) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("  ", theme::dim()),
+        Span::styled(
+            truncate(text, width.saturating_sub(3) as usize),
+            theme::bright(),
+        ),
+    ])
+}
+
+fn render_divider(frame: &mut Frame, rect: Rect) {
+    frame.render_widget(
+        Paragraph::new(Span::styled("─".repeat(rect.width as usize), theme::dim()))
+            .style(Style::default().bg(theme::PANEL_BG)),
+        rect,
+    );
+}
+
+fn render_footer(frame: &mut Frame, rect: Rect, text: &str, error: bool) {
+    let style = if error { theme::error() } else { theme::dim() };
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            format!(
+                "  {}",
+                truncate(text, rect.width.saturating_sub(3) as usize)
+            ),
+            style,
+        ))
+        .style(Style::default().bg(theme::PANEL_BG)),
+        rect,
+    );
+}
+
+/// Render selectable `(label, detail)` rows with the selected row highlighted.
+fn render_panel_rows(frame: &mut Frame, list: Rect, rows: &[(String, String)], selected: usize) {
+    let on_panel = Style::default().bg(theme::PANEL_BG);
+    if rows.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled("  (empty)", theme::muted())).style(on_panel),
+            list,
+        );
+        return;
+    }
+    let visible = list.height as usize;
+    let start = if selected >= visible {
+        selected + 1 - visible
+    } else {
+        0
+    };
+    let width = list.width as usize;
+    let mut lines = Vec::new();
+    for (index, (label, detail)) in rows.iter().enumerate().skip(start).take(visible) {
+        let highlighted = index == selected;
+        let marker = if highlighted {
+            Span::styled(" ❯ ", theme::star())
+        } else {
+            Span::raw("   ")
+        };
+        let label_style = if highlighted {
+            theme::bright_bold()
+        } else {
+            theme::text()
+        };
+        let mut spans = vec![marker, Span::styled(label.clone(), label_style)];
+        if !detail.is_empty() {
+            let used: usize = spans.iter().map(|span| span.content.chars().count()).sum();
+            let pad = width.saturating_sub(used + detail.chars().count() + 1);
+            spans.push(Span::raw(" ".repeat(pad)));
+            spans.push(Span::styled(detail.clone(), theme::dim()));
+        }
+        let mut line = Line::from(spans).style(on_panel);
+        if highlighted {
+            line = line.style(Style::default().bg(theme::MENU_SELECTED_BG));
+        }
+        lines.push(line);
+    }
+    frame.render_widget(Paragraph::new(Text::from(lines)).style(on_panel), list);
+}
+
+/// A compact path, using `~` for the home directory when possible.
+fn compact_path(path: &std::path::Path) -> String {
+    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from)
+        && let Ok(relative) = path.strip_prefix(&home)
+    {
+        return format!("~/{}", relative.display());
+    }
+    path.display().to_string()
+}
+
+fn directory_rows(entries: &[crate::app::overlay::DirEntry]) -> Vec<(String, String)> {
+    entries
+        .iter()
+        .map(|entry| {
+            let label = match entry.kind {
+                DirEntryKind::ChooseCurrent => "✓  use this folder".to_string(),
+                DirEntryKind::Parent => "..".to_string(),
+                DirEntryKind::Directory => format!("{}/", entry.name),
+            };
+            (label, String::new())
+        })
+        .collect()
+}
+
+/// Render the "Open Project…" directory browser.
+pub fn render_dir_picker(frame: &mut Frame, area: Rect, picker: &DirPicker) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let browser = &picker.browser;
+    let rows = directory_rows(&browser.entries);
+    let width = ((area.width as u32 * 3 / 5) as u16)
+        .clamp(40, 84)
+        .min(area.width.max(1));
+    let visible = rows.len().min(14);
+    let height = (visible as u16 + 4).min(area.height);
+    let inner = draw_panel(frame, area, panel_title("Open Project"), width, height);
+    if inner.height < 4 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    frame.render_widget(
+        Paragraph::new(panel_subtitle(
+            &compact_path(&browser.current),
+            chunks[0].width,
+        ))
+        .style(Style::default().bg(theme::PANEL_BG)),
+        chunks[0],
+    );
+    render_divider(frame, chunks[1]);
+    render_panel_rows(frame, chunks[2], &rows, browser.selected);
+    match &browser.error {
+        Some(error) => render_footer(frame, chunks[3], error, true),
+        None => render_footer(
+            frame,
+            chunks[3],
+            "↑↓ move  ·  Enter open  ·  ← up  ·  Esc cancel",
+            false,
+        ),
+    }
+}
+
+/// Render the guided "Create a new project" flow.
+pub fn render_new_project(frame: &mut Frame, area: Rect, flow: &NewProject) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let width = ((area.width as u32 * 3 / 5) as u16)
+        .clamp(42, 86)
+        .min(area.width.max(1));
+    let on_panel = Style::default().bg(theme::PANEL_BG);
+
+    match flow.step {
+        NewProjectStep::Parent => {
+            let rows = directory_rows(&flow.browser.entries);
+            let visible = rows.len().min(14);
+            let height = (visible as u16 + 4).min(area.height);
+            let title = panel_title("New Project  ·  1 of 3  choose a folder");
+            let inner = draw_panel(frame, area, title, width, height);
+            if inner.height < 4 {
+                return;
+            }
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(1),
+                    Constraint::Length(1),
+                ])
+                .split(inner);
+            frame.render_widget(
+                Paragraph::new(panel_subtitle(
+                    &compact_path(&flow.browser.current),
+                    chunks[0].width,
+                ))
+                .style(on_panel),
+                chunks[0],
+            );
+            render_divider(frame, chunks[1]);
+            render_panel_rows(frame, chunks[2], &rows, flow.browser.selected);
+            match &flow.error {
+                Some(error) => render_footer(frame, chunks[3], error, true),
+                None => render_footer(
+                    frame,
+                    chunks[3],
+                    "↑↓ move  ·  Enter choose / open  ·  ← up  ·  Esc cancel",
+                    false,
+                ),
+            }
+        }
+        NewProjectStep::Name => {
+            let height = 7.min(area.height);
+            let title = panel_title("New Project  ·  2 of 3  name it");
+            let inner = draw_panel(frame, area, title, width, height);
+            if inner.height == 0 {
+                return;
+            }
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                ])
+                .split(inner);
+            frame.render_widget(
+                Paragraph::new(panel_subtitle(
+                    &format!("in {}", compact_path(&flow.parent)),
+                    chunks[0].width,
+                ))
+                .style(on_panel),
+                chunks[0],
+            );
+            render_divider(frame, chunks[1]);
+            let input = if flow.name.is_empty() {
+                Span::styled("project-name", theme::muted())
+            } else {
+                Span::styled(flow.name.clone(), theme::bright())
+            };
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![Span::styled(" ❯ ", theme::star()), input]))
+                    .style(on_panel),
+                chunks[2],
+            );
+            let target = if flow.name.trim().is_empty() {
+                "will be created here".to_string()
+            } else {
+                format!(
+                    "creates {}",
+                    compact_path(&flow.parent.join(flow.name.trim()))
+                )
+            };
+            frame.render_widget(
+                Paragraph::new(panel_subtitle(&target, chunks[3].width)).style(on_panel),
+                chunks[3],
+            );
+            if chunks[4].height > 0 {
+                match &flow.error {
+                    Some(error) => render_footer(frame, chunks[4], error, true),
+                    None => render_footer(frame, chunks[4], "Enter continue  ·  Esc back", false),
+                }
+            }
+            // Place the terminal cursor in the input row.
+            let cursor_x = chunks[2].x + 3 + flow.name.chars().count() as u16;
+            if cursor_x < chunks[2].x + chunks[2].width {
+                frame.set_cursor_position((cursor_x, chunks[2].y));
+            }
+        }
+        NewProjectStep::Language => {
+            let rows: Vec<(String, String)> = create::CREATABLE
+                .iter()
+                .map(|language| {
+                    (
+                        language.name().to_string(),
+                        create::describe(*language).to_string(),
+                    )
+                })
+                .collect();
+            let visible = rows.len();
+            let height = (visible as u16 + 4).min(area.height);
+            let title = panel_title("New Project  ·  3 of 3  language");
+            let inner = draw_panel(frame, area, title, width, height);
+            if inner.height < 4 {
+                return;
+            }
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(1),
+                    Constraint::Length(1),
+                ])
+                .split(inner);
+            frame.render_widget(
+                Paragraph::new(panel_subtitle(
+                    &format!("{} in {}", flow.name, compact_path(&flow.parent)),
+                    chunks[0].width,
+                ))
+                .style(on_panel),
+                chunks[0],
+            );
+            render_divider(frame, chunks[1]);
+            render_panel_rows(frame, chunks[2], &rows, flow.language);
+            match &flow.error {
+                Some(error) => render_footer(frame, chunks[3], error, true),
+                None => render_footer(
+                    frame,
+                    chunks[3],
+                    "↑↓ choose  ·  Enter create  ·  Esc back",
+                    false,
+                ),
+            }
+        }
     }
 }
 
