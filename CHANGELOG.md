@@ -191,6 +191,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Animations only run when there is something to show (the welcome scene or
   in-progress work); an idle editor still does no work.
 
+### Git
+
+- Added **Changed Files…** (`Ctrl+Shift+G`): a filterable list of every file
+  with a working-tree status (modified, added, deleted, renamed, untracked,
+  conflicted), each showing its short indicator. Choosing one opens it. This is
+  a read-only view built from the existing git snapshot.
+
 ### Search
 
 - Added **Search in Project…** (`Ctrl+Shift+F`): a case-insensitive text

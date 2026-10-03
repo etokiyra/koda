@@ -52,6 +52,7 @@ pub mod ids {
 
     pub const WORKSPACE_SYMBOLS: &str = "project.symbols";
     pub const PROJECT_SEARCH: &str = "project.search";
+    pub const CHANGED_FILES: &str = "git.changedFiles";
 
     pub const TOGGLE_TREE: &str = "view.toggleTree";
     pub const FOCUS_TREE: &str = "view.focusTree";
@@ -279,6 +280,8 @@ impl CommandRegistry {
                 Some("Ctrl+Shift+F"),
             )
             .describes("Find text across every file in the project"),
+            Command::new(CHANGED_FILES, "Changed Files…", "Git", Some("Ctrl+Shift+G"))
+                .describes("List the files changed in the working tree"),
             Command::new(TOGGLE_TREE, "Toggle File Tree", "View", Some("Ctrl+B"))
                 .describes("Show or hide the project sidebar"),
             Command::new(

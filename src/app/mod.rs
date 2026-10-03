@@ -19,6 +19,7 @@ use crate::background::{Background, Event as BackgroundEvent};
 use crate::commands::{Command, CommandRegistry, ids};
 use crate::editor::{Document, Editor, Position, Selection};
 use crate::filesystem;
+use crate::git::GitFileStatus;
 use crate::language::completion::{Completion, CompletionKind};
 use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::format;
@@ -450,7 +451,8 @@ impl App {
                     ('f', false) => self.open_search(false),
                     ('h', true) => self.open_hover(),
                     ('h', false) => self.open_search(true),
-                    ('g', _) => self.execute_command(ids::GOTO_LINE),
+                    ('g', true) => self.execute_command(ids::CHANGED_FILES),
+                    ('g', false) => self.execute_command(ids::GOTO_LINE),
                     ('b', _) => self.toggle_tree(),
                     ('e', _) => self.focus_tree(),
                     ('w', _) => self.execute_command(ids::CLOSE_TAB),
@@ -1013,6 +1015,7 @@ impl App {
             ids::SETUP => self.language_setup(),
             ids::WORKSPACE_SYMBOLS => self.open_workspace_symbols(),
             ids::PROJECT_SEARCH => self.open_project_search(),
+            ids::CHANGED_FILES => self.open_changed_files(),
             ids::FIND => self.open_search(false),
             ids::REPLACE => self.open_search(true),
             ids::GOTO_LINE => self.open_prompt(PromptKind::GotoLine, "Go to line", "42"),
@@ -1828,6 +1831,46 @@ impl App {
                 true
             }
         }
+    }
+
+    /// List the files changed in the working tree, newest snapshot.
+    fn open_changed_files(&mut self) {
+        if !self.workspace.git.available {
+            self.set_status("Not a git repository");
+            return;
+        }
+        if self.workspace.git.files.is_empty() {
+            self.set_status("Working tree clean");
+            return;
+        }
+        let root = self.workspace.root().to_path_buf();
+        let mut entries: Vec<(PathBuf, GitFileStatus)> = self
+            .workspace
+            .git
+            .files
+            .iter()
+            .map(|(path, status)| (path.clone(), *status))
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let items = entries
+            .into_iter()
+            .map(|(path, status)| {
+                let relative = path
+                    .strip_prefix(&root)
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string();
+                PickerItem::new(
+                    relative,
+                    format!("{} {}", status.indicator(), status.label()),
+                    PickerAction::OpenPath(path),
+                )
+            })
+            .collect();
+        let mut picker = Picker::new("Changed Files", "Filter files…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
     }
 
     /// Prompt for a project-wide text query.
@@ -3920,6 +3963,31 @@ mod tests {
             panic!("expected search results");
         };
         assert!(picker.filtered.len() >= 2, "expected both files to match");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn changed_files_lists_git_status() {
+        let dir = temp_project("changed-files");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+        let mut files = std::collections::HashMap::new();
+        files.insert(file.clone(), GitFileStatus::Modified);
+        app.workspace.git = crate::git::GitInfo {
+            repo_root: Some(dir.clone()),
+            branch: Some("main".to_string()),
+            files,
+            available: true,
+        };
+
+        app.execute_command(ids::CHANGED_FILES);
+        let Overlay::Picker(picker) = &app.overlay else {
+            panic!("expected the changed-files picker");
+        };
+        assert!(!picker.filtered.is_empty());
+        let item = picker.item(0).expect("an item");
+        assert!(matches!(item.action, PickerAction::OpenPath(_)));
+        assert!(item.detail.contains('M'), "detail was {}", item.detail);
         fs::remove_dir_all(&dir).ok();
     }
 

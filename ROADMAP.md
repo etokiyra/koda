@@ -155,6 +155,8 @@ command palette already reports which are available. Filling them in is additive
 - [ ] A subtle, optional theme system (works with no config by default).
 - [ ] File iconography that respects monochrome terminals.
 - [ ] Better diff/merge view for git.
+- [x] A changed-files list (`Ctrl+Shift+G`) over the working-tree snapshot;
+      selecting an entry opens it.
 - [ ] Staged/unstaged git view and basic commit flow.
 - [x] Project-wide text search (`Ctrl+Shift+F`): a `.gitignore`-aware,
       case-insensitive scan on the background worker with a filterable result

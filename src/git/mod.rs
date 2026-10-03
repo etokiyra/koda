@@ -34,6 +34,19 @@ impl GitFileStatus {
             GitFileStatus::TypeChanged => 'T',
         }
     }
+
+    /// A human-readable name for lists.
+    pub fn label(self) -> &'static str {
+        match self {
+            GitFileStatus::Modified => "modified",
+            GitFileStatus::Added => "added",
+            GitFileStatus::Deleted => "deleted",
+            GitFileStatus::Renamed => "renamed",
+            GitFileStatus::Untracked => "untracked",
+            GitFileStatus::Conflicted => "conflicted",
+            GitFileStatus::TypeChanged => "type changed",
+        }
+    }
 }
 
 /// Snapshot of repository state for a directory.
