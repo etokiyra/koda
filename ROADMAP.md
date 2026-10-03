@@ -121,7 +121,8 @@ command palette already reports which are available. Filling them in is additive
 - [x] Undo grouping for consecutive typing.
 - [ ] Soft wrap and a configurable tab width.
 - [x] Persist cursor position, open tabs and expanded directories per project.
-- [ ] A kill-ring/registers model for copy/paste.
+- [x] A kill-ring with **Alt+Y** yank-pop; the newest kill still drives the
+      system clipboard. Named registers remain to come.
 
 ---
 

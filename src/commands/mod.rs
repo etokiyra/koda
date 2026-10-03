@@ -26,6 +26,7 @@ pub mod ids {
     pub const COPY: &str = "edit.copy";
     pub const CUT: &str = "edit.cut";
     pub const PASTE: &str = "edit.paste";
+    pub const YANK_POP: &str = "edit.yankPop";
     pub const COMPLETE: &str = "edit.complete";
     pub const FIND: &str = "edit.find";
     pub const REPLACE: &str = "edit.replace";
@@ -172,6 +173,9 @@ impl CommandRegistry {
                 .needs_doc(),
             Command::new(PASTE, "Paste", "Edit", Some("Ctrl+V"))
                 .describes("Paste the clipboard")
+                .needs_doc(),
+            Command::new(YANK_POP, "Yank Pop", "Edit", Some("Alt+Y"))
+                .describes("Replace the last paste with an earlier kill")
                 .needs_doc(),
             Command::new(COMPLETE, "Complete", "Edit", Some("Ctrl+Space"))
                 .describes("Suggest completions for the word being typed")

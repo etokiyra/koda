@@ -89,6 +89,16 @@ pub struct Status {
     expires_at: Option<Instant>,
 }
 
+/// The region produced by the last paste, used by yank-pop.
+#[derive(Clone, Copy)]
+struct Yank {
+    doc: usize,
+    start: Position,
+    end: Position,
+    /// Buffer version at the time of the paste; any later edit invalidates it.
+    version: u64,
+}
+
 /// The root application object.
 pub struct App {
     pub workspace: Workspace,
@@ -99,6 +109,12 @@ pub struct App {
     pub overlay: Overlay,
     pub search: Search,
     pub clipboard: String,
+    /// Recent kills, most recent last, for yank-pop.
+    kill_ring: Vec<String>,
+    /// Index of the entry currently yanked, within the ring.
+    kill_index: usize,
+    /// The region produced by the last paste, so `Alt+Y` can replace it.
+    last_yank: Option<Yank>,
     pub recent_files: Vec<PathBuf>,
     /// Inline file-tree filter, when active.
     pub tree_filter: Option<TreeFilter>,
@@ -196,6 +212,9 @@ impl App {
             overlay: Overlay::None,
             search: Search::default(),
             clipboard: String::new(),
+            kill_ring: Vec::new(),
+            kill_index: 0,
+            last_yank: None,
             recent_files: Vec::new(),
             tree_filter: None,
             completion: None,
@@ -549,7 +568,11 @@ impl App {
                         '.' => self.code_actions(),
                         _ => {}
                     }
-                } else if !alt {
+                } else if alt {
+                    if matches!(c, 'y' | 'Y') {
+                        self.yank_pop();
+                    }
+                } else {
                     self.with_doc(|d| d.type_char(c));
                 }
             }
@@ -1030,6 +1053,7 @@ impl App {
             ids::COPY => self.copy(),
             ids::CUT => self.cut(),
             ids::PASTE => self.paste(),
+            ids::YANK_POP => self.yank_pop(),
             ids::COMPLETE => self.open_completion(),
             ids::HOVER => self.open_hover(),
             ids::SETUP => self.language_setup(),
@@ -1236,7 +1260,7 @@ impl App {
             .and_then(|doc| doc.selected_text());
         match selected {
             Some(text) => {
-                self.clipboard = text.clone();
+                self.push_kill(&text);
                 terminal::set_clipboard(&text);
                 self.set_status(format!("Copied {} character(s)", text.chars().count()));
             }
@@ -1252,7 +1276,7 @@ impl App {
         });
         match text {
             Some(text) => {
-                self.clipboard = text.clone();
+                self.push_kill(&text);
                 terminal::set_clipboard(&text);
                 self.set_status(format!("Cut {} character(s)", text.chars().count()));
                 self.after_edit();
@@ -1267,7 +1291,80 @@ impl App {
             self.set_status("Clipboard is empty");
             return;
         }
+        let Some(start) = self
+            .editor
+            .active_document()
+            .map(|doc| doc.clamped_cursor())
+        else {
+            return;
+        };
+        let index = self.editor.active_index();
         self.with_doc(|doc| doc.insert_text(&text));
+        if let Some(doc) = self.editor.active_document() {
+            self.last_yank = Some(Yank {
+                doc: index,
+                start,
+                end: doc.cursor,
+                version: doc.buffer.version,
+            });
+        }
+        self.kill_index = self.kill_ring.len().saturating_sub(1);
+    }
+
+    /// Record `text` as the newest kill, deduplicating consecutive copies.
+    fn push_kill(&mut self, text: &str) {
+        if self.kill_ring.last().map(String::as_str) != Some(text) {
+            self.kill_ring.push(text.to_string());
+            if self.kill_ring.len() > 64 {
+                self.kill_ring.remove(0);
+            }
+        }
+        self.kill_index = self.kill_ring.len().saturating_sub(1);
+        self.clipboard = text.to_string();
+        self.last_yank = None;
+    }
+
+    /// Replace the last paste with an earlier kill, Emacs-style.
+    fn yank_pop(&mut self) {
+        let Some(yank) = self.last_yank else {
+            self.set_status("Nothing to yank-pop");
+            return;
+        };
+        if self.editor.active_index() != yank.doc {
+            self.set_status("Yank-pop applies to the file just pasted into");
+            return;
+        }
+        let unchanged = self
+            .editor
+            .active_document()
+            .is_some_and(|doc| doc.buffer.version == yank.version && doc.cursor == yank.end);
+        if !unchanged {
+            self.set_status("Yank-pop is only available right after a paste");
+            return;
+        }
+        if self.kill_index == 0 || self.kill_ring.is_empty() {
+            self.set_status("No earlier kill");
+            return;
+        }
+        let next = self.kill_index - 1;
+        let text = self.kill_ring[next].clone();
+        let (start, end) = (yank.start, yank.end);
+        self.with_doc(|doc| doc.replace_range(start, end, &text));
+        if let Some(doc) = self.editor.active_document() {
+            self.last_yank = Some(Yank {
+                doc: yank.doc,
+                start,
+                end: doc.cursor,
+                version: doc.buffer.version,
+            });
+        }
+        self.kill_index = next;
+        self.clipboard = text;
+        self.set_status(format!(
+            "Yank pop {}/{}",
+            self.kill_ring.len() - next,
+            self.kill_ring.len()
+        ));
     }
 
     fn toggle_comment(&mut self) {
@@ -3120,6 +3217,9 @@ impl App {
             ids::COPY | ids::CUT if !document.is_some_and(|doc| doc.has_selection()) => {
                 (false, Some("nothing selected".to_string()))
             }
+            ids::YANK_POP if self.last_yank.is_none() => {
+                (false, Some("nothing to yank".to_string()))
+            }
             ids::NEXT_TAB | ids::PREV_TAB if self.editor.len() < 2 => {
                 (false, Some("only one tab".to_string()))
             }
@@ -3591,6 +3691,51 @@ mod tests {
         app.delete_path(&b);
         assert!(!b.exists());
         assert_eq!(app.editor.len(), 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn kill_ring_supports_yank_pop() {
+        let dir = temp_project("kill-ring");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "").unwrap();
+        let mut app = App::new(Some(&file)).unwrap();
+
+        app.push_kill("first");
+        app.push_kill("second");
+        app.paste();
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.text(),
+            "second"
+        );
+
+        app.yank_pop();
+        assert_eq!(app.editor.active_document().unwrap().buffer.text(), "first");
+
+        // Nothing older: the text is left alone.
+        app.yank_pop();
+        assert_eq!(app.editor.active_document().unwrap().buffer.text(), "first");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn yank_pop_is_refused_after_an_edit() {
+        let dir = temp_project("yank-edit");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "").unwrap();
+        let mut app = App::new(Some(&file)).unwrap();
+        app.push_kill("first");
+        app.push_kill("second");
+        app.paste();
+
+        // Any further edit invalidates the yank-pop target.
+        app.with_doc(|doc| doc.type_char('!'));
+        app.yank_pop();
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.text(),
+            "second!"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 

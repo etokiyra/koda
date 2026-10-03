@@ -219,6 +219,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Editing & UX
 
+- Copy and cut now feed a **kill-ring**; **Alt+Y** yank-pops the last paste to
+  an earlier kill, as long as nothing has been edited since. The system
+  clipboard (OSC 52) still receives the newest kill.
 - Added **New File…**, **Rename…** and **Delete…** to the palette. New files
   are created in the selected folder (or the active file's folder) and opened
   immediately. Renaming a file or folder updates any open buffers and the

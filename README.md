@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-199%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-201%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -154,7 +154,8 @@ The editor is the heart of Koda, and it is built for real projects.
   create/rename/delete, git branch and per-file status, and a
   changed-files list (`Ctrl+Shift+G`).
 - Grouped undo, auto-pairing, smart newline, selection-aware indent/outdent,
-  line move/duplicate and matching-bracket highlighting.
+  line move/duplicate, matching-bracket highlighting and a kill-ring with
+  `Alt+Y` yank-pop.
 - Quick open (`Ctrl+P`), inline fuzzy file filtering in the sidebar (`/`),
   find/replace with case, whole-word and regex options, project-wide text
   search (`Ctrl+Shift+F`), go-to-line, and **Revert File** to discard local
@@ -236,6 +237,7 @@ establishes the language context automatically.
 | `Ctrl+Shift+G` | List the files changed in git |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
+| `Alt+Y` | Yank-pop: replace the last paste with an earlier kill |
 | `Ctrl+Space` | Complete the word being typed |
 | `Ctrl+Shift+I` | Format the active file |
 | `Ctrl+Shift+H` | Hover: info about the symbol under the cursor |
