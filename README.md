@@ -98,6 +98,8 @@ Implemented:
   back to the built-in providers when no server is available.
 - **Session persistence**: open files, cursors and expanded directories are
   restored per project on the next launch.
+- External-change detection: clean files reload when they change on disk, and
+  dirty files are preserved with a warning.
 - Project-wide symbol search (`Ctrl+T`), scanned off the UI thread.
 - A keyboard-shortcuts cheatsheet (`F1`), a scroll margin, a live busy spinner
   and a gently animated mascot.

@@ -127,6 +127,8 @@ pub struct App {
     lsp_start_at: Option<(Instant, LanguageId)>,
     /// Connection state, shown in the statusline.
     pub lsp_status: LspStatus,
+    /// When open files were last checked for on-disk changes.
+    last_disk_check: Instant,
 }
 
 impl App {
@@ -180,6 +182,7 @@ impl App {
             lsp_language: None,
             lsp_start_at: None,
             lsp_status: LspStatus::Offline,
+            last_disk_check: Instant::now(),
         };
 
         if let Some(path) = target
@@ -211,7 +214,14 @@ impl App {
             let lsp_changed = self.poll_lsp();
             let background_changed = self.apply_background_events();
             let animated = self.tick_animation();
-            if needs_redraw || background_changed || lsp_changed || animated || self.tick_status() {
+            let external_changed = self.poll_external_changes();
+            if needs_redraw
+                || background_changed
+                || lsp_changed
+                || animated
+                || external_changed
+                || self.tick_status()
+            {
                 terminal.draw(|frame| ui::render(frame, self))?;
                 needs_redraw = false;
             }
@@ -273,6 +283,53 @@ impl App {
             return true;
         }
         false
+    }
+
+    /// Reload clean files that changed on disk, and warn about dirty ones.
+    ///
+    /// Throttled, because it touches the filesystem. Returns `true` when the UI
+    /// should repaint.
+    fn poll_external_changes(&mut self) -> bool {
+        const INTERVAL: Duration = Duration::from_millis(1200);
+        if self.last_disk_check.elapsed() < INTERVAL {
+            return false;
+        }
+        self.last_disk_check = Instant::now();
+
+        let mut message: Option<(bool, String)> = None;
+        for doc in &mut self.editor.documents {
+            let Some(path) = doc.buffer.path.clone() else {
+                continue;
+            };
+            let Some(current) = filesystem::modified_time(&path) else {
+                continue;
+            };
+            if doc.disk_modified() == Some(current) {
+                continue;
+            }
+            if doc.is_dirty() {
+                // Remember the new time so we warn once, not every tick.
+                doc.record_disk_mtime();
+                message = Some((
+                    false,
+                    format!("{} changed on disk — save to overwrite", doc.file_name()),
+                ));
+            } else if doc.reload_from_disk().is_ok() {
+                message = Some((true, format!("{} reloaded from disk", doc.file_name())));
+            }
+        }
+
+        match message {
+            Some((true, message)) => {
+                self.set_status(message);
+                true
+            }
+            Some((false, message)) => {
+                self.set_error(message);
+                true
+            }
+            None => false,
+        }
     }
 
     /// A short label for background work in progress, if any.
@@ -1210,7 +1267,7 @@ impl App {
         let result = self
             .editor
             .active_document_mut()
-            .map(|doc| doc.buffer.save_as(&path));
+            .map(|doc| doc.save_as(&path));
         match result {
             Some(Ok(true)) => {
                 self.request_detection_for_active();
@@ -1255,7 +1312,7 @@ impl App {
         let mut error = None;
         for doc in &mut self.editor.documents {
             if doc.is_dirty() && doc.buffer.path.is_some() {
-                match doc.buffer.save() {
+                match doc.save() {
                     Ok(true) => saved += 1,
                     Ok(false) => {}
                     Err(err) => {
@@ -3051,6 +3108,57 @@ cat >/dev/null
         assert_eq!(
             fresh.editor.active_document().unwrap().clamped_cursor(),
             Position::new(1, 4)
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reloads_clean_files_changed_on_disk() {
+        let dir = temp_project("external-clean");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        std::thread::sleep(Duration::from_millis(10));
+        fs::write(&file, "fn changed() {}\n").unwrap();
+        app.last_disk_check = Instant::now() - Duration::from_secs(5);
+
+        assert!(app.poll_external_changes());
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.text(),
+            "fn changed() {}\n"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn warns_when_a_dirty_file_changes_on_disk() {
+        let dir = temp_project("external-dirty");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .insert_text("// mine\n");
+
+        std::thread::sleep(Duration::from_millis(10));
+        fs::write(&file, "fn theirs() {}\n").unwrap();
+        app.last_disk_check = Instant::now() - Duration::from_secs(5);
+
+        assert!(app.poll_external_changes());
+        assert!(app.status.error);
+        assert!(
+            app.status_message()
+                .unwrap_or("")
+                .contains("changed on disk")
+        );
+        // The edit is preserved rather than silently overwritten.
+        assert!(
+            app.editor
+                .active_document()
+                .unwrap()
+                .buffer
+                .text()
+                .starts_with("// mine")
         );
         fs::remove_dir_all(&dir).ok();
     }

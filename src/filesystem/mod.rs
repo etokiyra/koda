@@ -76,6 +76,11 @@ pub fn is_file(path: &Path) -> bool {
     path.is_file()
 }
 
+/// The last-modified time of a file, if it can be read.
+pub fn modified_time(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
+}
+
 /// Read a file as UTF-8 (lossy). Binary detection is left to callers that need it.
 pub fn read_to_string(path: &Path) -> std::io::Result<String> {
     let bytes = std::fs::read(path)?;

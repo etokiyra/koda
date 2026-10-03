@@ -82,6 +82,17 @@ impl Buffer {
         self.text.to_string()
     }
 
+    /// Replace the entire contents (used when reloading from disk).
+    pub fn replace_contents(&mut self, text: &str) {
+        self.text = Rope::from_str(text);
+        self.line_ending = if text.contains("\r\n") {
+            LineEnding::Crlf
+        } else {
+            LineEnding::Lf
+        };
+        self.version += 1;
+    }
+
     pub fn as_rope(&self) -> &Rope {
         &self.text
     }

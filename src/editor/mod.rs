@@ -119,7 +119,7 @@ impl Editor {
     /// Save the active document, if it has a path.
     pub fn save_active(&mut self) -> std::io::Result<bool> {
         match self.active_document_mut() {
-            Some(doc) => doc.buffer.save(),
+            Some(doc) => doc.save(),
             None => Ok(false),
         }
     }

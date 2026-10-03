@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::SystemTime;
 
 use crate::editor::buffer::{Buffer, LineEnding};
 use crate::editor::history::{Coalesce, Edit, History};
@@ -36,6 +37,8 @@ pub struct Document {
     diagnostics_dirty: bool,
     /// Whether the current diagnostics came from a language server.
     diagnostics_from_lsp: bool,
+    /// The file's modification time when it was last read or written.
+    disk_mtime: Option<SystemTime>,
 }
 
 impl Document {
@@ -54,11 +57,14 @@ impl Document {
             diagnostics_revision: 0,
             diagnostics_dirty: false,
             diagnostics_from_lsp: false,
+            disk_mtime: None,
         }
     }
 
     pub fn from_path(path: &Path) -> std::io::Result<Self> {
-        Ok(Document::new(Buffer::from_path(path)?))
+        let mut document = Document::new(Buffer::from_path(path)?);
+        document.record_disk_mtime();
+        Ok(document)
     }
 
     pub fn file_name(&self) -> String {
@@ -78,6 +84,66 @@ impl Document {
 
     pub fn mark_clean(&mut self) {
         self.buffer.mark_clean();
+    }
+
+    // ----------------------------------------------------------------------
+    // Disk state
+    // ----------------------------------------------------------------------
+
+    /// Remember the file's current modification time.
+    pub fn record_disk_mtime(&mut self) {
+        self.disk_mtime = self
+            .buffer
+            .path
+            .as_ref()
+            .and_then(|path| crate::filesystem::modified_time(path));
+    }
+
+    /// The modification time recorded when the file was last read or written.
+    pub fn disk_modified(&self) -> Option<SystemTime> {
+        self.disk_mtime
+    }
+
+    /// Reload the buffer from disk, discarding history and diagnostics.
+    ///
+    /// The cursor is preserved (clamped) and the buffer ends up clean.
+    pub fn reload_from_disk(&mut self) -> std::io::Result<bool> {
+        let Some(path) = self.buffer.path.clone() else {
+            return Ok(false);
+        };
+        let bytes = std::fs::read(&path)?;
+        let text = String::from_utf8_lossy(&bytes);
+        let cursor = self.cursor;
+
+        self.buffer.replace_contents(&text);
+        self.history.clear();
+        self.buffer.mark_clean();
+        self.selection = None;
+        self.preferred_col = None;
+        self.cursor = self.buffer.clamp_position(cursor);
+        self.invalidate_highlight(0);
+        self.clear_diagnostics();
+        self.diagnostics_dirty = true;
+        self.record_disk_mtime();
+        Ok(true)
+    }
+
+    /// Write the buffer and record the resulting modification time.
+    pub fn save(&mut self) -> std::io::Result<bool> {
+        let saved = self.buffer.save()?;
+        if saved {
+            self.record_disk_mtime();
+        }
+        Ok(saved)
+    }
+
+    /// Write the buffer to `path` and record the modification time.
+    pub fn save_as(&mut self, path: &Path) -> std::io::Result<bool> {
+        let saved = self.buffer.save_as(path)?;
+        if saved {
+            self.record_disk_mtime();
+        }
+        Ok(saved)
     }
 
     // ----------------------------------------------------------------------
@@ -1304,5 +1370,28 @@ mod tests {
         assert!(!d.diagnostics_from_lsp());
         assert!(d.diagnostics().is_empty());
         assert_eq!(d.diagnostics_revision(), 0);
+    }
+
+    #[test]
+    fn reload_from_disk_replaces_contents_and_cleans() {
+        let dir = std::env::temp_dir().join(format!("koda-reload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("main.rs");
+        std::fs::write(&path, "fn a() {}\n").unwrap();
+
+        let mut d = Document::from_path(&path).unwrap();
+        d.move_to(Position::new(0, 3));
+        d.insert_text("// edit\n");
+        assert!(d.is_dirty());
+        assert!(d.can_undo());
+
+        std::fs::write(&path, "fn b() {}\n").unwrap();
+        assert!(d.reload_from_disk().unwrap());
+        assert_eq!(d.buffer.text(), "fn b() {}\n");
+        assert!(!d.is_dirty());
+        assert!(!d.can_undo());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

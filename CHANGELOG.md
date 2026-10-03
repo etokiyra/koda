@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Reliability
+
+- External-change detection: Koda watches open files for on-disk changes
+  (throttled to about once a second). A clean file is reloaded automatically
+  with a status message; a file with unsaved edits is preserved and you are
+  warned instead of having your work overwritten.
+
 ### Session
 
 - Koda remembers the open files, cursor positions and expanded directories for

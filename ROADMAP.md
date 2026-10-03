@@ -121,7 +121,9 @@ command palette already reports which are available. Filling them in is additive
 - [ ] Non-code language support (Markdown, JSON, TOML, YAML) for config files.
 - [ ] `.gitignore`-aware file tree and quick open.
 - [ ] File operations: create, rename, delete, move.
-- [ ] Save all, revert, and external-change detection.
+- [x] Save all and external-change detection: clean files reload from disk and
+      dirty files are preserved with a warning.
+- [ ] Revert the active file to its on-disk version.
 
 ---
 
