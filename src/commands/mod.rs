@@ -19,6 +19,8 @@ pub mod ids {
     pub const NEW_FILE: &str = "file.new";
     pub const RENAME_FILE: &str = "file.rename";
     pub const DELETE_FILE: &str = "file.delete";
+    pub const DUPLICATE_FILE: &str = "file.duplicate";
+    pub const COPY_FILE: &str = "file.copy";
     pub const QUIT: &str = "app.quit";
 
     pub const UNDO: &str = "edit.undo";
@@ -167,6 +169,10 @@ impl CommandRegistry {
                 .describes("Rename the selected file or folder"),
             Command::new(DELETE_FILE, "Delete…", "File", None)
                 .describes("Delete the selected file or folder"),
+            Command::new(DUPLICATE_FILE, "Duplicate File", "File", None)
+                .describes("Create a copy of the selected file and open it"),
+            Command::new(COPY_FILE, "Copy File…", "File", None)
+                .describes("Copy the selected file to a chosen path"),
             Command::new(QUIT, "Quit", "File", Some("Ctrl+Q")).describes("Leave Koda"),
             Command::new(UNDO, "Undo", "Edit", Some("Ctrl+Z"))
                 .describes("Undo the last change")

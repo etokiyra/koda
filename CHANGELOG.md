@@ -282,7 +282,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Editing & UX
 
 - Added **Delete Line** (`Ctrl+Shift+K`), which removes every line the cursor
-  or selection touches, and **Go to Matching Bracket** (`Ctrl+M`), which jumps
+  or selection touches, and **Go to Matching Bracket** (`Alt+M`), which jumps
   between a bracket and its partner using the same nesting-aware scan that
   drives matching-bracket highlighting.
 - **Replace All** (`Alt+Enter` in the replace bar, or the palette) replaces
@@ -296,6 +296,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   immediately. Renaming a file or folder updates any open buffers and the
   recent list; deleting closes the affected tabs and refuses while a file under
   the target has unsaved changes.
+- Added **Duplicate File** (a `name copy.ext` sibling, opened immediately) and
+  **Copy File…** (copy the selected file to a chosen path).
 - Find is case-insensitive by default and gains two toggles while the find bar
   is open: **Alt+C** for case sensitivity and **Alt+W** for whole-word matching.
   The active options are shown in the bar.

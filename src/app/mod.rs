@@ -207,6 +207,8 @@ pub struct App {
     pending_rename: Option<(PathBuf, usize, usize)>,
     /// The path awaiting a new name, from the file-rename prompt.
     pending_rename_file: Option<PathBuf>,
+    /// The path awaiting a destination, from the file-copy prompt.
+    pending_copy_file: Option<PathBuf>,
     /// A tool install in progress, if any.
     pending_install: Option<Tool>,
     /// Whether a git commit is running on the worker.
@@ -292,6 +294,7 @@ impl App {
             lsp_restarts: 0,
             pending_rename: None,
             pending_rename_file: None,
+            pending_copy_file: None,
             pending_install: None,
             pending_commit: false,
             pending_stage_refresh: false,
@@ -1166,6 +1169,8 @@ impl App {
             ids::NEW_FILE => self.new_file(),
             ids::RENAME_FILE => self.rename_selected(),
             ids::DELETE_FILE => self.delete_selected(),
+            ids::DUPLICATE_FILE => self.duplicate_file(),
+            ids::COPY_FILE => self.copy_file(),
             ids::QUIT => self.request_quit(),
             ids::UNDO => self.with_doc(|d| d.undo()),
             ids::REDO => self.with_doc(|d| d.redo()),
@@ -1310,6 +1315,28 @@ impl App {
                         self.set_status(format!("Renamed to {}", new.display()));
                     }
                     Err(err) => self.set_error(format!("Rename failed: {err}")),
+                }
+            }
+            PromptKind::CopyFile => {
+                let Some(source) = self.pending_copy_file.take() else {
+                    return;
+                };
+                if input.is_empty() {
+                    self.set_error("No destination provided");
+                    return;
+                }
+                let destination = if Path::new(&input).is_absolute() {
+                    PathBuf::from(&input)
+                } else {
+                    self.workspace.root().join(&input)
+                };
+                match filesystem::copy_file(&source, &destination) {
+                    Ok(()) => {
+                        self.workspace.tree.refresh();
+                        self.workspace.tree.select_path(&destination);
+                        self.set_status(format!("Copied to {}", destination.display()));
+                    }
+                    Err(err) => self.set_error(format!("Copy failed: {err}")),
                 }
             }
             PromptKind::ProjectSearch => {
@@ -1837,6 +1864,46 @@ impl App {
         let mut prompt = Prompt::new(PromptKind::RenameFile, "Rename", "new name");
         prompt.input = name;
         self.overlay = Overlay::Prompt(prompt);
+    }
+
+    /// Duplicate the selected file with a `copy` suffix and open it.
+    fn duplicate_file(&mut self) {
+        let Some(source) = self.file_op_target() else {
+            self.set_status("Select a file to duplicate");
+            return;
+        };
+        if source.is_dir() {
+            self.set_status("Folders cannot be duplicated yet");
+            return;
+        }
+        let destination = unique_copy_path(&source);
+        match filesystem::copy_file(&source, &destination) {
+            Ok(()) => {
+                self.workspace.tree.refresh();
+                self.workspace.tree.select_path(&destination);
+                self.open_path(destination);
+            }
+            Err(err) => self.set_error(format!("Duplicate failed: {err}")),
+        }
+    }
+
+    /// Prompt for a destination and copy the selected file there.
+    fn copy_file(&mut self) {
+        let Some(source) = self.file_op_target() else {
+            self.set_status("Select a file to copy");
+            return;
+        };
+        if source.is_dir() {
+            self.set_status("Folders cannot be copied yet");
+            return;
+        }
+        let placeholder = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("copy")
+            .to_string();
+        self.pending_copy_file = Some(source);
+        self.open_prompt(PromptKind::CopyFile, "Copy file", &placeholder);
     }
 
     fn delete_selected(&mut self) {
@@ -3622,6 +3689,9 @@ impl App {
             ids::RENAME_FILE | ids::DELETE_FILE if self.file_op_target().is_none() => {
                 (false, Some("select a file first".to_string()))
             }
+            ids::DUPLICATE_FILE | ids::COPY_FILE if self.file_op_target().is_none() => {
+                (false, Some("select a file first".to_string()))
+            }
             ids::GIT_COMMIT if !self.workspace.git.available => {
                 (false, Some("not a git repository".to_string()))
             }
@@ -4113,6 +4183,30 @@ impl App {
     }
 }
 
+/// A sibling copy path that does not yet exist: `name copy.ext`,
+/// `name copy 2.ext`, and so on.
+fn unique_copy_path(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let extension = path.extension().and_then(|e| e.to_str());
+    for index in 1..1000 {
+        let base = if index == 1 {
+            format!("{stem} copy")
+        } else {
+            format!("{stem} copy {index}")
+        };
+        let name = match extension {
+            Some(ext) => format!("{base}.{ext}"),
+            None => base,
+        };
+        let candidate = parent.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    parent.join(format!("{stem} copy"))
+}
+
 /// Whether two optional/actual paths refer to the same file.
 fn same_file(a: Option<&Path>, b: &Path) -> bool {
     let Some(a) = a else {
@@ -4249,6 +4343,38 @@ mod tests {
             app.editor.active_document().unwrap().buffer.path.as_deref(),
             Some(created.as_path())
         );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn duplicate_file_creates_a_copy_and_opens_it() {
+        let dir = temp_project("duplicate");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        app.execute_command(ids::DUPLICATE_FILE);
+        let copy = dir.join("src/main copy.rs");
+        assert!(copy.is_file(), "expected {}", copy.display());
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.path.as_deref(),
+            Some(copy.as_path())
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn copy_file_prompts_and_writes_the_copy() {
+        let dir = temp_project("copy-file");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        app.execute_command(ids::COPY_FILE);
+        assert!(matches!(
+            &app.overlay,
+            Overlay::Prompt(prompt) if prompt.kind == PromptKind::CopyFile
+        ));
+        app.submit_prompt(PromptKind::CopyFile, "src/backup.rs".to_string());
+        assert!(dir.join("src/backup.rs").is_file());
         fs::remove_dir_all(&dir).ok();
     }
 

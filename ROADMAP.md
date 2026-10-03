@@ -155,7 +155,8 @@ command palette already reports which are available. Filling them in is additive
 - [x] File operations: create (New File…), rename (Rename…) and delete
       (Delete…) from the tree or the active file. Renaming with a path also
       moves a file.
-- [ ] A dedicated drag-free move command and copy/duplicate.
+- [x] Copy/duplicate files (**Duplicate File**, **Copy File…**); moving works
+      through **Rename…** with a path.
 - [x] Save all and external-change detection: clean files reload from disk and
       dirty files are preserved with a warning.
 - [x] Revert the active file to its on-disk version (**Revert File** in the

@@ -180,6 +180,7 @@ pub enum PromptKind {
     RenameFile,
     ProjectSearch,
     CommitMessage,
+    CopyFile,
 }
 
 /// A single-line text prompt.

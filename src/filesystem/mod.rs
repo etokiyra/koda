@@ -125,6 +125,16 @@ pub fn rename_path(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::rename(from, to)
 }
 
+/// Copy a file, creating parent directories when necessary.
+pub fn copy_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    if let Some(parent) = to.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::copy(from, to).map(|_| ())
+}
+
 /// Remove a file or a directory and everything inside it.
 pub fn remove_path(path: &Path) -> std::io::Result<()> {
     if path.is_dir() {
