@@ -1,139 +1,192 @@
 # Koda
 
-> A modern, lightweight, terminal-native IDE.
+<p align="center"><em>A modern, lightweight, terminal-native IDE.</em></p>
 
-Koda is not "another terminal text editor". It is a development environment that
-happens to live in your terminal: fast, minimal, keyboard-first and — above all —
-**zero configuration**.
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/etokiyra/koda?style=flat-square&color=90b99f"></a>
+  <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-137%20passing-9dc6ac?style=flat-square">
+  <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
+  <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
+  <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
+</p>
 
-Install Koda, open a project, start coding.
+<p align="center">
+  <img alt="Zero configuration" src="https://img.shields.io/badge/config-zero-ea83a5?style=flat-square">
+  <img alt="Terminal native" src="https://img.shields.io/badge/terminal-native-aca1cf?style=flat-square">
+  <a href="https://github.com/helix-editor/helix/blob/master/runtime/themes/mellow.toml"><img alt="Theme: Mellow" src="https://img.shields.io/badge/theme-Mellow-e29eca?style=flat-square"></a>
+  <img alt="Made with Rust" src="https://img.shields.io/badge/made%20with-Rust-b9aeda?style=flat-square&logo=rust&logoColor=white">
+  <a href="https://github.com/etokiyra/koda/issues"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-90b99f?style=flat-square"></a>
+</p>
 
+```text
+    ✦ ───────────────────────────────────────── ☾
+
+     _  _____  ____    _
+    | |/ / _ \|  _ \  / \
+    | ' / | | | | | |/ _ \
+    | . \ |_| | |_| / ___ \
+    |_|\_\___/|____/_/   \_\
+
+    ✦   your cozy little coding space   ✦
+
+                   /\___/\
+                   ( ･ω･ )
+                    > ω <
+                   /|   |\
+
+    ✦ ───────────────────────────────────────── ☾
 ```
- ✦ koda  ·  Rust  ·  src/main.rs
- ✦ files ────────────│ ▏ main.rs
-▏ ▸ src             ? │ 1 fn main() {
-  ·  main.rs         │ 2     println!("hi");
-  ·  Cargo.toml      │ 3 }
- Rust  ☾ main 1±  ·  saved                Ln 1, Col 1  ☾ 5%
+
+Koda is not another terminal text editor. It is a small development environment
+that happens to live in your terminal — fast, minimal, keyboard-first and,
+above all, **zero configuration**.
+
+> Install Koda. Open a project. Start coding.
+
+No LSP config. No plugin marketplace. No dotfiles to hand-write. Koda detects the
+language, brings its own intelligence, and lets you get on with the interesting
+part.
+
+```text
+ ✦ koda  ·  Rust  ·  src/main.rs                                    ✧  ·  ✧
+ ✦ files ────────────────────────────│ ▏ main.rs
+ ▏ ▸ src                             │ ● 1  use std::io;
+   ▸ tests                           │   2
+   · Cargo.toml                      │   3  fn main() -> io::Result<()> {
+   · CHANGELOG.md                    │   4      let name = "koda";
+   · README.md                       │   5      println!("hello from {name}");
+   · ROADMAP.md                      │   6      Ok(())
+                                     │   7  }
+ Rust  1✖  ☾ main 2±  ✧ lsp           LF   Ln 5, Col 16   ☾ 42%
 ```
 
-Koda is a tiny place to live while you code: Mellow colours, a little star-cat
-mascot, and a lot of care — with the editor still first.
+---
 
-## Philosophy
+## ✦ Why Koda
 
-- **Zero configuration.** Supported languages work out of the box. No LSP
-  setup, no plugin marketplace, no config file required.
-- **Koda owns language intelligence.** Detection and language support are
-  first-class subsystems, not an afterthought.
-- **Terminal-native.** Koda cooperates with the terminal. It never paints an
-  opaque background, so transparent terminals keep working.
-- **Keyboard-first.** Familiar shortcuts, plus a command palette for everything
-  else.
-- **Performance is a feature.** A rope-backed editor, lazy file tree and a
-  responsive event loop.
+- **Zero configuration.** Supported languages work out of the box. Koda writes
+  no config, asks for none, and needs none.
+- **Koda owns language intelligence.** Detection, providers and the language
+  server lifecycle are first-class subsystems — including fetching the tools
+  you are missing, from trusted package managers, with one keystroke.
+- **Terminal-native.** Koda cooperates with your terminal. It never paints an
+  opaque background, so transparency, blur and wallpaper keep working.
+- **Keyboard-first.** Familiar shortcuts for muscle memory, plus a command
+  palette that makes everything discoverable.
+- **Fast by design.** A rope-backed editor, a lazy file tree, background
+  workers, and a UI that only repaints when something actually changes.
 
-## Design & personality
+## ☾ Language intelligence
 
-Koda's colour language is **Mellow**, the separate named colorscheme shipped
-with Helix — not Helix's default theme. Koda takes Mellow's palette and its
-semantic mappings — blue keywords, bright-blue types, green strings, magenta
-numbers, grey italic comments, pink constants, yellow operators — and adapts
-them to its own terminal-native interface. Koda is its own design, though: its
-own header, tabs, sidebar, statusline and welcome scene.
+Koda layers real IDE features on top of a clean provider abstraction. When a
+language server is available it takes over; when it is not, built-in providers
+keep you productive **offline**.
 
-Mellow is maintained upstream in Helix:
-<https://github.com/helix-editor/helix/blob/master/runtime/themes/mellow.toml>.
+- **Diagnostics** — gutter markers, underlines, a statusline count, `F8`/`Shift+F8`
+  navigation and a diagnostics list.
+- **Completion** — `Ctrl+Space`, instantly merging buffer identifiers, language
+  keywords, and server candidates.
+- **Hover** — `Ctrl+Shift+H`, with the symbol's kind, definition and usage count.
+- **Navigation** — `F12` go-to-definition and `Shift+F12` find-references, across
+  files when a server is attached.
+- **Symbols** — `Ctrl+Shift+O` for the file, `Ctrl+T` for the whole workspace.
+- **Rename** — `F2`, applying a workspace edit across every affected file.
+- **Code actions** — `Ctrl+.` for quick fixes and refactors.
+- **Formatting** — `Ctrl+Shift+I` through the language's own tool (`rustfmt`,
+  `gofmt`), never blocking the UI.
 
-Colour and personality live in one place — `src/ui/theme.rs` for the palette and
-`src/ui/art.rs` for the ASCII art — so the whole environment stays coherent and
-easy to evolve.
+### Zero-configuration language support
 
-A few principles:
+The complexity lives inside Koda:
 
-- **Transparency first.** Koda never paints a full-screen background. Plain
-  surfaces use the terminal's own background, so transparency, blur and
-  wallpapers show through. Only small, deliberate surfaces (the statusline,
-  popups and the current line) get a Mellow panel background.
-- **Art with restraint.** The Koda familiar, a little star-cat, appears where
-  there is room for personality — the welcome scene and empty states — never
-  behind your code.
-- **One vocabulary.** A four-pointed star `✦`, a crescent moon `☾`, a `❯`
-  pointer and `·` separators recur everywhere, so the interface feels like one
-  piece.
+```text
+   open a file ──▶ detect language ──▶ choose a provider
+                        │
+                        ├─▶ highlight · diagnostics · symbols · completion · hover
+                        │
+                        └─▶ if a language server is installed
+                              start it · sync documents · route features through it
+                              (and it stays out of your way when none exists)
+```
 
-## Status
+Missing something? **Language Setup…** in the command palette shows every tool
+Koda knows about and installs a missing one with a single `Enter` — through the
+official channel, so provenance and integrity stay with the package manager:
 
-Koda is under active, incremental development. Today it is a real editor with a
-solid foundation; language intelligence is layered on top next.
+| Tool | Purpose | Koda installs it with |
+| --- | --- | --- |
+| `rust-analyzer` | Rust language server | `rustup component add rust-analyzer` |
+| `gopls` | Go language server | `go install golang.org/x/tools/gopls@latest` |
+| `rustfmt` | Rust formatting | `rustup component add rustfmt` |
+| `gofmt` | Go formatting | ships with the Go toolchain |
 
-Implemented:
+### Supported languages
 
-- A rope-backed text editor with cursor, selection, undo/redo and auto-indent.
-- Multi-file tabs, a lazy project file tree and git status indicators.
-- Syntax highlighting for **Rust** and **Go** via language providers.
-- A contextual, confidence-based language **detection engine** that combines
-  project markers, extensions, file names, shebangs and content signals.
-- A command palette, quick open, find/replace, go-to-line and file open.
-- IDE editing behaviour: grouped undo, auto-pairing, smart newline,
-  selection-aware indent/outdent, line move/duplicate and bracket matching.
-- An inline fuzzy file filter in the sidebar, tab overflow scrolling and
-  name disambiguation.
-- Provider-driven diagnostics (lexical structural checks for Rust and Go today)
-  surfaced as gutter markers, underlines, a statusline count, and `F8`/`Shift+F8`
-  navigation.
-- A document-symbol outline (`Ctrl+Shift+O`) for Rust and Go, with fuzzy
-  filtering and jump-to-symbol, plus within-file go-to-definition (`F12`) and
-  find-references (`Shift+F12`).
-- Completion (`Ctrl+Space`) merging provider keywords with buffer identifiers.
-- Formatting (`Ctrl+Shift+I`) through the language's own tool (`rustfmt`,
-  `gofmt`), run off the UI thread, with missing tools reported up front.
-- Hover (`Ctrl+Shift+H`) showing a symbol's kind, definition line and usage
-  count.
-- Language-tool discovery: **Language Setup…** reports which of
-  `rust-analyzer`, `gopls`, `rustfmt` and `gofmt` Koda found, with install
-  hints for the rest — and can install a missing tool with one action through
-  its official manager (`rustup`, `go install`).
-- An asynchronous **language-server client**: when `rust-analyzer` or `gopls` is
-  installed Koda starts it for the workspace and shows its diagnostics, falling
-  back to the built-in providers when no server is available. Completion, hover,
-  go-to-definition, references, rename and code actions use the server when
-  attached.
-- **Session persistence**: open files, cursors and expanded directories are
-  restored per project on the next launch.
-- External-change detection: clean files reload when they change on disk, and
-  dirty files are preserved with a warning.
-- Project-wide symbol search (`Ctrl+T`), scanned off the UI thread.
-- A keyboard-shortcuts cheatsheet (`F1`), a scroll margin, a live busy spinner
-  and a gently animated mascot.
-- Lightweight git integration (branch + per-file status, via the `git` binary).
-- A distinctive Mellow-based visual identity: a semantic theme layer, an
-  adaptive ASCII welcome scene, the Koda familiar and personality-rich empty
-  states — all transparency-friendly.
-- A background worker keeps language detection and git off the UI thread, and
-  Koda repaints only when something changes.
-- A clean provider/registry abstraction that makes adding a language
-  straightforward.
+| Language | Syntax | Diagnostics | Symbols | Completion | Hover | Navigation | Rename |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **Rust** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
+| **Go** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 
-## Installation
+Adding a language means implementing one trait and registering it — no changes
+to the editor or the UI.
 
-Koda is a standard Cargo project.
+## ❯ Editing & workflow
+
+The editor is the heart of Koda, and it is built for real projects.
+
+- Multiple files in tabs, a lazy project tree, git branch and per-file status.
+- Grouped undo, auto-pairing, smart newline, selection-aware indent/outdent,
+  line move/duplicate and matching-bracket highlighting.
+- Quick open (`Ctrl+P`), inline fuzzy file filtering in the sidebar (`/`),
+  find/replace and go-to-line.
+- Project-wide symbol search, session persistence (open files, cursors and
+  expanded folders come back next launch) and external-change detection.
+- A background worker keeps detection, diagnostics, formatting and git off the
+  UI thread.
+
+## ✧ Look & feel
+
+Koda has a personality, but the code always comes first.
+
+- **The Mellow colours.** Koda speaks the palette and semantic mappings of
+  [Mellow][mellow], the separate named colorscheme shipped with Helix — not
+  Helix's default theme. Blue keywords, bright-blue types, green strings,
+  magenta numbers, grey italic comments.
+- **Transparency first.** Plain surfaces use your terminal's own background;
+  only the statusline, popups and the current line carry a soft panel.
+- **A little familiar.** A star-cat keeps you company on the welcome screen and
+  in empty states — never behind your code.
+- **One visual vocabulary.** `✦` stars, `☾` moons, `❯` pointers and `·`
+  separators recur throughout, so the whole environment reads as one piece.
+
+[mellow]: https://github.com/helix-editor/helix/blob/master/runtime/themes/mellow.toml
+
+## ✦ Install
+
+Koda is a standard Cargo project (Rust edition 2024).
 
 ```bash
-git clone <your-fork-or-repo> koda
+git clone https://github.com/etokiyra/koda.git
 cd koda
 cargo build --release
-# the binary is target/release/koda
+# binary: target/release/koda
+```
+
+Or install it onto your `PATH`:
+
+```bash
+cargo install --path .
 ```
 
 During development:
 
 ```bash
-cargo run -- .
-cargo run -- path/to/file.rs
+cargo run -- .                 # open the current directory
+cargo run -- src/main.rs       # open a file inside its detected project
 ```
 
-## Usage
+## ❯ Usage
 
 ```bash
 koda              # open the current directory as a workspace
@@ -141,10 +194,13 @@ koda .            # same, explicitly
 koda src/main.rs  # open a file inside its detected project
 ```
 
-Koda detects the project root (`Cargo.toml`, `go.mod`, or a `.git` directory)
-and establishes language context automatically.
+Koda finds the project root (`Cargo.toml`, `go.mod`, or a `.git` directory) and
+establishes the language context automatically.
 
-## Keyboard shortcuts
+## ☾ Keyboard shortcuts
+
+<details>
+<summary>Expand the full keymap</summary>
 
 | Shortcut | Action |
 | --- | --- |
@@ -154,8 +210,7 @@ and establishes language context automatically.
 | `Ctrl+P` | Quick open |
 | `Ctrl+Shift+P` | Command palette |
 | `F1` | Keyboard-shortcuts cheatsheet |
-| `Ctrl+F` | Find |
-| `Ctrl+H` | Replace |
+| `Ctrl+F` / `Ctrl+H` | Find / replace |
 | `Ctrl+G` | Go to line |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
@@ -172,6 +227,8 @@ and establishes language context automatically.
 | `Ctrl+Shift+O` | Go to symbol in the active file |
 | `Ctrl+T` | Go to symbol in the workspace |
 | `F12` / `Shift+F12` | Go to definition / find references |
+| `F2` | Rename symbol |
+| `Ctrl+.` | Code actions |
 | `Tab` / `Shift+Tab` | Indent / outdent selection |
 | `Alt+↑` / `Alt+↓` | Move line up / down |
 | `Ctrl+Shift+D` | Duplicate line |
@@ -183,9 +240,14 @@ Editor keys behave as you would expect: arrows, `Home`/`End`, `PageUp`/`PageDown
 selection replaces it, brackets and quotes pair up, and consecutive typing
 undoes as one step.
 
-## Architecture
+</details>
 
-```
+## ✦ Architecture
+
+<details>
+<summary>Expand the source tree</summary>
+
+```text
 src/
 ├── app/          # state, event loop, overlays, command dispatch
 ├── commands/     # the extensible command registry
@@ -193,26 +255,29 @@ src/
 ├── filesystem/   # thin, well-behaved fs helpers
 ├── git/          # lightweight git integration
 ├── language/
-│   ├── detection/# signals, scoring, confidence
-│   ├── provider/ # the LanguageProvider trait + registry
-│   ├── rust/     # Rust provider
-│   └── go/       # Go provider
+│   ├── detection/  # signals, scoring, confidence
+│   ├── provider/   # the LanguageProvider trait + registry
+│   ├── lsp/        # JSON-RPC client, lifecycle, result conversion
+│   ├── tools/      # discovery + trusted provisioning
+│   ├── rust/       # Rust provider
+│   └── go/         # Go provider
 ├── project/      # workspace, project detection, file tree
+├── session.rs    # per-project session persistence
 ├── terminal/     # terminal lifecycle + OSC 52 clipboard
-├── background.rs # worker thread for detection, git, and future language work
+├── background.rs # worker thread for detection, LSP, git and formatting
 └── ui/           # rendering for every surface
 ```
 
-The guiding rule: **language-specific logic never leaks into the editor or UI**.
-Detection answers *what is this file*; providers answer *how do we support it*.
-Expensive work runs on a background worker so the UI never blocks on it.
+The guiding rule: **language-specific logic never leaks into the editor or the
+UI.** Detection answers *what is this file*; providers answer *how do we support
+it*. Everything expensive runs on a background worker so the UI never blocks.
 
-See [`AGENTS.md`](AGENTS.md) for the full architecture and conventions.
+</details>
 
-## Language detection
+## ☾ Language detection
 
-Extensions are only one signal. File-level signals decide *what a file is*;
-project context corroborates them:
+Extensions are only one signal. File-level evidence decides *what a file is*;
+project context corroborates it:
 
 1. **File name** — special names like `Makefile`, `Dockerfile`
 2. **Shebang** — `#!/usr/bin/env …`
@@ -222,26 +287,33 @@ project context corroborates them:
    agrees with the file's own signals)
 
 A project marker never overrides a file's own nature: `README.md` inside a Rust
-project stays plain text, while `main.rs` inside that project becomes *high*
-confidence Rust. The workspace separately tracks the project kind, so Koda still
-understands that the file lives inside a Rust project.
+project stays plain text, while `main.rs` becomes *high* confidence Rust — and
+the workspace still understands that it lives inside a Rust project.
 
-Signals are scored and turned into a [`Confidence`](src/language/detection/confidence.rs).
-The architecture allows Koda to eventually ask the user when detection is
-ambiguous rather than silently guessing.
-
-## Development
+## ❯ Development
 
 ```bash
-cargo test        # unit + rendering tests
-cargo clippy      # lints
-cargo fmt         # formatting
+cargo test                    # unit + rendering tests
+cargo clippy --all-targets    # lints (must be clean)
+cargo fmt                     # formatting
+cargo run -- .                # try it
 ```
 
 Contributions are developed commit-by-commit: small, focused, compiling and
 tested. See [`ROADMAP.md`](ROADMAP.md) for where this is going and
 [`CHANGELOG.md`](CHANGELOG.md) for what has changed.
 
-## License
+## ✦ Credits & license
 
-MIT.
+- Colour language: **[Mellow][mellow]**, the named colorscheme shipped with
+  [Helix](https://helix-editor.com), by Rohit K Viswanath. Koda translates its
+  palette and semantic mappings into its own interface; the layout, components
+  and ASCII art are Koda's.
+- Built on the shoulders of [`ratatui`](https://ratatui.rs),
+  [`crossterm`](https://github.com/crossterm-rs/crossterm),
+  [`ropey`](https://github.com/cessen/ropey) and
+  [`serde_json`](https://github.com/serde-rs/json).
+
+Licensed under the [MIT License](LICENSE).
+
+<p align="center"><sub>✦ &nbsp; made with care &nbsp; ☾</sub></p>
