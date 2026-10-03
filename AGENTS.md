@@ -288,19 +288,40 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   so the regex engine carries a per-line step budget and the `.gitignore` glob
   matcher is polynomial; a crafted pattern degrades to "no match" instead of
   freezing the editor.
+- **The LSP encoding boundary is centralized.** Koda's internal positions count
+  Unicode scalar values. Everything crossing the LSP boundary is converted in
+  `language/lsp/convert.rs` (`char_to_lsp`/`lsp_to_char`, and
+  `edits_to_chars`) using the actual line text and the negotiated
+  `PositionEncoding` (UTF-8, UTF-16 or UTF-32). Outbound requests convert the
+  cursor; inbound diagnostics, edits, formatting and locations convert back
+  before use. Conversion always clamps to a character boundary and never splits
+  a code point. Do not add ad-hoc character/byte arithmetic in the UI.
+- **Server responses are validated against the document they describe.** A
+  document-sensitive request records `(language, id, path, buffer version)` at
+  request time; a response is applied only if it is still the newest request and
+  the document is open at the same version (navigation also requires it to be
+  active). Code actions are re-validated when applied. Never apply an edit or
+  move the cursor from a response that has been superseded.
+- **Requests and subprocesses are bounded.** Every LSP request has a deadline
+  (formatting a longer one); expired requests are removed and their UI state
+  cleared. External processes run through `process::wait_captured`, which drains
+  both pipes, caps output and kills the child at a deadline. New subprocess call
+  sites must use it rather than `Command::output` or `wait_with_output`.
+- **Background work is isolated.** A small worker pool runs background requests,
+  so one slow operation cannot stall unrelated services. Automatic,
+  superseding snapshots (diagnostics) may be dropped when the queue is
+  saturated; user-initiated work must not be dropped.
 
-### Known limitation
+### Known limitations
 
-- **LSP position encoding is negotiated but not yet applied.** Koda advertises
-  `utf-8`/`utf-16` and stores the server's choice, but positions are still
-  treated as Unicode scalar columns. On lines containing non-ASCII text this can
-  shift diagnostics, completion, hover, navigation and — most seriously —
-  rename/format/code-action edits, which can then be applied at the wrong
-  offset. The fix is to convert at the request/response boundary using each
-  line's text (`char_to_utf8`/`char_to_utf16` and their inverses), in both
-  directions, before any edit is applied. Until then, prefer setting files that
-  need server-side edits to ASCII, or expect occasional wrong offsets on lines
-  with non-ASCII characters.
+- **`.gitignore` discovery is capped.** At most 256 nested `.gitignore` files and
+  4096 directories are read per project; in an enormous monorepo a deeper rule
+  beyond the cap is not applied. The caps keep project open predictable.
+- **Incremental sync is not implemented.** Koda always sends whole-document
+  changes, which the protocol permits as the safe fallback even for servers that
+  prefer incremental updates.
+- **Non-UTF-8 paths in state.** Recent/session stores serialize paths lossily, so
+  a non-UTF-8 path may not round-trip.
 
 ---
 

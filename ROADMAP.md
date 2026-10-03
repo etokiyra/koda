@@ -136,10 +136,13 @@ The highest-value work. These turn Koda from an editor into an IDE.
       JDT with a checksum-verified Eclipse Adoptium JDK, and C# installs
       OmniSharp with the .NET SDK, both under Koda's data directory. Servers are
       launched with their runtime on `PATH` (`JAVA_HOME`, `DOTNET_ROOT`).
-- [ ] **LSP position encoding.** Convert positions in both directions using the
-      encoding the server negotiated (`utf-8`, `utf-16` or `utf-32`) and each
-      line's text. Until then, non-ASCII lines can shift diagnostics and cause
-      rename, formatting and code-action edits to land at the wrong offset.
+- [x] **LSP position encoding.** Positions are converted in both directions
+      using the encoding the server negotiated (`utf-8`, `utf-16` or `utf-32`)
+      and each line's text, so diagnostics, navigation and rename/format/
+      code-action edits are correct on non-ASCII lines.
+- [x] **Language-server response validation.** Document-sensitive requests
+      record the document version at request time; stale or superseded
+      responses are discarded, and requests have bounded lifetimes.
 
 The abstraction is already in place: providers declare `Capability`s, and the
 command palette already reports which are available. Filling them in is additive.
@@ -275,6 +278,19 @@ command palette already reports which are available. Filling them in is additive
 - [ ] A plugin/provider API for third-party languages.
 - [ ] Remote development over SSH.
 - [ ] Debug adapter support.
+
+---
+
+## Known limitations
+
+- `.gitignore` discovery is capped (256 nested files, 4096 directories) so
+  opening a huge monorepo stays predictable; a rule beyond the cap is not
+  applied.
+- Document synchronization is always whole-document. This is the protocol's safe
+  fallback, including for servers that prefer incremental changes; incremental
+  sync is not implemented.
+- Recent/session state serializes paths lossily, so a non-UTF-8 path may not
+  round-trip.
 
 ---
 

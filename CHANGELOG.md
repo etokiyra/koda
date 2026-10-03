@@ -49,6 +49,47 @@ features; the goal was to make existing behaviour trustworthy.
   `.gitignore` fix also gives `.gitignore` the correct precedence over
   `.git/info/exclude`.
 
+### Language-server correctness (second audit pass)
+
+- **Position encoding.** Koda now honours the encoding a server negotiates.
+  Character positions are converted to and from UTF-8 bytes, UTF-16 code units
+  or code points at every boundary, so diagnostics, completion, hover,
+  navigation, signature help, rename, formatting and code-action edits are
+  correct on lines containing accented characters, CJK, emoji and combining
+  marks. Out-of-range or mid-code-point offsets are clamped to a character
+  boundary, and signature parameter labels use the UTF-16 offsets the protocol
+  requires.
+- **Stale responses.** Definition, references, rename, formatting and code
+  actions record the document version at request time and are discarded if the
+  document changed or closed, or (for navigation) is no longer active. Code
+  actions are re-validated when applied.
+- **Request lifetimes.** Every request has a deadline (formatting a longer one);
+  unanswered requests are expired and their UI state cleared, including on a
+  crash or restart, so a hung server cannot leave Koda waiting forever.
+- **Diagnostics.** A published document version is parsed and filtered: results
+  for an older synchronized version are dropped by the client, and results for a
+  buffer whose change has not yet been sent are dropped by the app.
+- **Synchronization.** `textDocumentSync` is parsed; a server that advertises
+  none is not sent documents. Koda otherwise sends whole-document changes (the
+  protocol's safe fallback), including for incremental servers.
+
+### Reliability hardening
+
+- **Background isolation.** A small worker pool runs background requests, so a
+  slow formatter, installer or git command no longer blocks detection,
+  diagnostics and search. Automatic diagnostics snapshots are dropped when the
+  queue is saturated. Formatters and tool commands share a bounded, timed
+  subprocess helper.
+- **Parsing safety.** JSON-RPC header lines are bounded, numeric-string request
+  ids are accepted, and Windows `file:///C:/…` URIs decode correctly.
+- **State and search.** Session cursors stay aligned with files when an entry is
+  malformed; the recent and session stores are written atomically; project-search
+  columns are measured in the original line.
+- **Filesystem and scaffolding.** Symlinked directories are expandable (with
+  cycle protection in quick open), significant leading whitespace in
+  `.gitignore` is preserved, and project names that could break out of generated
+  shell, string-literal or HTML contexts are rejected.
+
 ### Welcome screen
 
 - The welcome screen now opens on one of five **animated scenes** — *starry
