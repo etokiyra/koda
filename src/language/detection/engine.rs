@@ -171,7 +171,7 @@ impl DetectionEngine {
                 for hint in descriptor.content_hints {
                     if sample.contains(hint) {
                         hits += 1;
-                        if hits > MAX_CONTENT_HINTS {
+                        if hits >= MAX_CONTENT_HINTS {
                             break;
                         }
                     }
@@ -206,7 +206,25 @@ impl DetectionEngine {
         }
 
         // ---- Phase 2: project context corroborates the file's own signals ----
-        if let Some((project_language, project_reason)) = self.project_language(input, &scores)
+        //
+        // Only a language that already has a *file-level* signal (name, shebang
+        // or extension) may receive the bonus. A marker alone, or a language
+        // guessed from incidental content hints, must never be promoted: the
+        // project says what the project is, not what a given file is.
+        let file_level: Vec<(LanguageId, u32)> = scores
+            .iter()
+            .filter(|(id, _)| {
+                evidence.iter().any(|e| {
+                    e.language == *id
+                        && matches!(
+                            e.kind,
+                            SignalKind::FileName | SignalKind::Shebang | SignalKind::Extension
+                        )
+                })
+            })
+            .copied()
+            .collect();
+        if let Some((project_language, project_reason)) = self.project_language(input, &file_level)
             && let Some((_, score)) = scores.iter_mut().find(|(id, _)| *id == project_language)
         {
             *score += W_PROJECT_CONTEXT_BONUS;
@@ -265,10 +283,8 @@ impl DetectionEngine {
             }
         }
         candidates
-            .iter()
+            .into_iter()
             .find(|(id, _)| scores.iter().any(|(score_id, _)| score_id == id))
-            .cloned()
-            .or_else(|| candidates.into_iter().next())
     }
 }
 

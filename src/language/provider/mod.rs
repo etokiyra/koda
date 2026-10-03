@@ -250,12 +250,19 @@ impl ProviderRegistry {
     }
 
     /// Descriptors for every real provider, used to build the detection engine.
+    ///
+    /// Sorted by language id so detection is deterministic: the registry is a
+    /// `HashMap` whose iteration order is randomised per process, which would
+    /// otherwise leak into tie-breaking and the project-context bonus.
     pub fn descriptors(&self) -> Vec<LanguageDescriptor> {
-        self.providers
+        let mut descriptors: Vec<LanguageDescriptor> = self
+            .providers
             .values()
             .filter(|p| p.id() != LanguageId::Unknown)
             .map(|p| p.descriptor())
-            .collect()
+            .collect();
+        descriptors.sort_by_key(|descriptor| descriptor.id);
+        descriptors
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &dyn LanguageProvider> {

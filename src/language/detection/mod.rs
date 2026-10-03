@@ -183,4 +183,84 @@ mod tests {
         assert_eq!(result.language, LanguageId::Rust);
         assert_eq!(result.confidence, Confidence::High);
     }
+
+    #[test]
+    fn content_hint_weight_is_capped_at_three() {
+        let mut e = DetectionEngine::default();
+        e.register(LanguageDescriptor {
+            id: LanguageId::Rust,
+            extensions: &[],
+            project_markers: &[],
+            file_names: &[],
+            shebangs: &[],
+            content_hints: &["a", "b", "c", "d", "e"],
+        });
+        let result = e.detect(&DetectionInput {
+            path: None,
+            file_name: None,
+            extension: None,
+            project_markers: &[],
+            content_sample: Some("abcde"),
+        });
+        // Three hints' worth of weight, not five.
+        assert_eq!(result.scores[0], (LanguageId::Rust, 60));
+    }
+
+    #[test]
+    fn project_context_never_promotes_a_content_only_language() {
+        let e = DetectionEngine::new(vec![
+            LanguageDescriptor {
+                id: LanguageId::Rust,
+                extensions: &["rs"],
+                project_markers: &["Cargo.toml"],
+                file_names: &[],
+                shebangs: &[],
+                content_hints: &["fn ", "let mut ", "impl ", "use std"],
+            },
+            LanguageDescriptor {
+                id: LanguageId::Markdown,
+                extensions: &["md"],
+                project_markers: &[],
+                file_names: &[],
+                shebangs: &[],
+                content_hints: &["## ", "```"],
+            },
+        ]);
+        // A Markdown file that merely contains a Rust-looking code block inside
+        // a Rust project must stay Markdown.
+        let result = e.detect(&DetectionInput {
+            path: None,
+            file_name: Some("README.md"),
+            extension: Some("md"),
+            project_markers: &["Cargo.toml".to_string()],
+            content_sample: Some("## Title\n\n```rust\nfn main() { let mut x = 1; }\n```\n"),
+        });
+        assert_eq!(result.language, LanguageId::Markdown);
+        let rust_score = result
+            .scores
+            .iter()
+            .find(|(id, _)| *id == LanguageId::Rust)
+            .map(|(_, score)| *score);
+        assert_eq!(
+            rust_score,
+            Some(40),
+            "marker must not add the 40-point bonus"
+        );
+    }
+
+    #[test]
+    fn registry_descriptors_are_deterministic() {
+        let registry = crate::language::provider::ProviderRegistry::builtin();
+        let ids: Vec<LanguageId> = registry
+            .descriptors()
+            .iter()
+            .map(|descriptor| descriptor.id)
+            .collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(
+            ids, sorted,
+            "descriptor order must not depend on HashMap order"
+        );
+    }
 }
