@@ -3,7 +3,7 @@
 <p align="center"><em>A modern, lightweight, terminal-native IDE.</em></p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/etokiyra/koda?style=flat-square&color=90b99f"></a>
+  <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
   <img alt="Tests" src="https://img.shields.io/badge/tests-137%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
@@ -314,6 +314,6 @@ tested. See [`ROADMAP.md`](ROADMAP.md) for where this is going and
   [`ropey`](https://github.com/cessen/ropey) and
   [`serde_json`](https://github.com/serde-rs/json).
 
-Licensed under the [MIT License](LICENSE).
+Licensed under the [GNU General Public License v3.0](LICENSE).
 
 <p align="center"><sub>✦ &nbsp; made with care &nbsp; ☾</sub></p>

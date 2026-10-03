@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### License
+
+- Relicensed Koda under the **GNU General Public License v3.0** (previously
+  declared MIT). The full text is in [`LICENSE`](LICENSE).
+
 ### Zero configuration
 
 - **Language Setup…** can now install a missing tool with one action, using
