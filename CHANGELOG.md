@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Managed Go, clangd, asm-lsp and phpactor — fewer system prerequisites
+
+- **Go is fully automatic, and it unlocks three tools at once.** Koda resolves
+  the current stable Go release from `go.dev/dl/?mode=json` (which publishes the
+  version and the SHA-256 of every archive together, verified fail-closed),
+  extracts it under `tools/go`, and installs tooling into a **private
+  `GOPATH`/`GOBIN`** so nothing lands in the user's `~/go`. A system Go is reused
+  when present; otherwise the official toolchain is provisioned. `gopls`, `sqls`
+  and `shfmt` now need no system Go at all. **Live-verified**: `gopls` installed
+  with no system Go on `PATH`, and its LSP handshake.
+- **clangd** is provisioned from the official, self-contained `clangd` release
+  (a ~120 MB bundle with its own resource headers) instead of requiring a full
+  LLVM toolchain; the GitHub asset digest is verified. **Live-verified**: managed
+  clangd installed and completed a full `initialize` handshake.
+- **asm-lsp** now prefers the project's prebuilt release (verified digest) over a
+  `cargo` build; `cargo install` remains the fallback, and it now bootstraps the
+  Rust toolchain via the official `rustup` installer when `cargo` is missing.
+- **phpactor** is provisioned as the official `phpactor.phar` (verified digest,
+  made executable) so Composer is no longer required — only a PHP runtime.
+- **Ruby** gets an isolated gem home: `solargraph` installs under Koda's data
+  directory instead of the user's global gems, with `GEM_HOME`/`GEM_PATH` scoped
+  to the server process.
+- **musl safety.** The prebuilt `clangd`/`asm-lsp` bundles are glibc-linked, so
+  Koda does not offer them on musl (where the system toolchain or the `cargo`
+  fallback is used); the Go toolchain and its tools are static and remain
+  available.
+
 ### Portable Swift, a working Perl server on modern Perl, and `mix format`
 
 - **Swift now runs on distributions swift.org does not build for, including

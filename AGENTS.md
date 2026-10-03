@@ -283,6 +283,27 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   first user: **PLS** (no `Coro` dependency, so it builds on current Perls) is
   preferred, with `Perl::LanguageServer` discovered as a fallback. The editor
   still tracks one running server per language.
+- **A managed toolchain can provision the tool that installs another tool.** The
+  official Go toolchain is one managed component that unlocks `gopls`, `sqls` and
+  `shfmt`: `go_attempts` first tries the user's `go`, then a managed Go archive,
+  and every `go install` writes to a Koda-private `GOPATH`/`GOBIN`, so nothing
+  lands in `~/go`. The same "try the ambient tool, then provision a self-contained
+  one" shape covers `cargo`/`rustup` for `asm-lsp`. Downloads verify the checksum
+  the source actually publishes (`go.dev/dl` JSON, GitHub asset digests) and fail
+  closed.
+- **Prefer a small, self-contained upstream bundle over a system toolchain.**
+  `clangd` comes from the clangd project's own release (a ~120 MB bundle with its
+  resource headers) rather than requiring LLVM; `asm-lsp` prefers its prebuilt
+  release; `phpactor.phar` removes the Composer dependency. These bundles are
+  gated behind `libc_is_musl` where they link glibc. Native dependencies are
+  checked, not assumed: only a build whose libraries are present is offered, and
+  a missing one is named.
+- **A runtime Koda cannot verify is a prerequisite, not a download.** PHP and
+  Ruby interpreters are discovered and reused, never fetched: official PHP is
+  source-only and the third-party static builds publish no checksum, and Ruby has
+  no official portable binary. Koda still isolates what it can — `solargraph`
+  installs into a private gem home with `GEM_HOME`/`GEM_PATH` scoped to the
+  process — and reports the missing runtime precisely.
 - **Split editor.** The editor keeps a single active document; a split stores
   one document index per pane and `editor.active` follows the focused pane, so
   every existing editing path keeps working unchanged. Panes share the tab

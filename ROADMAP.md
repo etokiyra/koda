@@ -20,22 +20,23 @@ We deliberately support few languages well rather than many languages badly:
 
 ```
 Rust → solid
-Go   → solid
+Go   → solid (managed toolchain; gopls/sqls/shfmt)
 Python → built-in, offline
-Shell  → built-in, offline
+Shell  → built-in, offline (shfmt via managed Go)
 TypeScript / JavaScript → built-in, offline
-C / C++ → built-in, offline (clangd when present)
+C / C++ → built-in, offline (managed clangd bundle)
 Java → built-in, offline (managed Eclipse JDT)
 C# → built-in, offline (managed OmniSharp)
-PHP → built-in, offline (phpactor when present)
+PHP → built-in, offline (managed phpactor.phar; needs PHP)
 Lua → built-in, offline (managed lua-language-server)
 Kotlin → built-in, offline (managed JDK 21 + kotlin-language-server)
-Ruby / SQL → built-in, offline (solargraph / sqls installed when possible)
+Ruby → built-in, offline (solargraph in an isolated gem home; needs Ruby)
 Dart → built-in, offline (managed Dart SDK + analysis server)
 Swift → built-in, offline (GPG-verified toolchain: native or portable + compat)
 Perl → built-in, offline (managed PLS / Perl::LanguageServer in a local::lib)
 Elixir → built-in, offline (managed Erlang/OTP + Elixir + built ElixirLS)
-Assembly → built-in, offline (asm-lsp installed when possible)
+SQL → built-in, offline (managed Go toolchain + sqls)
+Assembly → built-in, offline (prebuilt asm-lsp; cargo/rustup fallback)
 HTML / CSS → built-in, offline (npm servers)
 then expand
 ```
@@ -261,6 +262,15 @@ command palette already reports which are available. Filling them in is additive
       discovered fallback. A language may have several candidate servers and Koda
       picks the first that is available. Each runs the real server to verify the
       result, and every unsupported platform is reported instead of attempted.
+- [x] System prerequisites removed for Go, C/C++, PHP and Assembly. The
+      **official Go toolchain** is provisioned and used to install `gopls`,
+      `sqls` and `shfmt` into a private `GOPATH`/`GOBIN` (so no system Go is
+      needed); **clangd** comes from its self-contained release bundle;
+      **asm-lsp** prefers a prebuilt release with a `cargo`/`rustup` fallback;
+      **phpactor** is the verified `phpactor.phar` (only a PHP runtime is
+      required); and **solargraph** installs into an isolated gem home.
+      Downloads verify a published checksum or digest and fail closed, and the
+      glibc-only bundles are not offered on musl.
 - [x] Web tokenizer depth: regex literals (expression-position lookback) and
       single-line JSX tags, attributes, fragments and closing tags for
       JavaScript/TypeScript/JSX, with generics and comparisons kept as operators.
@@ -357,8 +367,17 @@ command palette already reports which are available. Filling them in is additive
 - **Perl uses PLS on current Perls.** `Perl::LanguageServer` depends on `Coro`,
   which does not compile on Perl ≥ 5.41, so Koda prefers PLS (no `Coro`) and keeps
   `Perl::LanguageServer` as a discovered fallback. Both install into the same
-  isolated `local::lib`. Every other language is genuinely provisioned (Dart SDK,
-  Erlang/OTP + Elixir + ElixirLS, JDK 21/25, .NET SDK, Node.js, Lua).
+  isolated `local::lib`.
+- **PHP and Ruby still need their runtime.** Koda provisions `phpactor.phar` and
+  an isolated `solargraph` gem, but not a PHP or Ruby interpreter: official PHP
+  is source-only (GPG-signed, needs a build toolchain) and the portable
+  third-party static builds publish no checksum, while Ruby has no official
+  portable binary. Both runtimes are reused when installed and reported as a
+  prerequisite otherwise.
+- **clangd and asm-lsp prebuilt bundles are glibc-only.** Their prebuilt releases
+  link against glibc and libstdc++, so Koda does not offer them on musl
+  (Alpine/Void musl); a system clangd or the `cargo` fallback is used there. The
+  official Go toolchain and Go-installed tools are static and work on musl.
 - `.gitignore` discovery is capped (256 nested files, 4096 directories) so
   opening a huge monorepo stays predictable; a rule beyond the cap is not
   applied.
