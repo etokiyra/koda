@@ -19,6 +19,8 @@ pub enum ProjectKind {
     Rust,
     Go,
     Python,
+    Java,
+    CSharp,
     Generic,
 }
 
@@ -32,6 +34,19 @@ pub const KNOWN_MARKERS: &[(&str, ProjectKind)] = &[
     ("setup.py", ProjectKind::Python),
     ("requirements.txt", ProjectKind::Python),
     ("Pipfile", ProjectKind::Python),
+    ("pom.xml", ProjectKind::Java),
+    ("build.gradle", ProjectKind::Java),
+    ("build.gradle.kts", ProjectKind::Java),
+    ("settings.gradle", ProjectKind::Java),
+    ("settings.gradle.kts", ProjectKind::Java),
+    ("global.json", ProjectKind::CSharp),
+];
+
+/// Markers identified by a file-name suffix rather than an exact name, which
+/// need a directory listing to detect (`MyApp.csproj`, `App.sln`).
+pub const KNOWN_SUFFIX_MARKERS: &[(&str, ProjectKind)] = &[
+    (".csproj", ProjectKind::CSharp),
+    (".sln", ProjectKind::CSharp),
 ];
 
 impl ProjectKind {
@@ -40,6 +55,8 @@ impl ProjectKind {
             ProjectKind::Rust => "Rust",
             ProjectKind::Go => "Go",
             ProjectKind::Python => "Python",
+            ProjectKind::Java => "Java",
+            ProjectKind::CSharp => "C#",
             ProjectKind::Generic => "Workspace",
         }
     }
@@ -49,6 +66,8 @@ impl ProjectKind {
             ProjectKind::Rust => LanguageId::Rust,
             ProjectKind::Go => LanguageId::Go,
             ProjectKind::Python => LanguageId::Python,
+            ProjectKind::Java => LanguageId::Java,
+            ProjectKind::CSharp => LanguageId::CSharp,
             ProjectKind::Generic => LanguageId::Unknown,
         }
     }
@@ -164,11 +183,26 @@ fn normalize_start(start: &Path) -> PathBuf {
 }
 
 fn markers_present(dir: &Path) -> Vec<String> {
-    KNOWN_MARKERS
+    let mut markers: Vec<String> = KNOWN_MARKERS
         .iter()
         .filter(|(name, _)| dir.join(name).exists())
         .map(|(name, _)| (*name).to_string())
-        .collect()
+        .collect();
+
+    // Suffix markers (`*.csproj`, `*.sln`) need the directory listing.
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let lower = name.to_ascii_lowercase();
+            for (suffix, _) in KNOWN_SUFFIX_MARKERS {
+                if lower.ends_with(suffix) {
+                    markers.push(name.to_string());
+                }
+            }
+        }
+    }
+    markers
 }
 
 /// The marker file names of the nearest enclosing project for `path`.
@@ -197,9 +231,16 @@ pub fn nearest_markers(path: &Path, fallback: &[String]) -> Vec<String> {
 }
 
 fn kind_for_marker(marker: &str) -> Option<ProjectKind> {
-    KNOWN_MARKERS
+    if let Some((_, kind)) = KNOWN_MARKERS
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(marker))
+    {
+        return Some(*kind);
+    }
+    let lower = marker.to_ascii_lowercase();
+    KNOWN_SUFFIX_MARKERS
+        .iter()
+        .find(|(suffix, _)| lower.ends_with(suffix))
         .map(|(_, kind)| *kind)
 }
 
@@ -223,6 +264,25 @@ mod tests {
             project.root.canonicalize().unwrap(),
             dir.canonicalize().unwrap()
         );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn detects_java_and_csharp_projects() {
+        let dir = std::env::temp_dir().join(format!("koda-proj-jvm-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        fs::write(dir.join("pom.xml"), "<project/>").unwrap();
+        assert_eq!(Project::detect(&dir).kind, ProjectKind::Java);
+        assert_eq!(ProjectKind::Java.language(), LanguageId::Java);
+        fs::remove_file(dir.join("pom.xml")).unwrap();
+
+        // A `*.csproj` suffix marker is recognised without an exact name.
+        fs::write(dir.join("MyApp.csproj"), "<Project/>").unwrap();
+        assert_eq!(Project::detect(&dir).kind, ProjectKind::CSharp);
+        assert_eq!(ProjectKind::CSharp.language(), LanguageId::CSharp);
 
         fs::remove_dir_all(&dir).ok();
     }

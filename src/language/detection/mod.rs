@@ -46,6 +46,8 @@ mod tests {
                 LanguageId::JavaScript => &["js", "jsx"],
                 LanguageId::C => &["c", "h"],
                 LanguageId::Cpp => &["cpp", "hpp"],
+                LanguageId::Java => &["java"],
+                LanguageId::CSharp => &["cs"],
                 LanguageId::Unknown => &[],
             },
             project_markers: match id {

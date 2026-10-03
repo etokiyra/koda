@@ -11,6 +11,7 @@
 
 pub mod c;
 pub mod completion;
+pub mod csharp;
 pub mod data;
 pub mod detection;
 pub mod diagnostics;
@@ -18,6 +19,7 @@ pub mod format;
 pub mod go;
 pub mod hover;
 pub mod id;
+pub mod java;
 pub mod json;
 pub mod lsp;
 pub mod markdown;

@@ -21,6 +21,8 @@ pub const CREATABLE: &[LanguageId] = &[
     LanguageId::Python,
     LanguageId::TypeScript,
     LanguageId::JavaScript,
+    LanguageId::Java,
+    LanguageId::CSharp,
     LanguageId::Shell,
     LanguageId::C,
     LanguageId::Cpp,
@@ -39,6 +41,8 @@ pub fn describe(language: LanguageId) -> &'static str {
         LanguageId::Python => "pyproject.toml + src/<package>",
         LanguageId::TypeScript => "package.json + tsconfig.json",
         LanguageId::JavaScript => "package.json + src/index.js",
+        LanguageId::Java => "pom.xml + src/main/java/<package>",
+        LanguageId::CSharp => "a .csproj + Program.cs",
         LanguageId::Shell => "an executable <name>.sh",
         LanguageId::C => "CMakeLists.txt + src/main.c",
         LanguageId::Cpp => "CMakeLists.txt + src/main.cpp",
@@ -135,6 +139,8 @@ pub fn create(parent: &Path, name: &str, language: LanguageId) -> CreateOutcome 
         LanguageId::Python => python(&root, name),
         LanguageId::TypeScript => typescript(&root, name),
         LanguageId::JavaScript => javascript(&root, name),
+        LanguageId::Java => java(&root, name),
+        LanguageId::CSharp => csharp(&root, name),
         LanguageId::Shell => shell(&root, name),
         LanguageId::C => c(&root, name),
         LanguageId::Cpp => cpp(&root, name),
@@ -263,6 +269,53 @@ fn cpp(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         write(root, "CMakeLists.txt", &cmake)?,
         write(root, "src/main.cpp", main)?,
         write(root, ".gitignore", "build/\n")?,
+    ])
+}
+
+fn java(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let artifact = module_name(name);
+    let package = python_module(name);
+    let pom = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <project xmlns=\"http://maven.apache.org/POM/4.0.0\"\n\
+         \x20        xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n\
+         \x20        xsi:schemaLocation=\"http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd\">\n\
+         \x20 <modelVersion>4.0.0</modelVersion>\n\
+         \x20 <groupId>com.example</groupId>\n\
+         \x20 <artifactId>{artifact}</artifactId>\n\
+         \x20 <version>0.1.0</version>\n\
+         \x20 <properties>\n\
+         \x20   <maven.compiler.release>21</maven.compiler.release>\n\
+         \x20   <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>\n\
+         \x20 </properties>\n\
+         </project>\n"
+    );
+    let app = format!(
+        "package com.example.{package};\n\npublic final class App {{\n    public static void main(String[] args) {{\n        System.out.println(\"Hello from {name}!\");\n    }}\n}}\n"
+    );
+    let path = format!("src/main/java/com/example/{package}/App.java");
+    Ok(vec![
+        write(root, "pom.xml", &pom)?,
+        write(root, &path, &app)?,
+        write(root, ".gitignore", "target/\n*.class\n")?,
+    ])
+}
+
+fn csharp(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let project = crate_name(name);
+    let csproj = "<Project Sdk=\"Microsoft.NET.Sdk\">\n\
+         \x20 <PropertyGroup>\n\
+         \x20   <OutputType>Exe</OutputType>\n\
+         \x20   <TargetFramework>net10.0</TargetFramework>\n\
+         \x20   <ImplicitUsings>enable</ImplicitUsings>\n\
+         \x20   <Nullable>enable</Nullable>\n\
+         \x20 </PropertyGroup>\n\
+         </Project>\n";
+    let program = format!("Console.WriteLine(\"Hello from {name}!\");\n");
+    Ok(vec![
+        write(root, &format!("{project}.csproj"), csproj)?,
+        write(root, "Program.cs", &program)?,
+        write(root, ".gitignore", "bin/\nobj/\n")?,
     ])
 }
 
@@ -493,6 +546,36 @@ mod tests {
             panic!("expected C++ success");
         };
         assert!(root.join("src/main.cpp").is_file());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scaffolds_java_and_csharp() {
+        let dir = scratch("jvm-dotnet");
+        let parent = dir.join("parent");
+        std::fs::create_dir_all(&parent).unwrap();
+
+        let CreateOutcome::Created { root, .. } = create(&parent, "My Service", LanguageId::Java)
+        else {
+            panic!("expected Java success");
+        };
+        assert!(root.join("pom.xml").is_file());
+        assert!(
+            root.join("src/main/java/com/example/my_service/App.java")
+                .is_file()
+        );
+        let pom = std::fs::read_to_string(root.join("pom.xml")).unwrap();
+        assert!(pom.contains("<artifactId>my-service</artifactId>"));
+        assert!(pom.contains("maven.compiler.release>21"));
+
+        let CreateOutcome::Created { root, .. } = create(&parent, "My App", LanguageId::CSharp)
+        else {
+            panic!("expected C# success");
+        };
+        assert!(root.join("my-app.csproj").is_file());
+        assert!(root.join("Program.cs").is_file());
+        let csproj = std::fs::read_to_string(root.join("my-app.csproj")).unwrap();
+        assert!(csproj.contains("<TargetFramework>net10.0</TargetFramework>"));
         std::fs::remove_dir_all(&dir).ok();
     }
 

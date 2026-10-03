@@ -25,6 +25,8 @@ Python → built-in, offline
 Shell  → built-in, offline
 TypeScript / JavaScript → built-in, offline
 C / C++ → built-in, offline (clangd when present)
+Java → built-in, offline (managed Eclipse JDT)
+C# → built-in, offline (managed OmniSharp)
 then expand
 ```
 
@@ -186,6 +188,10 @@ command palette already reports which are available. Filling them in is additive
       diagnostics, symbols (functions, structs, classes, enums, unions,
       typedefs, `#define`) and offline completion/hover/navigation, with
       `clangd` used when the toolchain provides it.
+- [x] Java and C# built-in support: annotation/attribute highlighting, strings
+      (including C# verbatim/raw strings and Java text blocks), structural
+      diagnostics, symbols (types, methods, fields, records, interfaces) and
+      offline completion/hover/navigation.
 - [x] `.gitignore`-aware file tree and quick open. A dependency-free matcher
       reads root and nested `.gitignore` files plus `.git/info/exclude`, and
       hides ignored paths from the tree, quick open, the inline filter and

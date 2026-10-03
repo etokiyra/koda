@@ -48,8 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   network access and no toolchain: `Cargo.toml` + `src/main.rs`; `go.mod` +
   `main.go`; `pyproject.toml` + a source package; `package.json` +
   `tsconfig.json` + `src/index.ts` (TypeScript) or `package.json` +
-  `src/index.js` (JavaScript); `CMakeLists.txt` + `src/main.c`/`src/main.cpp`
-  (C/C++); or an executable shell script.
+  `src/index.js` (JavaScript); `pom.xml` + `src/main/java/…/App.java` (Java);
+  a `*.csproj` + `Program.cs` (C#); `CMakeLists.txt` +
+  `src/main.c`/`src/main.cpp` (C/C++); or an executable shell script.
 - Creation runs on the background worker with a busy indicator and a toast; on
   success the project opens, its entry file loads and language tooling starts
   automatically. If a write fails partway, the partial directory is left

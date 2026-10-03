@@ -31,6 +31,10 @@ pub enum LanguageId {
     C,
     /// C++ source and headers.
     Cpp,
+    /// Java sources.
+    Java,
+    /// C# sources.
+    CSharp,
     /// Used when detection could not reach a confident answer.
     #[default]
     Unknown,
@@ -38,7 +42,7 @@ pub enum LanguageId {
 
 impl LanguageId {
     /// Every language Koda understands today. Keep this in sync with [`crate::language::provider`].
-    pub const ALL: [LanguageId; 12] = [
+    pub const ALL: [LanguageId; 14] = [
         LanguageId::Rust,
         LanguageId::Go,
         LanguageId::Python,
@@ -51,6 +55,8 @@ impl LanguageId {
         LanguageId::JavaScript,
         LanguageId::C,
         LanguageId::Cpp,
+        LanguageId::Java,
+        LanguageId::CSharp,
     ];
 
     /// A human readable display name.
@@ -68,6 +74,8 @@ impl LanguageId {
             LanguageId::JavaScript => "JavaScript",
             LanguageId::C => "C",
             LanguageId::Cpp => "C++",
+            LanguageId::Java => "Java",
+            LanguageId::CSharp => "C#",
             LanguageId::Unknown => "Plain Text",
         }
     }
@@ -87,6 +95,8 @@ impl LanguageId {
             LanguageId::JavaScript => "javascript",
             LanguageId::C => "c",
             LanguageId::Cpp => "cpp",
+            LanguageId::Java => "java",
+            LanguageId::CSharp => "csharp",
             LanguageId::Unknown => "text",
         }
     }

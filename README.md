@@ -166,6 +166,8 @@ two Koda instances cannot corrupt the same managed prefix.
 | **JavaScript** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **C** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **C++** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
+| **Java** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
+| **C#** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **Shell** | built-in | LSP | built-in (functions) | built-in | built-in | built-in | — |
 | **Markdown** | built-in | — | built-in (headings) | — | — | — | — |
 | **JSON** | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — |
@@ -175,12 +177,11 @@ two Koda instances cannot corrupt the same managed prefix.
 Prose and configuration files are first-class too. Markdown, JSON, TOML and YAML
 get syntax highlighting, structural diagnostics where they make sense, and a
 symbol outline, all offline and with no setup. **Python**, **Shell**,
-**TypeScript**, **JavaScript**, **C** and **C++** work offline through Koda's
-built-in intelligence (highlighting, diagnostics where available, symbols,
-completion, hover, navigation) and gain richer server-backed features when Koda
-installs `pylsp`, `bash-language-server` or `typescript-language-server`, or
-finds `clangd`. Adding a language means implementing one trait and registering
-it — no changes to the editor or the UI.
+**TypeScript**, **JavaScript**, **C**, **C++**, **Java** and **C#** work offline
+through Koda's built-in intelligence (highlighting, diagnostics where available,
+symbols, completion, hover, navigation) and gain richer server-backed features
+when Koda installs or finds a managed language server. Adding a language means
+implementing one trait and registering it — no changes to the editor or the UI.
 
 ## ❯ Editing & workflow
 
@@ -317,8 +318,9 @@ the home screen back.
    confirms the highlighted one, `←` goes up, `Esc` cancels.
 2. **Name it** — the name is validated for your platform and checked against
    the chosen folder so an existing project is never overwritten.
-3. **Pick a language** — Rust, Go, Python, TypeScript, JavaScript, Shell, C or
-   C++, each shown with what Koda will generate. `Esc` steps back at any point.
+3. **Pick a language** — Rust, Go, Python, TypeScript, JavaScript, Java, C#,
+   Shell, C or C++, each shown with what Koda will generate. `Esc` steps back at
+   any point.
 
 Koda then scaffolds the project without a network connection or a toolchain and
 opens it, ready to edit:
@@ -330,6 +332,8 @@ opens it, ready to edit:
 | **Python** | `pyproject.toml`, `src/<package>/__init__.py` and `__main__.py` |
 | **TypeScript** | `package.json`, `tsconfig.json`, `src/index.ts`, `.gitignore` |
 | **JavaScript** | `package.json`, `src/index.js`, `.gitignore` |
+| **Java** | `pom.xml`, `src/main/java/…/App.java`, `.gitignore` |
+| **C#** | a `*.csproj`, `Program.cs`, `.gitignore` |
 | **Shell** | an executable `<name>.sh` (plus a `README.md`) |
 | **C** | `CMakeLists.txt`, `src/main.c`, `.gitignore` |
 | **C++** | `CMakeLists.txt`, `src/main.cpp`, `.gitignore` |
