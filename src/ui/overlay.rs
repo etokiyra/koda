@@ -1,7 +1,7 @@
 //! Overlays: command palette, quick open, prompts and the search bar.
 //!
-//! Mellow's `ui.menu` language: a revolver panel, a lilac border, stars in the
-//! title, and a warm bossanova highlight.
+//! Mellow's `ui.menu` language: a panel background, a blue accent border, stars
+//! in the title, and a `ui.menu.selected` highlight row.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -125,7 +125,7 @@ pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
 
         let mut line = Line::from(spans).style(Style::default().bg(theme::PANEL_BG));
         if selected {
-            line = line.style(Style::default().bg(theme::CURSORLINE_BG));
+            line = line.style(Style::default().bg(theme::MENU_SELECTED_BG));
         }
         lines.push(line);
     }
@@ -220,7 +220,7 @@ pub fn render_completion(
         ])
         .style(Style::default().bg(theme::PANEL_BG));
         if selected {
-            line = line.style(Style::default().bg(theme::CURSORLINE_BG));
+            line = line.style(Style::default().bg(theme::MENU_SELECTED_BG));
         }
         lines.push(line);
     }

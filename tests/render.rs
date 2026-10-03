@@ -144,9 +144,9 @@ fn bracket_match_is_highlighted() {
     let buffer = terminal.backend().buffer();
     let highlighted = (0..buffer.area.height).any(|y| {
         (0..buffer.area.width).any(|x| {
-            buffer
-                .cell((x, y))
-                .is_some_and(|cell| cell.bg == theme::BRACKET_BG)
+            buffer.cell((x, y)).is_some_and(|cell| {
+                cell.fg == theme::BRACKET_MATCH && cell.modifier.contains(Modifier::UNDERLINED)
+            })
         })
     });
     assert!(highlighted, "matching brackets should be highlighted");

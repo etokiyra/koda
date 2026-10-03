@@ -83,10 +83,12 @@ The editor core must remain language-agnostic.
 Koda's look is a first-class concern, not an afterthought.
 
 - **Mellow is the colour source of truth.** The palette and semantic mappings
-  come from Helix's Mellow default theme. `src/ui/theme.rs` is the single point
-  of truth: the raw palette in `palette`, semantic roles (`ACCENT`, `TEXT`,
-  `PANEL_BG`, …) and `token_style(kind)` for syntax. Do not hard-code colours in
-  widgets.
+  come from **Mellow**, the separately named colorscheme shipped with Helix
+  (not Helix's default theme), defined in
+  `runtime/themes/mellow.toml`.
+  `src/ui/theme.rs` is the single point of truth: the raw palette in `palette`,
+  semantic roles (`ACCENT`, `TEXT`, `PANEL_BG`, …) and `token_style(kind)` for
+  syntax. Do not hard-code colours in widgets.
 - **Koda's design is its own.** Mellow is the colour language; the layout,
   header, tabs, sidebar, statusline, popups and welcome scene are Koda's. Never
   copy Helix's or VS Code's UI.

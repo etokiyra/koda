@@ -1,6 +1,6 @@
 //! The Koda statusline.
 //!
-//! A solid revolver strip with a language pill, git state and cursor position —
+//! A solid panel strip with a language pill, git state and cursor position —
 //! Koda's most recognisable band of colour.
 
 use ratatui::Frame;
@@ -173,6 +173,6 @@ fn severity_color(severity: Severity) -> Color {
         Severity::Error => theme::ERROR,
         Severity::Warning => theme::WARN,
         Severity::Info => theme::INFO,
-        Severity::Hint => theme::MUTED,
+        Severity::Hint => theme::HINT,
     }
 }

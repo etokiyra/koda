@@ -1,8 +1,8 @@
 //! The editor pane: gutter, syntax, cursorline, indent guides and cursor.
 //!
 //! Koda's editor is intentionally bare — no box, no chrome. Code dominates.
-//! A faint bossanova cursorline and comet indent guides add warmth without
-//! fighting the code.
+//! A subtle cursorline (`ui.cursorline.primary`) and faint indent guides add
+//! warmth without fighting the code.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -245,7 +245,8 @@ fn render_line(
             && ((open.row == row && open.col == original)
                 || (close.row == row && close.col == original))
         {
-            style = style.bg(theme::BRACKET_BG).add_modifier(Modifier::BOLD);
+            // Mellow `ui.cursor.match`: yellow, bold and underlined.
+            style = with_bg(theme::bracket_match(), base_bg);
         }
         if selected.get(original).copied().unwrap_or(false) {
             style = style.bg(theme::SELECTION_BG);
@@ -297,7 +298,7 @@ fn severity_style(severity: Severity) -> Style {
         Severity::Error => theme::error(),
         Severity::Warning => theme::warn(),
         Severity::Info => theme::info(),
-        Severity::Hint => theme::dim(),
+        Severity::Hint => theme::hint(),
     }
 }
 

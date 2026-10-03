@@ -35,11 +35,15 @@ mascot, and a lot of care — with the editor still first.
 
 ## Design & personality
 
-Koda's colour language is **Mellow** — the default Helix theme — used with the
-same semantic mappings Helix gives it: keywords are almond, types and functions
-white, strings silver, numbers chamois, comments sirocco, with lilac and
-lavender carrying operators, punctuation and structure. Koda is its own design,
-though: its own header, tabs, sidebar, statusline and welcome scene.
+Koda's colour language is **Mellow**, the separate named colorscheme shipped
+with Helix — not Helix's default theme. Koda takes Mellow's palette and its
+semantic mappings — blue keywords, bright-blue types, green strings, magenta
+numbers, grey italic comments, pink constants, yellow operators — and adapts
+them to its own terminal-native interface. Koda is its own design, though: its
+own header, tabs, sidebar, statusline and welcome scene.
+
+Mellow is maintained upstream in Helix:
+<https://github.com/helix-editor/helix/blob/master/runtime/themes/mellow.toml>.
 
 Colour and personality live in one place — `src/ui/theme.rs` for the palette and
 `src/ui/art.rs` for the ASCII art — so the whole environment stays coherent and
@@ -49,8 +53,8 @@ A few principles:
 
 - **Transparency first.** Koda never paints a full-screen background. Plain
   surfaces use the terminal's own background, so transparency, blur and
-  wallpapers show through. Only small, deliberate surfaces (the statusline and
-  popups) get a Mellow panel background.
+  wallpapers show through. Only small, deliberate surfaces (the statusline,
+  popups and the current line) get a Mellow panel background.
 - **Art with restraint.** The Koda familiar, a little star-cat, appears where
   there is room for personality — the welcome scene and empty states — never
   behind your code.

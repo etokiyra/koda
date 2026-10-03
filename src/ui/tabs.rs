@@ -1,8 +1,9 @@
 //! The tab strip: a quiet row of pills.
 //!
-//! The active tab is a solid bossanova pill with a lilac bar; inactive tabs fade
-//! into sirocco. Unsaved work is a small honey star. When there are more tabs
-//! than fit, the strip scrolls around the active tab and shows overflow chevrons.
+//! The active tab is a solid panel-grey pill (`ui.menu.selected`) with a blue
+//! accent bar; inactive tabs fade into the secondary grey. Unsaved work is a
+//! small star. When there are more tabs than fit, the strip scrolls around the
+//! active tab and shows overflow chevrons.
 
 use std::collections::HashMap;
 
@@ -76,7 +77,7 @@ pub fn render(frame: &mut Frame, area: Rect, editor: &Editor) {
         });
 
         let style = if is_active {
-            theme::pill(theme::CURSORLINE_BG, theme::TEXT_BRIGHT)
+            theme::pill(theme::MENU_SELECTED_BG, theme::TEXT_BRIGHT)
         } else {
             theme::muted()
         };
@@ -84,7 +85,7 @@ pub fn render(frame: &mut Frame, area: Rect, editor: &Editor) {
 
         if editor.documents[index].is_dirty() {
             let dot = if is_active {
-                theme::star().bg(theme::CURSORLINE_BG)
+                theme::star().bg(theme::MENU_SELECTED_BG)
             } else {
                 theme::star()
             };

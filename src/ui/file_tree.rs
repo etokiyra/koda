@@ -1,9 +1,9 @@
 //! The project sidebar.
 //!
-//! A single hairline rule separates it from the editor. Directories are lilac,
-//! files lavender, selection is a warm bossanova row, and git state lives in a
-//! quiet right-aligned column. Pressing `/` turns the sidebar into an inline
-//! fuzzy file filter.
+//! A single hairline rule separates it from the editor. Directories take the
+//! accent, files the primary text, selection is a `ui.selection` row, and git
+//! state lives in a quiet right-aligned column. Pressing `/` turns the sidebar
+//! into an inline fuzzy file filter.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
