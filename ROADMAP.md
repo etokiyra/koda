@@ -307,6 +307,12 @@ command palette already reports which are available. Filling them in is additive
 
 ## Known limitations
 
+- **Kotlin is deferred.** `kotlin-language-server` 1.3.x bundles a Kotlin
+  compiler whose `JavaVersion` parser rejects the four-part version string of
+  Koda's managed Eclipse Adoptium JDK 25 (`25.0.4.1`) and exits immediately. A
+  Kotlin provider therefore needs a *second*, pinned managed JDK (21 LTS) rather
+  than the one shared with `jdtls`; the investigation and download/launch shape
+  are otherwise identical to the Lua and Java managed servers.
 - `.gitignore` discovery is capped (256 nested files, 4096 directories) so
   opening a huge monorepo stays predictable; a rule beyond the cap is not
   applied.
