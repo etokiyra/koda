@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-229%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-231%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -188,6 +188,9 @@ Koda has a personality, but the code always comes first.
   in empty states — never behind your code.
 - **One visual vocabulary.** `✦` stars, `☾` moons, `❯` pointers and `·`
   separators recur throughout, so the whole environment reads as one piece.
+- **Quiet feedback.** Background results — a language server installing or
+  recovering, a commit, a format — surface as short-lived toasts above the
+  statusline, coloured by outcome, so you always know what Koda just did.
 
 [mellow]: https://github.com/helix-editor/helix/blob/master/runtime/themes/mellow.toml
 

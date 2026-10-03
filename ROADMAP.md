@@ -191,7 +191,8 @@ command palette already reports which are available. Filling them in is additive
 - [x] Project-wide text search (`Ctrl+Shift+F`): a `.gitignore`-aware,
       case-insensitive scan on the background worker with a filterable result
       list.
-- [ ] Notifications/toasts for long-running operations.
+- [x] Notifications/toasts for long-running operations: background results
+      appear as severity-coloured toasts above the statusline.
 
 ---
 

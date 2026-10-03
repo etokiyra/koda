@@ -45,6 +45,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         overlay::render_search(frame, chunks[2], &app.search);
     }
     status_bar::render(frame, chunks[3], app);
+    // Notifications sit just above the statusline; overlays draw over them.
+    overlay::render_toasts(frame, area, &app.toasts);
 
     match &app.overlay {
         Overlay::None => {}

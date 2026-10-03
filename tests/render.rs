@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use koda::app::App;
+use koda::app::ToastKind;
 use koda::app::overlay::Overlay;
 use koda::commands::ids;
 use koda::language::diagnostics::{Diagnostic, Severity, TextPos};
@@ -183,6 +184,22 @@ fn split_renders_both_documents() {
         "right pane missing:\n{screen}"
     );
     assert!(screen.contains("│"), "separator missing:\n{screen}");
+
+    cleanup(&dir);
+}
+
+#[test]
+fn renders_toast_notification() {
+    let dir = temp_project("toast-render");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    app.push_toast(ToastKind::Success, "Formatted main.rs");
+
+    let screen = draw(&mut app);
+    assert!(
+        screen.contains("Formatted main.rs"),
+        "toast missing:\n{screen}"
+    );
 
     cleanup(&dir);
 }

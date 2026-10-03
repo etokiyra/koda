@@ -39,6 +39,15 @@ fn main() {
             app.execute_command(ids::SPLIT);
             app
         }
+        "toast" => {
+            let mut app = App::new(Some(&root.join("src/main.rs"))).expect("app");
+            app.push_toast(koda::app::ToastKind::Success, "Formatted src/main.rs");
+            app.push_toast(
+                koda::app::ToastKind::Error,
+                "Language server stopped; using built-in intelligence",
+            );
+            app
+        }
         "find" => {
             let mut app = App::new(Some(&root.join("src/main.rs"))).expect("app");
             app.execute_command(ids::FIND);

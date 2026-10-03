@@ -202,6 +202,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Polish & motion
 
+- Background results now appear as short-lived **notifications** stacked above
+  the statusline: tool installs, commits, formatting, git errors and language
+  server recovery each show a severity-coloured toast. Consecutive duplicates
+  are suppressed and the most recent few are kept.
+
 - Diagnostic messages can now appear inline at the end of the affected line
   (an error-lens style note), coloured by severity, truncated to fit and
   suppressed on narrow or horizontally scrolled lines. **Toggle Inline

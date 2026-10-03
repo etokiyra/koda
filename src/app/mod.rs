@@ -106,6 +106,21 @@ struct Yank {
     version: u64,
 }
 
+/// The tone of a notification.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToastKind {
+    Info,
+    Success,
+    Error,
+}
+
+/// A short-lived notification shown above the statusline.
+pub struct Toast {
+    pub message: String,
+    pub kind: ToastKind,
+    created: Instant,
+}
+
 /// The root application object.
 pub struct App {
     pub workspace: Workspace,
@@ -144,6 +159,8 @@ pub struct App {
     pub focus_pane: Pane,
     pub focus: Focus,
     pub status: Status,
+    /// Transient notifications shown above the statusline.
+    pub toasts: Vec<Toast>,
     /// Height of the editor viewport, updated during rendering.
     pub viewport_height: usize,
     pub should_quit: bool,
@@ -248,6 +265,7 @@ impl App {
             focus_pane: Pane::Primary,
             focus: Focus::Editor,
             status: Status::default(),
+            toasts: Vec::new(),
             viewport_height: 20,
             should_quit: false,
             quit_armed: false,
@@ -2081,15 +2099,26 @@ impl App {
                             .to_string();
                         self.set_status(format!("{action} {name}"));
                     }
-                    Err(message) => self.set_error(format!("Git: {message}")),
+                    Err(message) => {
+                        let text = format!("Git: {message}");
+                        self.set_error(text.clone());
+                        self.push_toast(ToastKind::Error, text);
+                    }
                 }
                 true
             }
             BackgroundEvent::GitCommitted { result } => {
                 self.pending_commit = false;
                 match result {
-                    Ok(message) => self.set_status(message),
-                    Err(message) => self.set_error(format!("Commit failed — {message}")),
+                    Ok(message) => {
+                        self.set_status(message.clone());
+                        self.push_toast(ToastKind::Success, message);
+                    }
+                    Err(message) => {
+                        let text = format!("Commit failed — {message}");
+                        self.set_error(text.clone());
+                        self.push_toast(ToastKind::Error, text);
+                    }
                 }
                 true
             }
@@ -2125,8 +2154,15 @@ impl App {
             BackgroundEvent::ToolInstalled { tool: _, result } => {
                 self.pending_install = None;
                 match result {
-                    Ok(message) => self.set_status(message),
-                    Err(message) => self.set_error(format!("Install failed — {message}")),
+                    Ok(message) => {
+                        self.set_status(message.clone());
+                        self.push_toast(ToastKind::Success, message);
+                    }
+                    Err(message) => {
+                        let text = format!("Install failed — {message}");
+                        self.set_error(text.clone());
+                        self.push_toast(ToastKind::Error, text);
+                    }
                 }
                 true
             }
@@ -2402,9 +2438,15 @@ impl App {
                 self.set_status("Formatting is not available for this language")
             }
             FormatOutcome::ToolMissing { tool, hint } => {
-                self.set_error(format!("{tool} not found — {hint}"))
+                let message = format!("{tool} not found — {hint}");
+                self.set_error(message.clone());
+                self.push_toast(ToastKind::Error, message);
             }
-            FormatOutcome::Failed(message) => self.set_error(format!("Format failed: {message}")),
+            FormatOutcome::Failed(message) => {
+                let text = format!("Format failed: {message}");
+                self.set_error(text.clone());
+                self.push_toast(ToastKind::Error, text);
+            }
         }
     }
 
@@ -2429,6 +2471,12 @@ impl App {
         if applied {
             self.after_edit();
             self.set_status("Formatted");
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("file")
+                .to_string();
+            self.push_toast(ToastKind::Success, format!("Formatted {name}"));
         } else {
             self.set_status("File is no longer open");
         }
@@ -2604,10 +2652,12 @@ impl App {
         }
         self.diagnostics_dirty_at = Some(Instant::now());
         if let Some(language) = language {
-            self.set_error(format!(
+            let message = format!(
                 "{} did not respond; using built-in intelligence",
                 language.name()
-            ));
+            );
+            self.set_error(message.clone());
+            self.push_toast(ToastKind::Error, message);
             self.schedule_lsp_restart(language);
         }
         true
@@ -2709,9 +2759,10 @@ impl App {
                         doc.use_builtin_diagnostics();
                     }
                     self.diagnostics_dirty_at = Some(Instant::now());
-                    self.set_error(format!(
-                        "Language server stopped — {message}; using built-in intelligence"
-                    ));
+                    let text =
+                        format!("Language server stopped — {message}; using built-in intelligence");
+                    self.set_error(text.clone());
+                    self.push_toast(ToastKind::Error, text);
                     if let Some(language) = language {
                         self.schedule_lsp_restart(language);
                     }
@@ -3974,19 +4025,53 @@ impl App {
         self.status.expires_at = Some(Instant::now() + Duration::from_secs(8));
     }
 
-    /// Expire stale status messages so the language/git summary returns.
+    /// Post a notification that lingers briefly above the statusline.
     ///
-    /// Returns `true` when a message was cleared, so the caller knows to redraw.
+    /// Consecutive duplicates are ignored so a burst of work does not spam the
+    /// screen, and only the most recent few are kept.
+    pub fn push_toast(&mut self, kind: ToastKind, message: impl Into<String>) {
+        const MAX: usize = 4;
+        let message = message.into();
+        if self
+            .toasts
+            .last()
+            .is_some_and(|toast| toast.message == message && toast.kind == kind)
+        {
+            return;
+        }
+        self.toasts.push(Toast {
+            message,
+            kind,
+            created: Instant::now(),
+        });
+        if self.toasts.len() > MAX {
+            self.toasts.remove(0);
+        }
+    }
+
+    /// Expire stale status messages and notifications.
+    ///
+    /// Returns `true` when something was cleared, so the caller knows to redraw.
     fn tick_status(&mut self) -> bool {
+        const TOAST_TTL: Duration = Duration::from_secs(5);
+        let mut changed = false;
+
+        let before = self.toasts.len();
+        self.toasts
+            .retain(|toast| toast.created.elapsed() < TOAST_TTL);
+        if self.toasts.len() != before {
+            changed = true;
+        }
+
         if let Some(expires_at) = self.status.expires_at
             && Instant::now() >= expires_at
         {
             self.status.message.clear();
             self.status.error = false;
             self.status.expires_at = None;
-            return true;
+            changed = true;
         }
-        false
+        changed
     }
 
     /// Clear any transient status message.
@@ -5061,6 +5146,23 @@ mod tests {
         assert_eq!(app.search.current, Some(1));
         app.handle_key(KeyEvent::new(KeyCode::F(3), KeyModifiers::SHIFT));
         assert_eq!(app.search.current, Some(0));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn toasts_deduplicate_and_cap() {
+        let dir = temp_project("toasts");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        app.push_toast(ToastKind::Success, "Saved");
+        app.push_toast(ToastKind::Success, "Saved");
+        assert_eq!(app.toasts.len(), 1, "duplicate toasts are ignored");
+
+        for index in 0..6 {
+            app.push_toast(ToastKind::Info, format!("message {index}"));
+        }
+        assert_eq!(app.toasts.len(), 4, "toasts are capped");
         fs::remove_dir_all(&dir).ok();
     }
 

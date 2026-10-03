@@ -12,6 +12,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 
 use crate::app::overlay::{CompletionState, Help, HoverState, Picker, Prompt, Search, SearchField};
+use crate::app::{Toast, ToastKind};
 use crate::commands::CommandRegistry;
 use crate::ui::{art, centered, theme};
 
@@ -589,6 +590,45 @@ pub fn render_search(frame: &mut Frame, area: Rect, search: &Search) {
     let cursor_x = area.x + 7 + cursor_col as u16;
     if cursor_x < area.x + area.width {
         frame.set_cursor_position((cursor_x, cursor_y));
+    }
+}
+
+/// Render notifications stacked above the statusline.
+pub fn render_toasts(frame: &mut Frame, area: Rect, toasts: &[Toast]) {
+    if toasts.is_empty() || area.height < 3 || area.width < 16 {
+        return;
+    }
+    let width = ((area.width as usize) * 2 / 3).clamp(16, 64) as u16;
+    let x = area.x + area.width.saturating_sub(width + 2);
+    let on_panel = Style::default().bg(theme::PANEL_BG);
+
+    for (index, toast) in toasts.iter().rev().take(3).enumerate() {
+        let Some(offset) = area.height.checked_sub(2 + index as u16) else {
+            break;
+        };
+        if offset == 0 {
+            break;
+        }
+        let rect = Rect {
+            x,
+            y: area.y + offset,
+            width,
+            height: 1,
+        };
+        let (glyph, style) = match toast.kind {
+            ToastKind::Success => ("✦", theme::success()),
+            ToastKind::Error => ("●", theme::error()),
+            ToastKind::Info => ("·", theme::info()),
+        };
+        let message = truncate(&toast.message, width.saturating_sub(4) as usize);
+        let pad = (width as usize).saturating_sub(3 + message.chars().count());
+        let line = Line::from(vec![
+            Span::styled(format!(" {glyph} "), style.bg(theme::PANEL_BG)),
+            Span::styled(message, on_panel),
+            Span::styled(" ".repeat(pad), on_panel),
+        ]);
+        frame.render_widget(Clear, rect);
+        frame.render_widget(Paragraph::new(line).style(on_panel), rect);
     }
 }
 
