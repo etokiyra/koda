@@ -6,10 +6,12 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::path::Path;
 
 use crate::language::completion::Completion;
 use crate::language::detection::LanguageDescriptor;
 use crate::language::diagnostics::Diagnostic;
+use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
 use crate::language::symbols::{Location, Symbol};
 
@@ -133,6 +135,13 @@ pub trait LanguageProvider: Send + Sync {
     /// need to contribute what is not already in the document.
     fn completions(&self, _text: &str, _line: usize, _col: usize) -> Vec<Completion> {
         Vec::new()
+    }
+
+    /// Format a document with the language's trusted formatter, if any.
+    ///
+    /// Providers without a formatter return [`FormatOutcome::Unsupported`].
+    fn format(&self, _path: &Path, _text: &str) -> FormatOutcome {
+        FormatOutcome::Unsupported
     }
 
     /// The comment marker used by "toggle comment" and friends.

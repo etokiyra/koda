@@ -65,8 +65,15 @@ The highest-value work. These turn Koda from an editor into an IDE.
 - [x] **Document symbols and symbol navigation** (`Ctrl+Shift+O`). Rust and Go
       providers scan the active file for definitions and offer a filterable
       outline; the chosen symbol is revealed. Heuristic today, LSP symbols later.
-- [ ] **Formatting.** Provider-driven document/selection formatting.
+- [x] **Formatting.** `Ctrl+Shift+I` runs the language's trusted formatter
+      (`rustfmt`, `gofmt`) on a snapshot through the background worker and
+      replaces the buffer as one undoable edit. Reuses system tools and explains
+      what is missing; automatic provisioning is still to come.
 - [ ] **Rename and code actions.**
+- [ ] **Tool provisioning and lifecycle.** Detect the language tooling Koda
+      needs, reuse what is already installed, and fetch compatible tools from
+      trusted sources with integrity checks when appropriate. Basic editing and
+      locally-available language support must keep working offline.
 - [ ] **Rust/Go intelligence backends.** Integrate mature language tooling
       internally (e.g. `rust-analyzer`, `gopls`), auto-discovered and launched by
       Koda. The user must never install or configure an LSP.

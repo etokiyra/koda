@@ -19,6 +19,7 @@ use crate::editor::{Document, Editor, Position, Selection};
 use crate::filesystem;
 use crate::language::completion::{Completion, CompletionKind};
 use crate::language::diagnostics::Severity;
+use crate::language::format::FormatOutcome;
 use crate::language::symbols::is_ident_char as is_word_char;
 use crate::language::{Capability, LanguageId, LanguageService};
 use crate::project::Workspace;
@@ -78,6 +79,10 @@ pub struct App {
     diagnostics_seq: u64,
     /// When set, diagnostics should be recomputed once typing pauses.
     diagnostics_dirty_at: Option<Instant>,
+    /// Monotonic id for format requests.
+    format_seq: u64,
+    /// The format request awaiting a result, if any.
+    pending_format: Option<(PathBuf, u64)>,
 }
 
 impl App {
@@ -118,6 +123,8 @@ impl App {
             close_armed: None,
             diagnostics_seq: 0,
             diagnostics_dirty_at: None,
+            format_seq: 0,
+            pending_format: None,
         };
 
         if let Some(path) = target
@@ -222,6 +229,7 @@ impl App {
                     ('b', _) => self.toggle_tree(),
                     ('e', _) => self.focus_tree(),
                     ('w', _) => self.execute_command(ids::CLOSE_TAB),
+                    ('i', true) => self.execute_command(ids::FORMAT),
                     _ => return false,
                 }
                 true
@@ -711,7 +719,8 @@ impl App {
             ids::NEXT_TAB => self.editor.next_tab(),
             ids::PREV_TAB => self.editor.previous_tab(),
             ids::PALETTE => self.open_command_palette(),
-            ids::FORMAT | ids::RENAME | ids::CODE_ACTIONS => self.report_language_capability(id),
+            ids::RENAME | ids::CODE_ACTIONS => self.report_language_capability(id),
+            ids::FORMAT => self.format_document(),
             ids::GOTO_DEFINITION => self.goto_definition(),
             ids::FIND_REFERENCES => self.find_references(),
             ids::SHOW_SYMBOLS => self.open_symbols(),
@@ -1101,10 +1110,102 @@ impl App {
                 .iter_mut()
                 .find(|doc| same_file(doc.buffer.path.as_deref(), &path))
                 .is_some_and(|doc| doc.apply_diagnostics(revision, diagnostics)),
+            BackgroundEvent::Formatted {
+                path,
+                revision,
+                outcome,
+            } => {
+                let current =
+                    self.pending_format
+                        .as_ref()
+                        .is_some_and(|(pending_path, pending_revision)| {
+                            *pending_path == path && *pending_revision == revision
+                        });
+                if !current {
+                    return false;
+                }
+                self.pending_format = None;
+                self.apply_format_outcome(&path, outcome);
+                true
+            }
             BackgroundEvent::Git(info) => {
                 self.workspace.git = info;
                 true
             }
+        }
+    }
+
+    /// Format the active document with the language's trusted formatter.
+    fn format_document(&mut self) {
+        let (path, language, text) = match self.editor.active_document() {
+            Some(doc) => (
+                doc.buffer.path.clone(),
+                doc.buffer.language,
+                doc.buffer.text(),
+            ),
+            None => return,
+        };
+        let Some(path) = path else {
+            self.set_error("Save the file before formatting");
+            return;
+        };
+        if !self
+            .language
+            .provider(language)
+            .capabilities()
+            .contains(&Capability::Formatting)
+        {
+            self.set_status(format!(
+                "Formatting is not available for {}",
+                language.name()
+            ));
+            return;
+        }
+
+        self.format_seq += 1;
+        let revision = self.format_seq;
+        self.pending_format = Some((path.clone(), revision));
+        self.background.format(path, language, text, revision);
+        self.set_status("Formatting…");
+    }
+
+    /// Apply a formatting result, or explain why it could not run.
+    fn apply_format_outcome(&mut self, path: &Path, outcome: FormatOutcome) {
+        match outcome {
+            FormatOutcome::Formatted(text) => self.apply_formatted(path, &text),
+            FormatOutcome::Unsupported => {
+                self.set_status("Formatting is not available for this language")
+            }
+            FormatOutcome::ToolMissing { tool, hint } => {
+                self.set_error(format!("{tool} not found — {hint}"))
+            }
+            FormatOutcome::Failed(message) => self.set_error(format!("Format failed: {message}")),
+        }
+    }
+
+    /// Replace the buffer with formatted text as a single undoable edit.
+    fn apply_formatted(&mut self, path: &Path, text: &str) {
+        let applied = if let Some(doc) = self
+            .editor
+            .documents
+            .iter_mut()
+            .find(|doc| same_file(doc.buffer.path.as_deref(), path))
+        {
+            let cursor = doc.clamped_cursor();
+            let last = doc.buffer.len_lines().saturating_sub(1);
+            let end = Position::new(last, doc.buffer.line_char_len(last));
+            doc.replace_range(Position::zero(), end, text);
+            doc.cursor = doc.buffer.clamp_position(cursor);
+            true
+        } else {
+            false
+        };
+
+        if applied {
+            self.after_edit();
+            self.set_status("Formatted");
+        } else {
+            self.set_status("File is no longer open");
         }
     }
 
@@ -1710,7 +1811,6 @@ impl App {
 
     fn report_language_capability(&mut self, id: &str) {
         let (capability, label) = match id {
-            ids::FORMAT => (Capability::Formatting, "Formatting"),
             ids::RENAME => (Capability::Rename, "Rename"),
             ids::CODE_ACTIONS => (Capability::CodeActions, "Code actions"),
             _ => return,
@@ -1913,9 +2013,10 @@ mod tests {
         };
 
         assert!(find("File: Save").expect("save").enabled);
+        assert!(find("Format Document").expect("format").enabled);
         assert!(
-            !find("Format Document").expect("format").enabled,
-            "formatting is not available for Rust yet"
+            !find("Rename Symbol").expect("rename").enabled,
+            "rename is not available for Rust yet"
         );
         fs::remove_dir_all(&dir).ok();
     }
@@ -2177,6 +2278,74 @@ mod tests {
         app.execute_command(ids::COMPLETE);
         let state = app.completion.as_ref().expect("completion should open");
         assert!(state.items.iter().any(|item| item.label == "fn"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn formatting_replaces_the_buffer_as_one_edit() {
+        let dir = temp_project("format");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main(){let x=1;}\n").unwrap();
+
+        let mut app = App::new(Some(&file)).unwrap();
+        let before = app.editor.active_document().unwrap().buffer.text();
+        app.apply_formatted(&file, "fn main() {\n    let x = 1;\n}\n");
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.text(),
+            "fn main() {\n    let x = 1;\n}\n"
+        );
+        assert!(app.editor.active_document().unwrap().is_dirty());
+
+        app.with_doc(|doc| doc.undo());
+        assert_eq!(app.editor.active_document().unwrap().buffer.text(), before);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn formatting_is_unavailable_for_plain_text() {
+        let dir = temp_project("format-plain");
+        let file = dir.join("notes.txt");
+        fs::write(&file, "hello\n").unwrap();
+
+        let mut app = App::new(Some(&file)).unwrap();
+        app.format_document();
+        assert!(
+            app.pending_format.is_none(),
+            "plain text has no formatter, so no request should be sent"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn format_document_runs_the_formatter() {
+        if std::process::Command::new("rustfmt")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return; // Skip when rustfmt is unavailable.
+        }
+        let dir = temp_project("format-flow");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main(){let x=1;}\n").unwrap();
+
+        let mut app = App::new(Some(&file)).unwrap();
+        app.format_document();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            app.apply_background_events();
+            if app.pending_format.is_none() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        let text = app.editor.active_document().unwrap().buffer.text();
+        assert!(
+            text.contains("fn main() {") && text.contains("    let x = 1;"),
+            "expected formatted output, got:\n{text}"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 }

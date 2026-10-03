@@ -7,10 +7,13 @@
 use crate::language::completion::{Completion, CompletionKind};
 use crate::language::detection::LanguageDescriptor;
 use crate::language::diagnostics::Diagnostic;
+use crate::language::format::{FormatOutcome, rustfmt};
 use crate::language::id::LanguageId;
 use crate::language::provider::{
     Capability, HighlightSpan, HighlightState, LanguageProvider, TokenKind,
 };
+
+use std::path::Path;
 
 const KEYWORDS: &[&str] = &[
     "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
@@ -57,6 +60,7 @@ impl LanguageProvider for RustProvider {
             Capability::GotoDefinition,
             Capability::GotoReference,
             Capability::Completion,
+            Capability::Formatting,
         ]
     }
 
@@ -110,6 +114,10 @@ impl LanguageProvider for RustProvider {
                 .map(|word| Completion::new(*word, CompletionKind::Constant)),
         );
         completions
+    }
+
+    fn format(&self, path: &Path, text: &str) -> FormatOutcome {
+        rustfmt(path, text)
     }
 
     fn line_comment(&self) -> &'static str {

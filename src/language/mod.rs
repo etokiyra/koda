@@ -12,6 +12,7 @@
 pub mod completion;
 pub mod detection;
 pub mod diagnostics;
+pub mod format;
 pub mod go;
 pub mod id;
 pub mod provider;

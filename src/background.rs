@@ -18,6 +18,7 @@ use crate::git::GitInfo;
 use crate::language::LanguageService;
 use crate::language::detection::Confidence;
 use crate::language::diagnostics::Diagnostic;
+use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
 
 /// Work sent to the background thread.
@@ -26,6 +27,13 @@ enum Request {
     Detect { path: PathBuf, markers: Vec<String> },
     /// Compute diagnostics for a document snapshot.
     Diagnostics {
+        path: PathBuf,
+        language: LanguageId,
+        text: String,
+        revision: u64,
+    },
+    /// Format a document snapshot with the language's formatter.
+    Format {
         path: PathBuf,
         language: LanguageId,
         text: String,
@@ -46,6 +54,11 @@ pub enum Event {
         path: PathBuf,
         revision: u64,
         diagnostics: Vec<Diagnostic>,
+    },
+    Formatted {
+        path: PathBuf,
+        revision: u64,
+        outcome: FormatOutcome,
     },
     Git(GitInfo),
 }
@@ -88,6 +101,19 @@ impl Background {
                                 diagnostics,
                             });
                         }
+                        Request::Format {
+                            path,
+                            language: id,
+                            text,
+                            revision,
+                        } => {
+                            let outcome = language.provider(id).format(&path, &text);
+                            let _ = event_tx.send(Event::Formatted {
+                                path,
+                                revision,
+                                outcome,
+                            });
+                        }
                         Request::RefreshGit { root } => {
                             let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
                         }
@@ -111,6 +137,16 @@ impl Background {
     /// `revision` lets the app discard results that arrive out of order.
     pub fn diagnose(&self, path: PathBuf, language: LanguageId, text: String, revision: u64) {
         let _ = self.requests.send(Request::Diagnostics {
+            path,
+            language,
+            text,
+            revision,
+        });
+    }
+
+    /// Ask for a document snapshot to be formatted.
+    pub fn format(&self, path: PathBuf, language: LanguageId, text: String, revision: u64) {
+        let _ = self.requests.send(Request::Format {
             path,
             language,
             text,

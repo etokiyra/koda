@@ -47,6 +47,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   buffer. It filters as you type, navigates with the arrows and accepts with
   `Enter`/`Tab` or dismisses with `Esc`. Buffer completion works for any
   language; language servers can supply richer candidates later.
+- Added formatting. **Format Document** (`Ctrl+Shift+I`) runs the language's
+  trusted formatter (`rustfmt` for Rust, `gofmt` for Go) on a buffer snapshot
+  through the background worker, then replaces the buffer as a single undoable
+  edit. Koda reads the Rust edition from the nearest `Cargo.toml`. The tools are
+  reused from the system; if one is missing Koda says exactly what to install
+  instead of failing silently. Automatic tool provisioning is not implemented
+  yet.
 
 ### Performance
 

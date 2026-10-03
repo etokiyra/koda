@@ -186,8 +186,8 @@ impl CommandRegistry {
             )
             .describes("Duplicate the current line")
             .needs_doc(),
-            Command::new(FORMAT, "Format Document", "Language", None)
-                .describes("Format the active file with its language provider")
+            Command::new(FORMAT, "Format Document", "Language", Some("Ctrl+Shift+I"))
+                .describes("Format the active file with its language formatter")
                 .needs_doc()
                 .capability(Capability::Formatting),
             Command::new(GOTO_DEFINITION, "Go to Definition", "Language", Some("F12"))

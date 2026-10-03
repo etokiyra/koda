@@ -7,10 +7,13 @@
 use crate::language::completion::{Completion, CompletionKind};
 use crate::language::detection::LanguageDescriptor;
 use crate::language::diagnostics::Diagnostic;
+use crate::language::format::{FormatOutcome, gofmt};
 use crate::language::id::LanguageId;
 use crate::language::provider::{
     Capability, HighlightSpan, HighlightState, LanguageProvider, TokenKind,
 };
+
+use std::path::Path;
 
 const KEYWORDS: &[&str] = &[
     "break",
@@ -101,6 +104,7 @@ impl LanguageProvider for GoProvider {
             Capability::GotoDefinition,
             Capability::GotoReference,
             Capability::Completion,
+            Capability::Formatting,
         ]
     }
 
@@ -159,6 +163,10 @@ impl LanguageProvider for GoProvider {
                 .map(|word| Completion::new(*word, CompletionKind::Constant)),
         );
         completions
+    }
+
+    fn format(&self, _path: &Path, text: &str) -> FormatOutcome {
+        gofmt(text)
     }
 
     fn line_comment(&self) -> &'static str {
