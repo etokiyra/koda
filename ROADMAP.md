@@ -23,6 +23,7 @@ Rust → solid
 Go   → solid
 Python → built-in, offline
 Shell  → built-in, offline
+TypeScript / JavaScript → built-in, offline
 then expand
 ```
 
@@ -168,6 +169,10 @@ command palette already reports which are available. Filling them in is additive
       richer analysis.
 - [x] Shell support (bash/zsh/sh): built-in highlighting, symbols, completion,
       hover and navigation, with optional `bash-language-server` provisioning.
+- [x] TypeScript and JavaScript support: one built-in, offline scanner for
+      highlighting (including block comments and template literals), structural
+      diagnostics, symbols, completion, hover and navigation, with
+      `typescript-language-server` provisioned for rename and code actions.
 - [x] `.gitignore`-aware file tree and quick open. A dependency-free matcher
       reads root and nested `.gitignore` files plus `.git/info/exclude`, and
       hides ignored paths from the tree, quick open, the inline filter and

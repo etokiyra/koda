@@ -7051,6 +7051,37 @@ done
     }
 
     #[test]
+    fn detects_typescript_and_javascript() {
+        let dir = temp_project("web-langs");
+        let cases = [
+            (
+                "app.ts",
+                "export const total: number = 1;\n",
+                LanguageId::TypeScript,
+            ),
+            (
+                "view.tsx",
+                "export const App = () => null;\n",
+                LanguageId::TypeScript,
+            ),
+            ("index.js", "const total = 1;\n", LanguageId::JavaScript),
+            (
+                "component.jsx",
+                "export default function App() { return null; }\n",
+                LanguageId::JavaScript,
+            ),
+        ];
+        for (name, content, expected) in cases {
+            let file = dir.join(name);
+            fs::write(&file, content).unwrap();
+            let app = app_with_file(&file);
+            let language = app.editor.active_document().unwrap().buffer.language;
+            assert_eq!(language, expected, "detected {name} as {language:?}");
+        }
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn detects_python_from_extension_and_shebang() {
         let dir = temp_project("python");
         let file = dir.join("app.py");

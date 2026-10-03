@@ -22,6 +22,7 @@ pub enum Tool {
     Gopls,
     Pylsp,
     BashLs,
+    TypeScriptLs,
     Rustfmt,
     Gofmt,
 }
@@ -40,6 +41,7 @@ impl Tool {
         Tool::Gopls,
         Tool::Pylsp,
         Tool::BashLs,
+        Tool::TypeScriptLs,
         Tool::Rustfmt,
         Tool::Gofmt,
     ];
@@ -50,6 +52,7 @@ impl Tool {
             Tool::Gopls => "gopls",
             Tool::Pylsp => "pylsp",
             Tool::BashLs => "bash-language-server",
+            Tool::TypeScriptLs => "typescript-language-server",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
         }
@@ -61,6 +64,7 @@ impl Tool {
             Tool::Gopls => "gopls",
             Tool::Pylsp => "pylsp",
             Tool::BashLs => "bash-language-server",
+            Tool::TypeScriptLs => "typescript-language-server",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
         }
@@ -72,12 +76,20 @@ impl Tool {
             Tool::Gopls | Tool::Gofmt => LanguageId::Go,
             Tool::Pylsp => LanguageId::Python,
             Tool::BashLs => LanguageId::Shell,
+            Tool::TypeScriptLs => LanguageId::TypeScript,
         }
+    }
+
+    /// Whether this tool serves `language`. The TypeScript server also handles
+    /// JavaScript.
+    pub fn serves(self, language: LanguageId) -> bool {
+        self.language() == language
+            || (self == Tool::TypeScriptLs && language == LanguageId::JavaScript)
     }
 
     pub fn purpose(self) -> ToolPurpose {
         match self {
-            Tool::RustAnalyzer | Tool::Gopls | Tool::Pylsp | Tool::BashLs => {
+            Tool::RustAnalyzer | Tool::Gopls | Tool::Pylsp | Tool::BashLs | Tool::TypeScriptLs => {
                 ToolPurpose::LanguageServer
             }
             Tool::Rustfmt | Tool::Gofmt => ToolPurpose::Formatter,
@@ -88,7 +100,11 @@ impl Tool {
     /// flag, so it is probed with no arguments against empty stdin.
     fn version_args(self) -> &'static [&'static str] {
         match self {
-            Tool::RustAnalyzer | Tool::Rustfmt | Tool::Pylsp | Tool::BashLs => &["--version"],
+            Tool::RustAnalyzer
+            | Tool::Rustfmt
+            | Tool::Pylsp
+            | Tool::BashLs
+            | Tool::TypeScriptLs => &["--version"],
             Tool::Gopls => &["version"],
             Tool::Gofmt => &[],
         }
@@ -99,6 +115,8 @@ impl Tool {
         match self {
             // `bash-language-server` needs its `start` subcommand.
             Tool::BashLs => &["start"],
+            // `typescript-language-server` speaks stdio when asked.
+            Tool::TypeScriptLs => &["--stdio"],
             _ => &[],
         }
     }
@@ -110,6 +128,7 @@ impl Tool {
             Tool::Gopls => "install with `go install golang.org/x/tools/gopls@latest`",
             Tool::Pylsp => "install `python-lsp-server` into a Koda-managed environment",
             Tool::BashLs => "install with `npm` — Koda uses a user-local prefix",
+            Tool::TypeScriptLs => "install with `npm` — Koda uses a user-local prefix",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
         }
@@ -120,7 +139,7 @@ impl Tool {
         Tool::ALL
             .iter()
             .copied()
-            .find(|tool| tool.language() == language && tool.purpose() == purpose)
+            .find(|tool| tool.serves(language) && tool.purpose() == purpose)
     }
 
     /// The preferred install command, when one exists.
@@ -135,6 +154,10 @@ impl Tool {
             Tool::Gopls => Some(("go", &["install", "golang.org/x/tools/gopls@latest"])),
             Tool::Pylsp => Some(("pipx", &["install", "python-lsp-server"])),
             Tool::BashLs => Some(("npm", &["install", "-g", "bash-language-server"])),
+            Tool::TypeScriptLs => Some((
+                "npm",
+                &["install", "-g", "typescript-language-server", "typescript"],
+            )),
             Tool::Gofmt => None,
         }
     }
@@ -146,7 +169,7 @@ impl Tool {
             Tool::RustAnalyzer | Tool::Rustfmt => &["rustup"],
             Tool::Gopls | Tool::Gofmt => &["go"],
             Tool::Pylsp => &["python3"],
-            Tool::BashLs => &["npm"],
+            Tool::BashLs | Tool::TypeScriptLs => &["npm"],
         }
     }
 
@@ -176,7 +199,8 @@ impl Tool {
                 InstallCommand::new("go", &["install", "golang.org/x/tools/gopls@latest"]),
             )],
             Tool::Pylsp => python_attempts(),
-            Tool::BashLs => bash_ls_attempts(),
+            Tool::BashLs => npm_attempts(&["bash-language-server"]),
+            Tool::TypeScriptLs => npm_attempts(&["typescript-language-server", "typescript"]),
             // `gofmt` ships with the Go toolchain; there is nothing to install.
             Tool::Gofmt => Vec::new(),
         }
@@ -344,35 +368,35 @@ fn python_attempts() -> Vec<InstallAttempt> {
     attempts
 }
 
-/// Strategies for installing the Shell language server with npm.
-fn bash_ls_attempts() -> Vec<InstallAttempt> {
+/// Strategies for installing an npm package into a user-local prefix.
+fn npm_attempts(packages: &[&str]) -> Vec<InstallAttempt> {
     let mut attempts = Vec::new();
     if let Some(prefix) = npm_prefix() {
         // A user-local prefix and cache: `npm install -g` into a root-owned
         // prefix, or a `~/.npm` left root-owned by a past `sudo npm`, would
         // otherwise fail with EACCES.
         let cache = prefix.with_file_name("npm-cache");
+        let mut args = vec![
+            "install".to_string(),
+            "-g".to_string(),
+            "--prefix".to_string(),
+            prefix.to_string_lossy().into_owned(),
+            "--cache".to_string(),
+            cache.to_string_lossy().into_owned(),
+        ];
+        args.extend(packages.iter().map(|package| (*package).to_string()));
         attempts.push(InstallAttempt::one(
             "npm (user-local prefix)",
-            InstallCommand::with_args(
-                "npm",
-                vec![
-                    "install".into(),
-                    "-g".into(),
-                    "--prefix".into(),
-                    prefix.to_string_lossy().into_owned(),
-                    "--cache".into(),
-                    cache.to_string_lossy().into_owned(),
-                    "bash-language-server".into(),
-                ],
-            ),
+            InstallCommand::with_args("npm", args),
         ));
     }
     // Fall back to whatever global prefix the user's npm (nvm, fnm, volta, …)
     // already uses.
+    let mut args = vec!["install".to_string(), "-g".to_string()];
+    args.extend(packages.iter().map(|package| (*package).to_string()));
     attempts.push(InstallAttempt::one(
         "npm",
-        InstallCommand::new("npm", &["install", "-g", "bash-language-server"]),
+        InstallCommand::with_args("npm", args),
     ));
     attempts
 }
@@ -658,7 +682,11 @@ mod tests {
             assert!(!tool.install_hint().is_empty());
             assert!(matches!(
                 tool.language(),
-                LanguageId::Rust | LanguageId::Go | LanguageId::Python | LanguageId::Shell
+                LanguageId::Rust
+                    | LanguageId::Go
+                    | LanguageId::Python
+                    | LanguageId::Shell
+                    | LanguageId::TypeScript
             ));
         }
     }
@@ -666,6 +694,30 @@ mod tests {
     #[test]
     fn unknown_program_is_not_located() {
         assert!(locate("koda-definitely-not-a-real-tool").is_none());
+    }
+
+    #[test]
+    fn typescript_tool_serves_javascript_and_installs_user_locally() {
+        assert!(Tool::TypeScriptLs.serves(LanguageId::TypeScript));
+        assert!(Tool::TypeScriptLs.serves(LanguageId::JavaScript));
+        assert_eq!(
+            Tool::for_language(LanguageId::JavaScript, ToolPurpose::LanguageServer),
+            Some(Tool::TypeScriptLs)
+        );
+
+        let attempts = Tool::TypeScriptLs.install_attempts();
+        assert!(
+            attempts
+                .iter()
+                .any(|attempt| attempt.commands.iter().any(|command| {
+                    command.args.iter().any(|arg| arg == "--prefix")
+                        && command
+                            .args
+                            .iter()
+                            .any(|arg| arg == "typescript-language-server")
+                })),
+            "TypeScript should install with npm into Koda's own prefix: {attempts:?}"
+        );
     }
 
     #[test]

@@ -23,6 +23,10 @@ pub enum LanguageId {
     Toml,
     /// YAML configuration.
     Yaml,
+    /// TypeScript source (and `.tsx`).
+    TypeScript,
+    /// JavaScript source (and `.jsx`), including ES modules.
+    JavaScript,
     /// Used when detection could not reach a confident answer.
     #[default]
     Unknown,
@@ -30,7 +34,7 @@ pub enum LanguageId {
 
 impl LanguageId {
     /// Every language Koda understands today. Keep this in sync with [`crate::language::provider`].
-    pub const ALL: [LanguageId; 8] = [
+    pub const ALL: [LanguageId; 10] = [
         LanguageId::Rust,
         LanguageId::Go,
         LanguageId::Python,
@@ -39,6 +43,8 @@ impl LanguageId {
         LanguageId::Json,
         LanguageId::Toml,
         LanguageId::Yaml,
+        LanguageId::TypeScript,
+        LanguageId::JavaScript,
     ];
 
     /// A human readable display name.
@@ -52,6 +58,8 @@ impl LanguageId {
             LanguageId::Json => "JSON",
             LanguageId::Toml => "TOML",
             LanguageId::Yaml => "YAML",
+            LanguageId::TypeScript => "TypeScript",
+            LanguageId::JavaScript => "JavaScript",
             LanguageId::Unknown => "Plain Text",
         }
     }
@@ -67,6 +75,8 @@ impl LanguageId {
             LanguageId::Json => "json",
             LanguageId::Toml => "toml",
             LanguageId::Yaml => "yaml",
+            LanguageId::TypeScript => "typescript",
+            LanguageId::JavaScript => "javascript",
             LanguageId::Unknown => "text",
         }
     }

@@ -42,6 +42,8 @@ mod tests {
                 LanguageId::Json => &["json"],
                 LanguageId::Toml => &["toml"],
                 LanguageId::Yaml => &["yaml", "yml"],
+                LanguageId::TypeScript => &["ts", "tsx"],
+                LanguageId::JavaScript => &["js", "jsx"],
                 LanguageId::Unknown => &[],
             },
             project_markers: match id {

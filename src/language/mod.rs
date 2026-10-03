@@ -27,6 +27,7 @@ pub mod shell;
 pub mod symbols;
 pub mod toml;
 pub mod tools;
+pub mod web;
 pub mod yaml;
 
 use std::path::Path;

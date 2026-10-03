@@ -64,7 +64,21 @@ pub fn lsp_language_id(language: LanguageId) -> &'static str {
         LanguageId::Json => "json",
         LanguageId::Toml => "toml",
         LanguageId::Yaml => "yaml",
+        LanguageId::TypeScript => "typescript",
+        LanguageId::JavaScript => "javascript",
         _ => "plaintext",
+    }
+}
+
+/// The `languageId` for a specific file, refining TSX/JSX to their React ids.
+fn language_id_for(language: LanguageId, path: &Path) -> &'static str {
+    match (
+        language,
+        path.extension().and_then(|extension| extension.to_str()),
+    ) {
+        (LanguageId::TypeScript, Some("tsx")) => "typescriptreact",
+        (LanguageId::JavaScript, Some("jsx")) => "javascriptreact",
+        _ => lsp_language_id(language),
     }
 }
 
@@ -294,7 +308,7 @@ impl Server {
             json!({
                 "textDocument": {
                     "uri": path_to_uri(path),
-                    "languageId": lsp_language_id(self.language),
+                    "languageId": language_id_for(self.language, path),
                     "version": version,
                     "text": text
                 }

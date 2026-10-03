@@ -52,6 +52,7 @@ src/
 │   ├── go/mod.rs         # Go provider
 │   ├── python/mod.rs     # Python provider
 │   ├── shell/mod.rs      # Shell provider
+│   ├── web/mod.rs        # TypeScript/JavaScript provider
 │   ├── markdown/mod.rs   # Markdown provider
 │   ├── json/mod.rs       # JSON provider
 │   ├── toml/mod.rs       # TOML provider

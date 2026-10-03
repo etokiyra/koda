@@ -218,6 +218,8 @@ impl ProviderRegistry {
         registry.register(Box::new(crate::language::json::JsonProvider));
         registry.register(Box::new(crate::language::toml::TomlProvider));
         registry.register(Box::new(crate::language::yaml::YamlProvider));
+        registry.register(Box::new(crate::language::web::WebProvider::typescript()));
+        registry.register(Box::new(crate::language::web::WebProvider::javascript()));
         registry
     }
 

@@ -125,6 +125,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Language support
 
+- Added **TypeScript** and **JavaScript** support. Both share one built-in,
+  offline scanner: highlighting for comments, block comments (carried across
+  lines), strings, template literals, numbers, keywords, types and decorators;
+  structural diagnostics; symbols (functions, classes, interfaces, type aliases,
+  enums, constants and namespaces); completion, hover and within-file
+  navigation. Detection understands `.ts`, `.tsx`, `.mts`, `.cts` and
+  `.js`, `.jsx`, `.mjs`, `.cjs`. `typescript-language-server` is provisioned
+  through Koda's user-local npm prefix for rename, code actions and type-aware
+  analysis.
 - Added **Shell** support (bash, zsh and POSIX sh): built-in highlighting for
   comments, strings, variables and expansions, keywords, builtins and function
   definitions, plus symbols, completion, hover and navigation. A
