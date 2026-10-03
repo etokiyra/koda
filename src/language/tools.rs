@@ -2112,6 +2112,40 @@ mod tests {
     }
 
     #[test]
+    fn kotlin_uses_a_dedicated_jdk_21() {
+        // The Kotlin plan must fetch JDK 21, while jdtls keeps JDK 25.
+        let attempts = Tool::KotlinLs.install_attempts();
+        let steps = &attempts.first().expect("a Kotlin plan").steps;
+        assert!(
+            steps
+                .iter()
+                .any(|step| matches!(step, InstallStep::AdoptiumJdk { feature: 21, .. })),
+            "Kotlin must install a JDK 21: {steps:?}"
+        );
+        let jdtls = Tool::Jdtls.install_attempts();
+        assert!(
+            jdtls
+                .first()
+                .expect("a jdtls plan")
+                .steps
+                .iter()
+                .any(|step| matches!(step, InstallStep::AdoptiumJdk { feature: 25, .. })),
+            "jdtls must keep its JDK 25"
+        );
+        // They live in separate directories and the launcher points Kotlin at
+        // its own JAVA_HOME.
+        assert!(tools_dir().is_some());
+        assert_ne!(kotlin_jdk_dir(), jdtls_dir());
+        let env = launch_env(Tool::KotlinLs);
+        let java_home = env
+            .iter()
+            .find(|(key, _)| key == "JAVA_HOME")
+            .map(|(_, value)| value.clone())
+            .expect("Kotlin launch sets JAVA_HOME");
+        assert_eq!(Some(PathBuf::from(java_home)), kotlin_jdk_dir());
+    }
+
+    #[test]
     fn unknown_program_is_not_located() {
         assert!(locate("koda-definitely-not-a-real-tool").is_none());
     }
