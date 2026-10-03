@@ -10,6 +10,7 @@ use std::ops::Range;
 use crate::language::detection::LanguageDescriptor;
 use crate::language::diagnostics::Diagnostic;
 use crate::language::id::LanguageId;
+use crate::language::symbols::Symbol;
 
 /// A feature a provider may offer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -104,6 +105,13 @@ pub trait LanguageProvider: Send + Sync {
     /// Providers that cannot analyse need not override this; returning nothing
     /// simply means the provider contributes no diagnostics.
     fn diagnostics(&self, _text: &str) -> Vec<Diagnostic> {
+        Vec::new()
+    }
+
+    /// Named definitions in a document, for the symbol outline.
+    ///
+    /// Providers without symbol support return nothing.
+    fn symbols(&self, _text: &str) -> Vec<Symbol> {
         Vec::new()
     }
 

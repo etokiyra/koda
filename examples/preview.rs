@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! cargo run --example preview -- [width] [height] [mode]
-//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics
+//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols
 //! ```
 
 use koda::app::App;
@@ -106,6 +106,11 @@ fn main() {
                 doc.move_to(koda::editor::Position::new(1, 17));
             }
             app.clear_status();
+            app
+        }
+        "symbols" => {
+            let mut app = App::new(Some(&root.join("src/ui/editor.rs"))).expect("app");
+            app.execute_command(ids::SHOW_SYMBOLS);
             app
         }
         _ => App::new(Some(&root)).expect("app"),

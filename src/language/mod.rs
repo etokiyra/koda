@@ -15,6 +15,7 @@ pub mod go;
 pub mod id;
 pub mod provider;
 pub mod rust;
+pub mod symbols;
 
 use std::path::Path;
 

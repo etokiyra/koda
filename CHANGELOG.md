@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New commands: **Next Diagnostic** (`F8`), **Previous Diagnostic**
   (`Shift+F8`) and **Show Diagnostics**, which lists every problem across open
   files and jumps to the chosen one.
+- Added document symbols. **Go to Symbol…** (`Ctrl+Shift+O`) lists the Rust and
+  Go definitions in the active file (functions, methods, structs, enums, traits,
+  interfaces, modules, types, constants and macros) and jumps to the chosen one.
+  Extraction is a lightweight provider scan; language-server symbols can replace
+  it later without changing the UI.
 
 ### Performance
 

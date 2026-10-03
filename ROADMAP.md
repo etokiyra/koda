@@ -58,7 +58,9 @@ The highest-value work. These turn Koda from an editor into an IDE.
       acceptance via `Tab`/`Enter`.
 - [ ] **Hover information.** Show type/docs for the symbol under the cursor.
 - [ ] **Go-to-definition and references.** Jump within and across files.
-- [ ] **Document symbols and symbol navigation** (`Ctrl+Shift+O`).
+- [x] **Document symbols and symbol navigation** (`Ctrl+Shift+O`). Rust and Go
+      providers scan the active file for definitions and offer a filterable
+      outline; the chosen symbol is revealed. Heuristic today, LSP symbols later.
 - [ ] **Formatting.** Provider-driven document/selection formatting.
 - [ ] **Rename and code actions.**
 - [ ] **Rust/Go intelligence backends.** Integrate mature language tooling

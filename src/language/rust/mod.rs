@@ -49,11 +49,19 @@ impl LanguageProvider for RustProvider {
     }
 
     fn capabilities(&self) -> &'static [Capability] {
-        &[Capability::SyntaxHighlighting, Capability::Diagnostics]
+        &[
+            Capability::SyntaxHighlighting,
+            Capability::Diagnostics,
+            Capability::DocumentSymbols,
+        ]
     }
 
     fn diagnostics(&self, text: &str) -> Vec<Diagnostic> {
         crate::language::diagnostics::check_delimiters(self, text)
+    }
+
+    fn symbols(&self, text: &str) -> Vec<crate::language::symbols::Symbol> {
+        crate::language::symbols::rust_symbols(text)
     }
 
     fn line_comment(&self) -> &'static str {

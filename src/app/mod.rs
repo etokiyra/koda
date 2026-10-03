@@ -550,9 +550,9 @@ impl App {
             ids::FORMAT
             | ids::GOTO_DEFINITION
             | ids::FIND_REFERENCES
-            | ids::SHOW_SYMBOLS
             | ids::RENAME
             | ids::CODE_ACTIONS => self.report_language_capability(id),
+            ids::SHOW_SYMBOLS => self.open_symbols(),
             ids::DIAGNOSTICS_NEXT => self.goto_diagnostic(1),
             ids::DIAGNOSTICS_PREV => self.goto_diagnostic(-1),
             ids::DIAGNOSTICS_LIST => self.open_diagnostics_list(),
@@ -1104,6 +1104,48 @@ impl App {
             doc.move_to(position);
             doc.scroll_top = position.row.saturating_sub(center);
         });
+    }
+
+    /// List the active document's definitions and jump to the chosen one.
+    fn open_symbols(&mut self) {
+        let (path, language, file, text) = match self.editor.active_document() {
+            Some(doc) => (
+                doc.buffer.path.clone(),
+                doc.buffer.language,
+                doc.file_name(),
+                doc.buffer.text(),
+            ),
+            None => return,
+        };
+        let Some(path) = path else {
+            self.set_status("Symbols need a saved file");
+            return;
+        };
+
+        let symbols = self.language.provider(language).symbols(&text);
+        if symbols.is_empty() {
+            self.set_status(format!("No symbols found in {file}"));
+            return;
+        }
+
+        let items = symbols
+            .into_iter()
+            .map(|symbol| {
+                let position = Position::new(symbol.line, symbol.col);
+                let detail = format!("{}  ·  {file}:{}", symbol.kind.label(), symbol.line + 1);
+                PickerItem::new(
+                    symbol.name,
+                    detail,
+                    PickerAction::Reveal {
+                        path: path.clone(),
+                        position,
+                    },
+                )
+            })
+            .collect();
+        let mut picker = Picker::new("Symbols", "Filter symbols…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
     }
 
     /// Wait up to `timeout` for startup background work to settle.
@@ -1773,6 +1815,25 @@ mod tests {
             panic!("expected the diagnostics list");
         };
         assert!(!picker.filtered.is_empty());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn symbol_outline_lists_definitions() {
+        let dir = temp_project("symbols");
+        let file = dir.join("src/main.rs");
+
+        let mut app = App::new(Some(&file)).unwrap();
+        app.execute_command(ids::SHOW_SYMBOLS);
+
+        let Overlay::Picker(picker) = &app.overlay else {
+            panic!("expected the symbol list");
+        };
+        let labels: Vec<String> = (0..picker.filtered.len())
+            .filter_map(|index| picker.item(index))
+            .map(|item| item.label.clone())
+            .collect();
+        assert!(labels.iter().any(|label| label == "main"));
         fs::remove_dir_all(&dir).ok();
     }
 }
