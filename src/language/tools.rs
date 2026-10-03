@@ -2594,28 +2594,30 @@ pub fn launch_env(tool: Tool) -> Vec<(String, String)> {
                 env.push(("PATH".to_string(), prepend_path(&format!("{lib}/bin"))));
             }
         }
-        // ElixirLS is a shell launcher that runs `elixir`; it needs the managed
-        // OTP and Elixir runtimes on `PATH` and a private Mix/Hex home so the
-        // user's `~/.mix` and `~/.hex` are never touched.
+        // ElixirLS is a shell launcher that runs `elixir`; when Koda installed
+        // it, it needs the managed OTP and Elixir runtimes on `PATH` and a
+        // private Mix/Hex home so the user's `~/.mix` is never touched. A
+        // system-provided ElixirLS is left on the user's own environment.
         Tool::ElixirLs => {
-            let mut bins: Vec<String> = Vec::new();
-            if let Some(dir) = elixir_ls_dir() {
-                bins.push(dir.to_string_lossy().into_owned());
-            }
-            if let Some(dir) = elixir_dir() {
-                bins.push(dir.join("bin").to_string_lossy().into_owned());
-            }
-            if let Some(dir) = otp_dir() {
-                bins.push(dir.join("bin").to_string_lossy().into_owned());
-            }
-            if !bins.is_empty() {
-                let joined = bins.join(":");
-                env.push(("PATH".to_string(), prepend_colon(&joined)));
-            }
-            if let Some(home) = mix_home() {
-                let home = home.to_string_lossy().into_owned();
-                env.push(("MIX_HOME".to_string(), home.clone()));
-                env.push(("HEX_HOME".to_string(), home));
+            if elixir_ls_dir().is_some_and(|dir| dir.is_dir()) {
+                let mut bins: Vec<String> = Vec::new();
+                if let Some(dir) = elixir_ls_dir() {
+                    bins.push(dir.to_string_lossy().into_owned());
+                }
+                if let Some(dir) = elixir_dir() {
+                    bins.push(dir.join("bin").to_string_lossy().into_owned());
+                }
+                if let Some(dir) = otp_dir() {
+                    bins.push(dir.join("bin").to_string_lossy().into_owned());
+                }
+                if !bins.is_empty() {
+                    env.push(("PATH".to_string(), prepend_colon(&bins.join(":"))));
+                }
+                if let Some(home) = mix_home() {
+                    let home = home.to_string_lossy().into_owned();
+                    env.push(("MIX_HOME".to_string(), home.clone()));
+                    env.push(("HEX_HOME".to_string(), home));
+                }
             }
         }
         // The managed Swift toolchain's `sourcekit-lsp` finds its sibling
