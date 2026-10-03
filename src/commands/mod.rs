@@ -30,6 +30,7 @@ pub mod ids {
     pub const COMPLETE: &str = "edit.complete";
     pub const FIND: &str = "edit.find";
     pub const REPLACE: &str = "edit.replace";
+    pub const REPLACE_ALL: &str = "edit.replaceAll";
     pub const GOTO_LINE: &str = "edit.gotoLine";
     pub const TOGGLE_COMMENT: &str = "edit.toggleComment";
     pub const INDENT: &str = "edit.indent";
@@ -186,6 +187,9 @@ impl CommandRegistry {
                 .needs_doc(),
             Command::new(REPLACE, "Replace", "Edit", Some("Ctrl+H"))
                 .describes("Search and replace in the active file")
+                .needs_doc(),
+            Command::new(REPLACE_ALL, "Replace All", "Edit", Some("Alt+Enter"))
+                .describes("Replace every match in the active file")
                 .needs_doc(),
             Command::new(GOTO_LINE, "Go to Line…", "Edit", Some("Ctrl+G"))
                 .describes("Jump to a line number")

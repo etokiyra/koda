@@ -801,6 +801,10 @@ impl App {
                     'r' => self.search.regex = !self.search.regex,
                     _ => return,
                 },
+                KeyCode::Enter => {
+                    self.replace_all();
+                    return;
+                }
                 _ => return,
             }
             self.refresh_search_matches();
@@ -1069,6 +1073,7 @@ impl App {
             ids::GIT_COMMIT => self.commit_changes(),
             ids::FIND => self.open_search(false),
             ids::REPLACE => self.open_search(true),
+            ids::REPLACE_ALL => self.replace_all(),
             ids::GOTO_LINE => self.open_prompt(PromptKind::GotoLine, "Go to line", "42"),
             ids::TOGGLE_COMMENT => self.toggle_comment(),
             ids::INDENT => self.with_doc(|d| d.indent()),
@@ -3213,6 +3218,66 @@ impl App {
         self.jump_to_match(next);
     }
 
+    /// Replace every current match in the active file as one undoable edit.
+    fn replace_all(&mut self) {
+        if !self.search.open || self.search.query.is_empty() {
+            self.set_status("Open find and type a query first");
+            return;
+        }
+        self.refresh_search_matches();
+        let matches = self.search.matches.clone();
+        if matches.is_empty() {
+            self.set_status("No matches to replace");
+            return;
+        }
+
+        let replacement = self.search.replacement.clone();
+        let (text, end) = match self.editor.active_document() {
+            Some(doc) => {
+                let last = doc.buffer.len_lines().saturating_sub(1);
+                let end = Position::new(last, doc.buffer.line_char_len(last));
+                (doc.buffer.text(), end)
+            }
+            None => return,
+        };
+
+        // Map `(row, col)` positions to character offsets.
+        let mut chars: Vec<char> = text.chars().collect();
+        let total = chars.len();
+        let mut line_starts = vec![0usize];
+        for (index, ch) in chars.iter().enumerate() {
+            if *ch == '\n' {
+                line_starts.push(index + 1);
+            }
+        }
+        let offset = |position: Position| -> usize {
+            let start = line_starts.get(position.row).copied().unwrap_or(total);
+            (start + position.col).min(total)
+        };
+
+        // Apply from the end so earlier offsets stay valid. Matches never
+        // overlap, so this is safe.
+        let mut replaced = 0usize;
+        for (start, finish) in matches.iter().rev() {
+            let from = offset(*start);
+            let to = offset(*finish);
+            if from >= to {
+                continue;
+            }
+            chars.splice(from..to, replacement.chars());
+            replaced += 1;
+        }
+        if replaced == 0 {
+            self.set_status("No matches to replace");
+            return;
+        }
+
+        let new_text: String = chars.into_iter().collect();
+        self.with_doc(|doc| doc.replace_range(Position::zero(), end, &new_text));
+        self.refresh_search_matches();
+        self.set_status(format!("Replaced {replaced} occurrence(s)"));
+    }
+
     // ----------------------------------------------------------------------
     // Overlays
     // ----------------------------------------------------------------------
@@ -3275,6 +3340,9 @@ impl App {
             }
             ids::YANK_POP if self.last_yank.is_none() => {
                 (false, Some("nothing to yank".to_string()))
+            }
+            ids::REPLACE_ALL if !self.search.open || self.search.query.is_empty() => {
+                (false, Some("open find first".to_string()))
             }
             ids::NEXT_TAB | ids::PREV_TAB if self.editor.len() < 2 => {
                 (false, Some("only one tab".to_string()))
@@ -4012,6 +4080,34 @@ mod tests {
         assert!(app.search.matches.is_empty());
         assert!(app.search.regex_error.is_some());
 
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn replace_all_applies_every_match_as_one_edit() {
+        let dir = temp_project("replace-all");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "foo foo foo\nbar foo\n").unwrap();
+        let mut app = App::new(Some(&file)).unwrap();
+
+        app.execute_command(ids::REPLACE);
+        app.search.query = "foo".to_string();
+        app.search.replacement = "baz".to_string();
+        app.refresh_search_matches();
+        assert_eq!(app.search.matches.len(), 4);
+
+        app.replace_all();
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.text(),
+            "baz baz baz\nbar baz\n"
+        );
+
+        // A single undo restores the original.
+        app.with_doc(|d| d.undo());
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.text(),
+            "foo foo foo\nbar foo\n"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 

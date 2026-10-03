@@ -242,6 +242,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Editing & UX
 
+- **Replace All** (`Alt+Enter` in the replace bar, or the palette) replaces
+  every match in a single undoable edit, honouring the case, whole-word and
+  regex options. One `Ctrl+Z` restores the file.
 - Copy and cut now feed a **kill-ring**; **Alt+Y** yank-pops the last paste to
   an earlier kill, as long as nothing has been edited since. The system
   clipboard (OSC 52) still receives the newest kill.
