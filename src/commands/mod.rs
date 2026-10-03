@@ -35,6 +35,7 @@ pub mod ids {
 
     pub const FORMAT: &str = "language.format";
     pub const HOVER: &str = "language.hover";
+    pub const SETUP: &str = "language.setup";
     pub const GOTO_DEFINITION: &str = "language.gotoDefinition";
     pub const FIND_REFERENCES: &str = "language.findReferences";
     pub const SHOW_SYMBOLS: &str = "language.symbols";
@@ -198,6 +199,8 @@ impl CommandRegistry {
                 .describes("Show information about the symbol under the cursor")
                 .needs_doc()
                 .capability(Capability::Hover),
+            Command::new(SETUP, "Language Setup…", "Language", None)
+                .describes("See which language tools Koda found"),
             Command::new(GOTO_DEFINITION, "Go to Definition", "Language", Some("F12"))
                 .describes("Jump to where the symbol is defined")
                 .needs_doc()

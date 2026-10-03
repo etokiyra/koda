@@ -90,6 +90,9 @@ Implemented:
   `gofmt`), run off the UI thread, with missing tools reported up front.
 - Hover (`Ctrl+Shift+H`) showing a symbol's kind, definition line and usage
   count.
+- Language-tool discovery: **Language Setup…** reports which of
+  `rust-analyzer`, `gopls`, `rustfmt` and `gofmt` Koda found, with install
+  hints for the rest.
 - Project-wide symbol search (`Ctrl+T`), scanned off the UI thread.
 - A keyboard-shortcuts cheatsheet (`F1`), a scroll margin, a live busy spinner
   and a gently animated mascot.

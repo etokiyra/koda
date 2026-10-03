@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! cargo run --example preview -- [width] [height] [mode]
-//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols | completion | hover | help
+//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics | symbols | completion | hover | help | setup
 //! ```
 
 use koda::app::App;
@@ -139,6 +139,11 @@ fn main() {
         "help" => {
             let mut app = App::new(Some(&root)).expect("app");
             app.execute_command(ids::HELP);
+            app
+        }
+        "setup" => {
+            let mut app = App::new(Some(&root)).expect("app");
+            app.execute_command(ids::SETUP);
             app
         }
         _ => App::new(Some(&root)).expect("app"),

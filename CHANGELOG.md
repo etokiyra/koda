@@ -66,6 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Format Document** unavailable in the palette with the reason
   ("rustfmt is not installed") before you try, rather than only failing on
   invocation.
+- Added language-tool discovery. Koda probes for `rust-analyzer`, `gopls`,
+  `rustfmt` and `gofmt`, checking that they exist *and* run (a `rustup` shim can
+  exist for a component that is not installed). **Language Setup…** lists every
+  tool with its version or an install hint. Automatic provisioning is not
+  implemented yet.
 
 ### Performance
 

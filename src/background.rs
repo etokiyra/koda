@@ -21,6 +21,7 @@ use crate::language::detection::Confidence;
 use crate::language::diagnostics::Diagnostic;
 use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
+use crate::language::tools::ToolRegistry;
 
 /// Work sent to the background thread.
 enum Request {
@@ -42,6 +43,8 @@ enum Request {
     },
     /// Scan a project for named definitions.
     WorkspaceSymbols { root: PathBuf, revision: u64 },
+    /// Probe for the external tools Koda can drive.
+    DiscoverTools,
     /// Recompute git status for a repository root.
     RefreshGit { root: PathBuf },
 }
@@ -67,6 +70,8 @@ pub enum Event {
         revision: u64,
         symbols: Vec<WorkspaceSymbol>,
     },
+    /// The result of probing for external tools.
+    Tools(ToolRegistry),
     Git(GitInfo),
 }
 
@@ -125,6 +130,9 @@ impl Background {
                             let symbols = language.workspace_symbols(&root, 3000);
                             let _ = event_tx.send(Event::WorkspaceSymbols { revision, symbols });
                         }
+                        Request::DiscoverTools => {
+                            let _ = event_tx.send(Event::Tools(ToolRegistry::discover()));
+                        }
                         Request::RefreshGit { root } => {
                             let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
                         }
@@ -170,6 +178,11 @@ impl Background {
         let _ = self
             .requests
             .send(Request::WorkspaceSymbols { root, revision });
+    }
+
+    /// Ask for the external tools to be probed.
+    pub fn discover_tools(&self) {
+        let _ = self.requests.send(Request::DiscoverTools);
     }
 
     /// Ask for git status to be refreshed.

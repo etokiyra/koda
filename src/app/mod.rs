@@ -22,6 +22,7 @@ use crate::language::diagnostics::Severity;
 use crate::language::format;
 use crate::language::format::FormatOutcome;
 use crate::language::symbols::is_ident_char as is_word_char;
+use crate::language::tools::{Tool, ToolRegistry};
 use crate::language::{Capability, LanguageId, LanguageService, WorkspaceSymbol};
 use crate::project::Workspace;
 use crate::terminal;
@@ -94,6 +95,8 @@ pub struct App {
     pub anim_phase: usize,
     /// When the animation frame last advanced.
     anim_last: Instant,
+    /// External tools Koda has probed for, once discovery completes.
+    pub tools: Option<ToolRegistry>,
 }
 
 impl App {
@@ -141,6 +144,7 @@ impl App {
             pending_workspace_symbols: None,
             anim_phase: 0,
             anim_last: Instant::now(),
+            tools: None,
         };
 
         if let Some(path) = target
@@ -149,6 +153,8 @@ impl App {
             app.open_path(path.to_path_buf());
         }
         app.request_git_refresh();
+        // Probe for external tools on the worker so startup never waits on it.
+        app.background.discover_tools();
         // Apply the initial detection and git snapshot before the first frame so
         // startup is deterministic.
         app.pump_background(Duration::from_millis(300));
@@ -829,6 +835,7 @@ impl App {
             ids::PASTE => self.paste(),
             ids::COMPLETE => self.open_completion(),
             ids::HOVER => self.open_hover(),
+            ids::SETUP => self.language_setup(),
             ids::WORKSPACE_SYMBOLS => self.open_workspace_symbols(),
             ids::FIND => self.open_search(false),
             ids::REPLACE => self.open_search(true),
@@ -864,6 +871,7 @@ impl App {
             PickerAction::Command(id) => self.execute_command(id),
             PickerAction::OpenPath(path) => self.open_path(path),
             PickerAction::Reveal { path, position } => self.reveal(path, position),
+            PickerAction::Info(message) => self.set_status(message),
         }
     }
 
@@ -1266,6 +1274,10 @@ impl App {
                 }
                 self.pending_workspace_symbols = None;
                 self.open_workspace_symbol_picker(symbols);
+                true
+            }
+            BackgroundEvent::Tools(registry) => {
+                self.tools = Some(registry);
                 true
             }
         }
@@ -1909,12 +1921,50 @@ impl App {
         let language = document
             .map(|doc| doc.buffer.language)
             .unwrap_or(LanguageId::Unknown);
-        match self.language.provider(language).formatter() {
-            Some(tool) if !format::is_available(tool) => {
-                (false, Some(format!("{tool} is not installed")))
-            }
-            _ => (true, None),
+        let Some(tool) =
+            Tool::for_language(language, crate::language::tools::ToolPurpose::Formatter)
+        else {
+            return (true, None);
+        };
+        // Prefer the probed registry; fall back to a PATH check before it lands.
+        let available = match &self.tools {
+            Some(tools) => tools.available(tool),
+            None => format::is_available(tool.program()),
+        };
+        if available {
+            (true, None)
+        } else {
+            (false, Some(format!("{} is not installed", tool.program())))
         }
+    }
+
+    /// Show which language tools Koda found, and how to install the rest.
+    fn language_setup(&mut self) {
+        let Some(tools) = self.tools.clone() else {
+            // Discovery is still running; ask again and tell the user.
+            self.background.discover_tools();
+            self.set_status("Checking language tools…");
+            return;
+        };
+
+        let mut items = Vec::new();
+        for status in tools.all() {
+            let tool = status.tool;
+            let purpose = match tool.purpose() {
+                crate::language::tools::ToolPurpose::LanguageServer => "language server",
+                crate::language::tools::ToolPurpose::Formatter => "formatter",
+            };
+            let label = format!("{}  ·  {} {purpose}", tool.label(), tool.language().name());
+            let detail = status.summary();
+            let mut item = PickerItem::new(label, detail.clone(), PickerAction::Info(detail));
+            if !status.available {
+                item = item.disabled(tool.install_hint());
+            }
+            items.push(item);
+        }
+        let mut picker = Picker::new("Language Setup", "Language tools…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
     }
 
     fn open_quick_open(&mut self) {
@@ -2217,9 +2267,14 @@ mod tests {
 
         assert!(find("File: Save").expect("save").enabled);
         // Formatting availability tracks whether the tool is actually installed.
+        let rustfmt_available = app
+            .tools
+            .as_ref()
+            .map(|tools| tools.available(Tool::Rustfmt))
+            .unwrap_or_else(|| format::is_available("rustfmt"));
         assert_eq!(
             find("Format Document").expect("format").enabled,
-            crate::language::format::is_available("rustfmt")
+            rustfmt_available
         );
         assert!(
             !find("Rename Symbol").expect("rename").enabled,
@@ -2625,6 +2680,28 @@ mod tests {
         app.pending_format = None;
         app.pending_workspace_symbols = Some(1);
         assert_eq!(app.busy(), Some("searching symbols"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn language_setup_lists_discovered_tools() {
+        let dir = temp_project("setup");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        // Tool discovery happens on the worker; wait briefly for it.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.tools.is_none() && Instant::now() < deadline {
+            app.apply_background_events();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(app.tools.is_some(), "tool discovery should complete");
+
+        app.execute_command(ids::SETUP);
+        let Overlay::Picker(picker) = &app.overlay else {
+            panic!("expected the language setup list");
+        };
+        assert!(picker.filtered.len() >= crate::language::tools::Tool::ALL.len());
         fs::remove_dir_all(&dir).ok();
     }
 }

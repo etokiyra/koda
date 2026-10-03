@@ -30,11 +30,7 @@ pub enum FormatOutcome {
 /// Used to tell the user up front that a formatter is missing instead of
 /// failing only when they ask for it.
 pub fn is_available(tool: &str) -> bool {
-    let Ok(path) = std::env::var("PATH") else {
-        return false;
-    };
-    std::env::split_paths(&path)
-        .any(|dir| dir.join(tool).is_file() || dir.join(format!("{tool}.exe")).is_file())
+    crate::language::tools::locate(tool).is_some()
 }
 
 /// Format Rust source with `rustfmt`, matching the project's edition when a

@@ -19,6 +19,7 @@ pub mod id;
 pub mod provider;
 pub mod rust;
 pub mod symbols;
+pub mod tools;
 
 use std::path::Path;
 
@@ -27,6 +28,7 @@ pub use provider::{
     Capability, HighlightSpan, HighlightState, LanguageProvider, ProviderRegistry, TokenKind,
 };
 pub use symbols::WorkspaceSymbol;
+pub use tools::{Tool, ToolRegistry};
 
 use detection::{DetectionEngine, DetectionResult};
 

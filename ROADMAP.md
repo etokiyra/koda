@@ -76,10 +76,12 @@ The highest-value work. These turn Koda from an editor into an IDE.
       whether they are installed and says so in the palette; automatic
       provisioning is still to come.
 - [ ] **Rename and code actions.**
-- [ ] **Tool provisioning and lifecycle.** Detect the language tooling Koda
-      needs, reuse what is already installed, and fetch compatible tools from
-      trusted sources with integrity checks when appropriate. Basic editing and
-      locally-available language support must keep working offline.
+- [ ] **Tool provisioning and lifecycle.** Discovery is implemented: Koda probes
+      for language servers and formatters, checks that they run, and reports
+      what is missing via **Language Setup…**. It reuses tools already
+      installed. Fetching and installing compatible tools from trusted sources
+      with integrity checks is still to come; basic editing and
+      locally-available language support keep working offline.
 - [ ] **Rust/Go intelligence backends.** Integrate mature language tooling
       internally (e.g. `rust-analyzer`, `gopls`), auto-discovered and launched by
       Koda. The user must never install or configure an LSP.

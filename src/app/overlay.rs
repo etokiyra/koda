@@ -15,6 +15,8 @@ pub enum PickerAction {
         path: PathBuf,
         position: Position,
     },
+    /// Show a short informational message in the statusline.
+    Info(String),
 }
 
 /// A single row in a picker.
