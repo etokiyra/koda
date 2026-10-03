@@ -90,7 +90,9 @@ The highest-value work. These turn Koda from an editor into an IDE.
 - [x] **LSP-backed completion, hover, go-to-definition and references.** When a
       server is attached these features come from it; the built-in providers
       remain as fallbacks. Rename and code actions are next.
-- [ ] **Rename and code actions** over LSP.
+- [x] **Rename** over LSP: `F2` prompts for a name and applies the server's
+      workspace edit across files.
+- [ ] **Code actions** over LSP.
 
 The abstraction is already in place: providers declare `Capability`s, and the
 command palette already reports which are available. Filling them in is additive.

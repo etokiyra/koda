@@ -106,6 +106,7 @@ impl LanguageProvider for GoProvider {
             Capability::Completion,
             Capability::Formatting,
             Capability::Hover,
+            Capability::Rename,
         ]
     }
 

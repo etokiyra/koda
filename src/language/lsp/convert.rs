@@ -21,6 +21,81 @@ pub struct Location {
     pub col: usize,
 }
 
+/// A single text replacement within a file, in `(line, character)` coordinates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextEdit {
+    pub start: (usize, usize),
+    pub end: (usize, usize),
+    pub new_text: String,
+}
+
+/// Every edit a workspace edit makes to one file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileEdit {
+    pub path: PathBuf,
+    pub edits: Vec<TextEdit>,
+}
+
+/// File edits from a `WorkspaceEdit` (`changes` or `documentChanges`).
+pub fn workspace_edit(value: &Value) -> Vec<FileEdit> {
+    let mut files = Vec::new();
+
+    if let Some(changes) = value.get("changes").and_then(Value::as_object) {
+        for (uri, edits) in changes {
+            if let Some(file) = file_edit(uri, edits) {
+                files.push(file);
+            }
+        }
+    } else if let Some(changes) = value.get("documentChanges").and_then(Value::as_array) {
+        for change in changes {
+            // Skip create/rename/delete operations; we only apply edits.
+            let Some(uri) = change.pointer("/textDocument/uri").and_then(Value::as_str) else {
+                continue;
+            };
+            let edits = change.get("edits").cloned().unwrap_or(Value::Null);
+            if let Some(file) = file_edit(uri, &edits) {
+                files.push(file);
+            }
+        }
+    }
+
+    files
+}
+
+fn file_edit(uri: &str, edits: &Value) -> Option<FileEdit> {
+    let path = uri_to_path(uri)?;
+    let edits = parse_edits(edits)?;
+    if edits.is_empty() {
+        return None;
+    }
+    Some(FileEdit { path, edits })
+}
+
+fn parse_edits(value: &Value) -> Option<Vec<TextEdit>> {
+    let items = value.as_array()?;
+    Some(
+        items
+            .iter()
+            .filter_map(|item| {
+                let range = item.get("range")?;
+                let start = range.get("start")?;
+                let end = range.get("end")?;
+                Some(TextEdit {
+                    start: (
+                        start.get("line")?.as_u64()? as usize,
+                        start.get("character")?.as_u64()? as usize,
+                    ),
+                    end: (
+                        end.get("line")?.as_u64()? as usize,
+                        end.get("character")?.as_u64()? as usize,
+                    ),
+                    new_text: item.get("newText")?.as_str()?.to_string(),
+                })
+            })
+            .collect(),
+    )
+}
+
 /// Completion items from a `textDocument/completion` result.
 ///
 /// The result may be a bare array or a `CompletionList` object.
@@ -183,5 +258,31 @@ mod tests {
         assert_eq!((found[1].line, found[1].col), (9, 0));
 
         assert!(locations(&json!(null)).is_empty());
+    }
+
+    #[test]
+    fn converts_a_workspace_edit() {
+        let value = json!({
+            "changes": {
+                "file:///tmp/a.rs": [
+                    { "range": { "start": { "line": 1, "character": 4 }, "end": { "line": 1, "character": 9 } }, "newText": "renamed" }
+                ]
+            }
+        });
+        let files = workspace_edit(&value);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, PathBuf::from("/tmp/a.rs"));
+        assert_eq!(files[0].edits[0].start, (1, 4));
+        assert_eq!(files[0].edits[0].new_text, "renamed");
+
+        let document_changes = json!({
+            "documentChanges": [
+                { "textDocument": { "uri": "file:///tmp/b.rs" },
+                  "edits": [ { "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 1 } }, "newText": "x" } ] }
+            ]
+        });
+        let files = workspace_edit(&document_changes);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, PathBuf::from("/tmp/b.rs"));
     }
 }

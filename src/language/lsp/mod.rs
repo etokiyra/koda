@@ -43,6 +43,7 @@ pub enum RequestKind {
     Hover,
     Definition,
     References,
+    Rename,
 }
 
 /// Something the app consumes from a running server.
@@ -145,7 +146,8 @@ impl Server {
                         "completion": { "completionItem": { "snippetSupport": false } },
                         "hover": { "contentFormat": ["markdown", "plaintext"] },
                         "definition": {},
-                        "references": {}
+                        "references": {},
+                        "rename": { "prepareSupport": false }
                     },
                     "workspace": { "configuration": true }
                 },
@@ -245,6 +247,15 @@ impl Server {
             object.insert("context".to_string(), json!({ "includeDeclaration": true }));
         }
         let _ = self.send_request(RequestKind::References, "textDocument/references", params);
+    }
+
+    /// Ask the server to rename the symbol at a position.
+    pub fn rename(&mut self, path: &Path, line: usize, col: usize, new_name: &str) {
+        let mut params = position_params(path, line, col);
+        if let Some(object) = params.as_object_mut() {
+            object.insert("newName".to_string(), json!(new_name));
+        }
+        let _ = self.send_request(RequestKind::Rename, "textDocument/rename", params);
     }
 
     /// Drain pending events without blocking.

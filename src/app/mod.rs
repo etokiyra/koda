@@ -5,6 +5,7 @@
 
 pub mod overlay;
 
+use std::cmp::Reverse;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -126,6 +127,8 @@ pub struct App {
     lsp_language: Option<LanguageId>,
     /// When set, a language server should start once this delay elapses.
     lsp_start_at: Option<(Instant, LanguageId)>,
+    /// The symbol awaiting a new name, from the rename prompt.
+    pending_rename: Option<(PathBuf, usize, usize)>,
     /// Connection state, shown in the statusline.
     pub lsp_status: LspStatus,
     /// When open files were last checked for on-disk changes.
@@ -182,6 +185,7 @@ impl App {
             lsp: None,
             lsp_language: None,
             lsp_start_at: None,
+            pending_rename: None,
             lsp_status: LspStatus::Offline,
             last_disk_check: Instant::now(),
         };
@@ -973,7 +977,8 @@ impl App {
             ids::PREV_TAB => self.editor.previous_tab(),
             ids::PALETTE => self.open_command_palette(),
             ids::HELP => self.toggle_help(),
-            ids::RENAME | ids::CODE_ACTIONS => self.report_language_capability(id),
+            ids::RENAME => self.rename_symbol(),
+            ids::CODE_ACTIONS => self.report_language_capability(id),
             ids::FORMAT => self.format_document(),
             ids::GOTO_DEFINITION => self.goto_definition(),
             ids::FIND_REFERENCES => self.find_references(),
@@ -1014,6 +1019,18 @@ impl App {
                 } else {
                     self.save_as(self.resolve_path(&input));
                 }
+            }
+            PromptKind::Rename => {
+                if input.is_empty() {
+                    self.set_error("No new name provided");
+                    return;
+                }
+                if let Some((path, row, col)) = self.pending_rename.take()
+                    && let Some(server) = self.lsp.as_mut()
+                {
+                    server.rename(&path, row, col, &input);
+                }
+                self.set_status("Renaming…");
             }
         }
     }
@@ -1860,7 +1877,65 @@ impl App {
                     self.open_location_picker("References", locations);
                 }
             }
+            RequestKind::Rename => {
+                let files = convert::workspace_edit(&value);
+                let applied = self.apply_workspace_edit(files);
+                if applied > 0 {
+                    self.set_status(format!("Renamed in {applied} place(s)"));
+                } else {
+                    self.set_status("Nothing to rename");
+                }
+            }
         }
+    }
+
+    /// Prompt for a new name and ask the server to rename the symbol.
+    fn rename_symbol(&mut self) {
+        let Some((path, row, col)) = self.lsp_target() else {
+            self.set_status("Rename needs a language server (see Language Setup…)");
+            return;
+        };
+        let word = self
+            .editor
+            .active_document()
+            .and_then(|doc| crate::language::symbols::word_at(&doc.buffer.text(), row, col))
+            .unwrap_or_default();
+
+        self.pending_rename = Some((path, row, col));
+        let mut prompt = Prompt::new(PromptKind::Rename, "Rename symbol", "new name");
+        prompt.input = word;
+        self.overlay = Overlay::Prompt(prompt);
+    }
+
+    /// Apply a workspace edit, returning the number of edits applied.
+    fn apply_workspace_edit(&mut self, files: Vec<convert::FileEdit>) -> usize {
+        let mut applied = 0;
+        for file in files {
+            if let Some(doc) = self
+                .editor
+                .documents
+                .iter_mut()
+                .find(|doc| same_file(doc.buffer.path.as_deref(), &file.path))
+            {
+                // Apply from the end so earlier offsets stay valid.
+                let mut edits = file.edits;
+                edits.sort_by_key(|edit| Reverse((edit.start.0, edit.start.1)));
+                for edit in edits {
+                    doc.replace_range(
+                        Position::new(edit.start.0, edit.start.1),
+                        Position::new(edit.end.0, edit.end.1),
+                        &edit.new_text,
+                    );
+                    applied += 1;
+                }
+            } else if let Ok(text) = std::fs::read_to_string(&file.path) {
+                let updated = apply_text_edits(&text, &file.edits);
+                if std::fs::write(&file.path, updated).is_ok() {
+                    applied += file.edits.len();
+                }
+            }
+        }
+        applied
     }
 
     /// Offer a picker of jump targets.
@@ -2358,6 +2433,9 @@ impl App {
                 (false, Some("no diagnostics".to_string()))
             }
             ids::FORMAT => self.format_availability(document),
+            ids::RENAME if self.lsp_target().is_none() => {
+                (false, Some("needs a language server".to_string()))
+            }
             _ => (true, None),
         }
     }
@@ -2586,6 +2664,32 @@ fn same_file(a: Option<&Path>, b: &Path) -> bool {
     let a = a.canonicalize().unwrap_or_else(|_| a.to_path_buf());
     let b = b.canonicalize().unwrap_or_else(|_| b.to_path_buf());
     a == b
+}
+
+/// Apply LSP text edits to a string, from the end so offsets stay valid.
+fn apply_text_edits(text: &str, edits: &[convert::TextEdit]) -> String {
+    let mut chars: Vec<char> = text.chars().collect();
+    // Character offset where each line begins.
+    let mut line_starts = vec![0usize];
+    for (index, ch) in chars.iter().enumerate() {
+        if *ch == '\n' {
+            line_starts.push(index + 1);
+        }
+    }
+    let total = chars.len();
+    let offset = |line: usize, character: usize| -> usize {
+        let start = line_starts.get(line).copied().unwrap_or(total);
+        (start + character).min(total)
+    };
+
+    let mut sorted: Vec<&convert::TextEdit> = edits.iter().collect();
+    sorted.sort_by_key(|edit| Reverse((edit.start.0, edit.start.1)));
+    for edit in sorted {
+        let start = offset(edit.start.0, edit.start.1);
+        let end = offset(edit.end.0, edit.end.1).max(start);
+        chars.splice(start..end, edit.new_text.chars());
+    }
+    chars.into_iter().collect()
 }
 
 /// Identifier words already present in a document, deduplicated in order.
@@ -3239,6 +3343,7 @@ while read -r header; do
     textDocument/completion) result='{"items":[{"label":"koda_lsp_item","kind":3}]}' ;;
     textDocument/definition) result="[{\"uri\":\"file://$target\",\"range\":{\"start\":{\"line\":2,\"character\":0},\"end\":{\"line\":2,\"character\":5}}}]" ;;
     textDocument/references) result="[{\"uri\":\"file://$target\",\"range\":{\"start\":{\"line\":1,\"character\":4},\"end\":{\"line\":1,\"character\":9}}}]" ;;
+    textDocument/rename) result="{\"changes\":{\"file://$target\":[{\"range\":{\"start\":{\"line\":1,\"character\":8},\"end\":{\"line\":1,\"character\":13}},\"newText\":\"renamed\"}]}}" ;;
     *) result='null' ;;
   esac
   resp=$(printf '{"jsonrpc":"2.0","id":%s,"result":%s}' "$id" "$result")
@@ -3328,6 +3433,28 @@ done
         assert!(
             wait(&mut app, &|app| matches!(app.overlay, Overlay::Picker(_))),
             "expected the references picker"
+        );
+
+        // Rename (the server returns a workspace edit).
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .move_to(Position::new(1, 8));
+        app.rename_symbol();
+        assert!(
+            matches!(app.overlay, Overlay::Prompt(_)),
+            "rename should prompt for a new name"
+        );
+        app.submit_prompt(PromptKind::Rename, "renamed".to_string());
+        assert!(
+            wait(&mut app, &|app| app.editor.active_document().is_some_and(
+                |doc| doc.buffer.line_text(1).contains("renamed")
+            )),
+            "expected the rename edit to apply"
+        );
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.line_text(1),
+            "    let renamed = 1;"
         );
 
         fs::remove_dir_all(&dir).ok();

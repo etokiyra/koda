@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the instant local ones; hover upgrades the built-in popup when the server
   answers; definition and references jump across files. The UI is identical
   whether an answer came from a server or a built-in provider.
+- **Rename** (`F2`) asks the server for a workspace edit and applies it across
+  every affected file — open buffers as undoable edits, unopened files on disk.
+  The palette reports "needs a language server" when none is attached.
 
 ### Fixed
 

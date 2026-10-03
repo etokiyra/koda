@@ -140,6 +140,7 @@ pub enum PromptKind {
     GotoLine,
     OpenPath,
     SaveAs,
+    Rename,
 }
 
 /// A single-line text prompt.
