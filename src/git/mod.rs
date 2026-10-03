@@ -72,27 +72,31 @@ impl GitInfo {
         let mut files = HashMap::new();
         let mut staged = std::collections::HashSet::new();
 
-        if let Some(output) = run(
+        if let Some(output) = run_bytes(
             &repo_root,
-            &["status", "--porcelain", "--untracked-files=normal"],
+            &["status", "--porcelain", "-z", "--untracked-files=normal"],
         ) {
-            for line in output.lines() {
-                if line.len() < 4 {
+            // `-z` NUL-separates entries and emits paths verbatim (no C-style
+            // quoting), which keeps spaces, non-ASCII bytes and even a leading
+            // space in the status columns intact. A rename/copy entry is
+            // `XY <destination>\0<source>\0`, so the source field is consumed
+            // for the next entry rather than parsed as its own.
+            let mut fields = output.split(|byte| *byte == 0);
+            while let Some(entry) = fields.next() {
+                if entry.len() < 4 {
                     continue;
                 }
-                let code = &line[..2];
-                let status = parse_status(code);
-                // Renames are reported as "old -> new"; take the destination.
-                let raw_path = line[3..].trim();
-                let path = match raw_path.split_once(" -> ") {
-                    Some((_, new)) => new,
-                    None => raw_path,
-                };
-                let path = path.trim_matches('"');
+                let code = &entry[..2];
+                let status = parse_status(&String::from_utf8_lossy(code));
+                let path = String::from_utf8_lossy(&entry[3..]).into_owned();
+                if matches!(code[0], b'R' | b'C') || matches!(code[1], b'R' | b'C') {
+                    // The destination path was reported first; drop the source.
+                    let _ = fields.next();
+                }
                 let absolute = repo_root.join(path);
                 // The first column is the index (staged) state; `?` is untracked.
-                let index = code.chars().next().unwrap_or(' ');
-                if index != ' ' && index != '?' {
+                let index = code[0];
+                if index != b' ' && index != b'?' {
                     staged.insert(absolute.clone());
                 }
                 files.insert(absolute, status);
@@ -150,6 +154,23 @@ fn run(dir: &Path, args: &[&str]) -> Option<String> {
     if text.is_empty() { None } else { Some(text) }
 }
 
+/// Run a git subcommand and return its raw stdout bytes.
+///
+/// Used where the exact bytes matter — `status --porcelain -z` separates
+/// records with NUL and must not be trimmed or lossily decoded first.
+fn run_bytes(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(output.stdout)
+}
+
 /// Run a git subcommand, returning trimmed stdout or the first error line.
 ///
 /// Unlike [`run`], this surfaces failures so the UI can explain what git said.
@@ -173,12 +194,16 @@ fn run_checked(dir: &Path, args: &[&str]) -> Result<String, String> {
     Err(message)
 }
 
-/// Stage every change in the repository at `root`.
+/// Stage every change under `root`.
+///
+/// The pathspec `.` scopes the add to the workspace root, so opening a
+/// subdirectory of a larger repository and committing never stages unrelated
+/// sibling projects.
 pub fn stage_all(root: &Path) -> Result<(), String> {
-    run_checked(root, &["add", "-A"]).map(|_| ())
+    run_checked(root, &["add", "-A", "--", "."]).map(|_| ())
 }
 
-/// Stage every change and commit it with `message`.
+/// Stage every change under `root` and commit it with `message`.
 ///
 /// Koda never rewrites history; this is a plain `git add -A` followed by a
 /// `git commit`, run only when the user explicitly asks for it.
@@ -287,6 +312,79 @@ mod tests {
         assert_eq!(parse_status("A "), GitFileStatus::Added);
         assert_eq!(parse_status("UU"), GitFileStatus::Conflicted);
         assert_eq!(parse_status("R "), GitFileStatus::Renamed);
+    }
+
+    /// Initialise a throwaway repository with a deterministic identity, or
+    /// return `None` when git is not installed.
+    fn temp_repo(name: &str) -> Option<PathBuf> {
+        if std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return None;
+        }
+        let dir = std::env::temp_dir().join(format!("koda-git-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        run_git(&dir, &["init", "-q"]);
+        run_git(&dir, &["config", "user.email", "koda@example.com"]);
+        run_git(&dir, &["config", "user.name", "Koda Test"]);
+        Some(dir)
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+    }
+
+    #[test]
+    fn parses_unstaged_status_without_losing_the_first_entry() {
+        // Regression: the whole status output used to be trimmed, which ate the
+        // leading space that marks an *unstaged* change on the first line and
+        // shifted its path.
+        let Some(dir) = temp_repo("unstaged") else {
+            return;
+        };
+        let modified = dir.join("a b file.txt");
+        std::fs::write(&modified, "one\n").unwrap();
+        run_git(&dir, &["add", "--", "a b file.txt"]);
+        run_git(&dir, &["commit", "-qm", "init"]);
+        std::fs::write(&modified, "two\n").unwrap();
+
+        let info = GitInfo::detect(&dir);
+        assert_eq!(info.files.get(&modified), Some(&GitFileStatus::Modified));
+        assert!(
+            !info.is_staged(&modified),
+            "an unstaged modification must not be marked staged"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parses_renames_and_non_ascii_paths() {
+        let Some(dir) = temp_repo("rename") else {
+            return;
+        };
+        std::fs::write(dir.join("old.txt"), "x\n").unwrap();
+        run_git(&dir, &["add", "--", "old.txt"]);
+        run_git(&dir, &["commit", "-qm", "init"]);
+        run_git(&dir, &["mv", "old.txt", "café renommé.txt"]);
+
+        let info = GitInfo::detect(&dir);
+        let renamed = dir.join("café renommé.txt");
+        assert_eq!(
+            info.files.get(&renamed),
+            Some(&GitFileStatus::Renamed),
+            "a renamed non-ASCII file should be reported at its new path"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
