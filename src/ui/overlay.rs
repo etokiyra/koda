@@ -13,7 +13,7 @@ use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 
 use crate::app::overlay::{CompletionState, Help, HoverState, Picker, Prompt, Search, SearchField};
 use crate::commands::CommandRegistry;
-use crate::ui::{centered, theme};
+use crate::ui::{art, centered, theme};
 
 /// Render a filterable list (command palette / quick open).
 pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
@@ -23,12 +23,13 @@ pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
     // when the filter matches nothing.
     let height = rows.max(6).min(area.height);
     let rect = centered(area, width, height);
+    let on_panel = Style::default().bg(theme::PANEL_BG);
 
     frame.render_widget(Clear, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme::accent())
-        .style(Style::default().bg(theme::PANEL_BG))
+        .style(on_panel)
         .title(Line::from(vec![
             Span::styled("✦ ", theme::star()),
             Span::styled(picker.title.clone(), theme::accent_bold()),
@@ -41,24 +42,46 @@ pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
         return;
     }
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    // A hint row is a small luxury: only spend the line when there is room.
+    let show_footer = inner.height >= 6;
+    let constraints = if show_footer {
+        vec![
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Min(1),
-        ])
+            Constraint::Length(1),
+        ]
+    } else {
+        vec![
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ]
+    };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
         .split(inner);
 
-    // Query input.
+    // Query input, with a position counter on the right when there are results.
     let input = if picker.query.is_empty() {
         Span::styled(picker.placeholder.clone(), theme::muted())
     } else {
         Span::styled(picker.query.clone(), theme::bright())
     };
+    let mut query_spans = vec![Span::styled(" ❯ ", theme::star()), input];
+    if !picker.filtered.is_empty() {
+        let counter = format!("{}/{}", picker.selected + 1, picker.filtered.len());
+        let used: usize = query_spans
+            .iter()
+            .map(|span| span.content.chars().count())
+            .sum();
+        let pad = (chunks[0].width as usize).saturating_sub(used + counter.chars().count() + 1);
+        query_spans.push(Span::raw(" ".repeat(pad)));
+        query_spans.push(Span::styled(counter, theme::dim()));
+    }
     frame.render_widget(
-        Paragraph::new(Line::from(vec![Span::styled(" ❯ ", theme::star()), input]))
-            .style(Style::default().bg(theme::PANEL_BG)),
+        Paragraph::new(Line::from(query_spans)).style(on_panel),
         chunks[0],
     );
     let cursor_x = chunks[0].x + 3 + picker.query.chars().count() as u16;
@@ -67,7 +90,7 @@ pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
     }
     frame.render_widget(
         Paragraph::new(Span::styled("─".repeat(inner.width as usize), theme::dim()))
-            .style(Style::default().bg(theme::PANEL_BG)),
+            .style(on_panel),
         chunks[1],
     );
 
@@ -75,10 +98,10 @@ pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
     let list_area = chunks[2];
     if picker.filtered.is_empty() {
         frame.render_widget(
-            Paragraph::new(Span::styled("  no matches", theme::muted()))
-                .style(Style::default().bg(theme::PANEL_BG)),
+            Paragraph::new(art::familiar_line("no matches")).style(on_panel),
             list_area,
         );
+        render_picker_footer(frame, show_footer.then(|| chunks[3]));
         return;
     }
     let visible = list_area.height as usize;
@@ -136,16 +159,32 @@ pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
             spans.push(Span::styled(item.shortcut.clone(), theme::accent()));
         }
 
-        let mut line = Line::from(spans).style(Style::default().bg(theme::PANEL_BG));
+        let mut line = Line::from(spans).style(on_panel);
         if selected {
             line = line.style(Style::default().bg(theme::MENU_SELECTED_BG));
         }
         lines.push(line);
     }
 
+    frame.render_widget(Paragraph::new(Text::from(lines)).style(on_panel), list_area);
+    render_picker_footer(frame, show_footer.then(|| chunks[3]));
+}
+
+/// Draw the picker's footer hint row, when there is room for one.
+fn render_picker_footer(frame: &mut Frame, area: Option<Rect>) {
+    let Some(area) = area else {
+        return;
+    };
+    let line = Line::from(vec![
+        Span::styled(" ↑↓ move ", theme::dim()),
+        Span::styled("·", theme::dim()),
+        Span::styled(" Enter select ", theme::dim()),
+        Span::styled("·", theme::dim()),
+        Span::styled(" Esc close ", theme::dim()),
+    ]);
     frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(theme::PANEL_BG)),
-        list_area,
+        Paragraph::new(line).style(Style::default().bg(theme::PANEL_BG)),
+        area,
     );
 }
 
@@ -355,6 +394,8 @@ fn help_lines(commands: &CommandRegistry, phase: usize) -> Vec<Line<'static>> {
         ("Home / End", "line start / end"),
         ("Ctrl+Home / End", "document start / end"),
         ("PageUp / PageDown", "scroll a page"),
+        ("F3 / Shift+F3", "find next / previous"),
+        ("Ctrl+PageUp/Down", "previous / next tab"),
     ];
 
     let mut order: Vec<&'static str> = Vec::new();
@@ -425,13 +466,16 @@ fn help_row(shortcut: &str, title: &str, key_width: usize) -> Line<'static> {
 /// Render a single-line text prompt.
 pub fn render_prompt(frame: &mut Frame, area: Rect, prompt: &Prompt) {
     let width = (area.width.saturating_sub(8)).clamp(28, 72);
-    let rect = centered(area, width, 3);
+    // A little extra height buys a hint row; small terminals keep it minimal.
+    let height = if area.height >= 6 { 4 } else { 3 };
+    let rect = centered(area, width, height);
+    let on_panel = Style::default().bg(theme::PANEL_BG);
 
     frame.render_widget(Clear, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme::accent())
-        .style(Style::default().bg(theme::PANEL_BG))
+        .style(on_panel)
         .title(Line::from(vec![
             Span::styled("✦ ", theme::star()),
             Span::styled(prompt.label.clone(), theme::accent_bold()),
@@ -443,6 +487,10 @@ pub fn render_prompt(frame: &mut Frame, area: Rect, prompt: &Prompt) {
     if inner.height == 0 {
         return;
     }
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(inner);
 
     let input = if prompt.input.is_empty() {
         Span::styled(prompt.placeholder.clone(), theme::muted())
@@ -450,14 +498,24 @@ pub fn render_prompt(frame: &mut Frame, area: Rect, prompt: &Prompt) {
         Span::styled(prompt.input.clone(), theme::bright())
     };
     frame.render_widget(
-        Paragraph::new(Line::from(vec![Span::styled(" ❯ ", theme::star()), input]))
-            .style(Style::default().bg(theme::PANEL_BG)),
-        inner,
+        Paragraph::new(Line::from(vec![Span::styled(" ❯ ", theme::star()), input])).style(on_panel),
+        rows[0],
     );
 
-    let cursor_x = inner.x + 3 + prompt.input.chars().count() as u16;
-    if cursor_x < inner.x + inner.width {
-        frame.set_cursor_position((cursor_x, inner.y));
+    if rows.len() > 1 && rows[1].height > 0 {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "   Enter confirm  ·  Esc cancel",
+                theme::dim(),
+            ))
+            .style(on_panel),
+            rows[1],
+        );
+    }
+
+    let cursor_x = rows[0].x + 3 + prompt.input.chars().count() as u16;
+    if cursor_x < rows[0].x + rows[0].width {
+        frame.set_cursor_position((cursor_x, rows[0].y));
     }
 }
 

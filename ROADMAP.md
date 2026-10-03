@@ -168,6 +168,11 @@ command palette already reports which are available. Filling them in is additive
 - [x] Refresh the project tree and git status on terminal focus and on demand
       (`F5`).
 - [x] Keyboard-shortcuts overlay (`F1`), generated from the command registry.
+- [x] Overlay polish: pickers and prompts gained a result counter, a footer
+      hint and a personable empty state.
+- [x] Keymap audit: fixed the terminal-aliased `Ctrl+M` rebind to `Alt+M` and
+      added `Ctrl+Shift+S`, `Ctrl+N`, `F3`/`Shift+F3`, `Ctrl+PageUp/Down` and
+      `Ctrl+Shift+M`.
 - [x] Editor scroll margin (scrolloff) and a gentle welcome-mascot animation.
 - [x] Inline diagnostic messages: an optional, severity-coloured note at the end
       of the affected line, folded into the existing diagnostics UI and

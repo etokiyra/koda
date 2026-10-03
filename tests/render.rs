@@ -120,6 +120,47 @@ fn command_palette_renders_overlay() {
         "palette missing:\n{screen}"
     );
     assert!(screen.contains("Save"), "commands missing:\n{screen}");
+    assert!(
+        screen.contains("Esc close"),
+        "picker footer missing:\n{screen}"
+    );
+
+    cleanup(&dir);
+}
+
+#[test]
+fn picker_empty_state_is_personable() {
+    let dir = temp_project("picker-empty");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    app.execute_command(ids::QUICK_OPEN);
+    if let Overlay::Picker(picker) = &mut app.overlay {
+        picker.query = "zzzzzzzz".to_string();
+        picker.refilter();
+    }
+
+    let screen = draw(&mut app);
+    assert!(
+        screen.contains("( -ω- )"),
+        "the familiar should greet an empty result:\n{screen}"
+    );
+    assert!(screen.contains("no matches"), "missing message:\n{screen}");
+
+    cleanup(&dir);
+}
+
+#[test]
+fn prompt_shows_confirm_hint() {
+    let dir = temp_project("prompt-hint");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    app.execute_command(ids::GOTO_LINE);
+
+    let screen = draw(&mut app);
+    assert!(
+        screen.contains("Esc cancel"),
+        "prompt hint missing:\n{screen}"
+    );
 
     cleanup(&dir);
 }

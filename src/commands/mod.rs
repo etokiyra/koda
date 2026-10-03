@@ -10,6 +10,7 @@ use crate::language::Capability;
 pub mod ids {
     pub const SAVE: &str = "file.save";
     pub const SAVE_ALL: &str = "file.saveAll";
+    pub const SAVE_AS: &str = "file.saveAs";
     pub const OPEN: &str = "file.open";
     pub const QUICK_OPEN: &str = "file.quickOpen";
     pub const CLOSE_TAB: &str = "file.closeTab";
@@ -142,6 +143,9 @@ impl CommandRegistry {
             Command::new(SAVE_ALL, "Save All", "File", None)
                 .describes("Save every modified file")
                 .needs_doc(),
+            Command::new(SAVE_AS, "Save As…", "File", Some("Ctrl+Shift+S"))
+                .describes("Write the active file to a new path")
+                .needs_doc(),
             Command::new(OPEN, "Open File…", "File", Some("Ctrl+O"))
                 .describes("Open a file by path"),
             Command::new(QUICK_OPEN, "Quick Open…", "File", Some("Ctrl+P"))
@@ -154,7 +158,7 @@ impl CommandRegistry {
             Command::new(REVERT, "Revert File", "File", None)
                 .describes("Discard changes and reload the file from disk")
                 .needs_doc(),
-            Command::new(NEW_FILE, "New File…", "File", None)
+            Command::new(NEW_FILE, "New File…", "File", Some("Ctrl+N"))
                 .describes("Create a file in the selected folder"),
             Command::new(RENAME_FILE, "Rename…", "File", None)
                 .describes("Rename the selected file or folder"),
@@ -227,7 +231,7 @@ impl CommandRegistry {
                 MATCHING_BRACKET,
                 "Go to Matching Bracket",
                 "Edit",
-                Some("Ctrl+M"),
+                Some("Alt+M"),
             )
             .describes("Jump to the bracket matching the one under the cursor")
             .needs_doc(),
@@ -290,9 +294,14 @@ impl CommandRegistry {
             )
             .describes("Jump to the previous problem in the file")
             .needs_doc(),
-            Command::new(DIAGNOSTICS_LIST, "Show Diagnostics", "Diagnostics", None)
-                .describes("List every problem in open files")
-                .needs_doc(),
+            Command::new(
+                DIAGNOSTICS_LIST,
+                "Show Diagnostics",
+                "Diagnostics",
+                Some("Ctrl+Shift+M"),
+            )
+            .describes("List every problem in open files")
+            .needs_doc(),
             Command::new(
                 WORKSPACE_SYMBOLS,
                 "Go to Symbol in Workspace…",

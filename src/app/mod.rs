@@ -486,6 +486,20 @@ impl App {
             self.goto_diagnostic(if shift { -1 } else { 1 });
             return true;
         }
+        if key.code == KeyCode::F(3) {
+            // Repeat the last find, reopening the bar when it was closed.
+            self.completion = None;
+            if !self.search.open {
+                self.search.open = true;
+                self.refresh_search_matches();
+            }
+            if shift {
+                self.find_previous();
+            } else {
+                self.find_next();
+            }
+            return true;
+        }
         if !ctrl {
             return false;
         }
@@ -498,7 +512,9 @@ impl App {
                 match (c.to_ascii_lowercase(), shift) {
                     (' ', _) => self.execute_command(ids::COMPLETE),
                     ('q', _) => self.request_quit(),
-                    ('s', _) => self.execute_command(ids::SAVE),
+                    ('s', true) => self.execute_command(ids::SAVE_AS),
+                    ('s', false) => self.execute_command(ids::SAVE),
+                    ('n', _) => self.execute_command(ids::NEW_FILE),
                     ('p', true) => self.open_command_palette(),
                     ('p', false) => self.open_quick_open(),
                     ('o', _) => self.execute_command(ids::OPEN),
@@ -512,6 +528,7 @@ impl App {
                     ('e', _) => self.focus_tree(),
                     ('w', _) => self.execute_command(ids::CLOSE_TAB),
                     ('t', _) => self.open_workspace_symbols(),
+                    ('m', true) => self.execute_command(ids::DIAGNOSTICS_LIST),
                     ('i', true) => self.execute_command(ids::FORMAT),
                     _ => return false,
                 }
@@ -523,6 +540,14 @@ impl App {
                 } else {
                     self.editor.next_tab();
                 }
+                true
+            }
+            KeyCode::PageUp => {
+                self.editor.previous_tab();
+                true
+            }
+            KeyCode::PageDown => {
+                self.editor.next_tab();
                 true
             }
             _ => false,
@@ -588,8 +613,10 @@ impl App {
                         _ => {}
                     }
                 } else if alt {
-                    if matches!(c, 'y' | 'Y') {
-                        self.yank_pop();
+                    match c {
+                        'y' | 'Y' => self.yank_pop(),
+                        'm' | 'M' => self.goto_matching_bracket(),
+                        _ => {}
                     }
                 } else {
                     self.with_doc(|d| d.type_char(c));
@@ -1061,6 +1088,7 @@ impl App {
         match id {
             ids::SAVE => self.save(),
             ids::SAVE_ALL => self.save_all(),
+            ids::SAVE_AS => self.open_prompt(PromptKind::SaveAs, "Save as", "path/to/file"),
             ids::OPEN => self.open_prompt(PromptKind::OpenPath, "Open file", "path/to/file.rs"),
             ids::QUICK_OPEN => self.open_quick_open(),
             ids::CLOSE_TAB => self.close_tab(),
@@ -4552,6 +4580,74 @@ mod tests {
         assert!(app.pending_commit);
         assert_eq!(app.busy(), Some("committing"));
 
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ctrl_shift_s_opens_save_as() {
+        let dir = temp_project("save-as");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        app.handle_key(KeyEvent::new(
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ));
+        assert!(matches!(
+            &app.overlay,
+            Overlay::Prompt(prompt) if prompt.kind == PromptKind::SaveAs
+        ));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ctrl_n_opens_the_new_file_prompt() {
+        let dir = temp_project("ctrl-n");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
+        assert!(matches!(
+            &app.overlay,
+            Overlay::Prompt(prompt) if prompt.kind == PromptKind::NewFile
+        ));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn alt_m_jumps_to_the_matching_bracket() {
+        let dir = temp_project("alt-m");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main() {}\n").unwrap();
+        let mut app = App::new(Some(&file)).unwrap();
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .move_to(Position::new(0, 7));
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+        assert_eq!(
+            app.editor.active_document().unwrap().clamped_cursor(),
+            Position::new(0, 8)
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn f3_advances_to_the_next_match() {
+        let dir = temp_project("f3");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "foo\nfoo\nfoo\n").unwrap();
+        let mut app = App::new(Some(&file)).unwrap();
+        app.execute_command(ids::FIND);
+        app.search.query = "foo".to_string();
+        app.refresh_search_matches();
+        app.jump_to_match(0);
+
+        app.handle_key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
+        assert_eq!(app.search.current, Some(1));
+        app.handle_key(KeyEvent::new(KeyCode::F(3), KeyModifiers::SHIFT));
+        assert_eq!(app.search.current, Some(0));
         fs::remove_dir_all(&dir).ok();
     }
 

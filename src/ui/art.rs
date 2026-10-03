@@ -72,6 +72,23 @@ pub fn art_lines(raw: &[&str], style: Style) -> Vec<Line<'static>> {
         .collect()
 }
 
+/// A single-line empty state: the familiar alongside a short message.
+pub fn familiar_line(message: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("( -ω- )  ", theme::soft()),
+        Span::styled(message.to_string(), theme::muted()),
+    ])
+}
+
+/// A one-line loading state with the familiar and a busy sparkle.
+pub fn busy_line(phase: usize, message: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{} ", spinner(phase)), theme::star()),
+        Span::styled("( ･ω･ )  ", theme::soft()),
+        Span::styled(message.to_string(), theme::muted()),
+    ])
+}
+
 /// Wrap content in a rounded frame, padding every row to `inner_width`.
 pub fn frame(
     content: Vec<Line<'static>>,

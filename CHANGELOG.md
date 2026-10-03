@@ -243,6 +243,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   respects `.gitignore`, skips binary and oversized files, and reports at most
   one match per line. A single-line selection prefills the query.
 
+### Keymap
+
+- Rebound **Go to Matching Bracket** from `Ctrl+M` to `Alt+M`: most terminals
+  encode `Ctrl+M` as Enter, so the old binding was effectively unreachable
+  (it still works on terminals with enhanced keyboard reporting).
+- Added `Ctrl+Shift+S` **Save As**, `Ctrl+N` **New File**, `F3`/`Shift+F3` for
+  **find next / previous**, `Ctrl+PageUp`/`Ctrl+PageDown` for **tab switching**
+  and `Ctrl+Shift+M` for the **diagnostics list**.
+- `Ctrl+Shift+S` previously fell through to a plain Save.
+
 ### Editing & UX
 
 - Added **Delete Line** (`Ctrl+Shift+K`), which removes every line the cursor
