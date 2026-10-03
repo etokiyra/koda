@@ -1,7 +1,7 @@
 //! A document: a buffer plus cursor, selection, scroll and undo state.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::editor::buffer::{Buffer, LineEnding};
@@ -144,6 +144,12 @@ impl Document {
             self.record_disk_mtime();
         }
         Ok(saved)
+    }
+
+    /// Point the document at a new path after a rename or move on disk.
+    pub fn set_path(&mut self, path: PathBuf) {
+        self.buffer.path = Some(path);
+        self.record_disk_mtime();
     }
 
     // ----------------------------------------------------------------------

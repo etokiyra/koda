@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-178%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-181%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -146,8 +146,8 @@ implementing one trait and registering it — no changes to the editor or the UI
 
 The editor is the heart of Koda, and it is built for real projects.
 
-- Multiple files in tabs, a lazy `.gitignore`-aware project tree, git branch
-  and per-file status.
+- Multiple files in tabs, a lazy `.gitignore`-aware project tree, file
+  create/rename/delete, git branch and per-file status.
 - Grouped undo, auto-pairing, smart newline, selection-aware indent/outdent,
   line move/duplicate and matching-bracket highlighting.
 - Quick open (`Ctrl+P`), inline fuzzy file filtering in the sidebar (`/`),

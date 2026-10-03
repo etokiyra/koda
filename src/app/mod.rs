@@ -133,6 +133,8 @@ pub struct App {
     lsp_start_at: Option<(Instant, LanguageId)>,
     /// The symbol awaiting a new name, from the rename prompt.
     pending_rename: Option<(PathBuf, usize, usize)>,
+    /// The path awaiting a new name, from the file-rename prompt.
+    pending_rename_file: Option<PathBuf>,
     /// A tool install in progress, if any.
     pending_install: Option<Tool>,
     /// Code actions from the most recent server response.
@@ -199,6 +201,7 @@ impl App {
             lsp_language: None,
             lsp_start_at: None,
             pending_rename: None,
+            pending_rename_file: None,
             pending_install: None,
             pending_code_actions: Vec::new(),
             lsp_status: LspStatus::Offline,
@@ -985,6 +988,9 @@ impl App {
             ids::CLOSE_TAB => self.close_tab(),
             ids::CLOSE_ALL => self.close_all(),
             ids::REVERT => self.revert_file(),
+            ids::NEW_FILE => self.new_file(),
+            ids::RENAME_FILE => self.rename_selected(),
+            ids::DELETE_FILE => self.delete_selected(),
             ids::QUIT => self.request_quit(),
             ids::UNDO => self.with_doc(|d| d.undo()),
             ids::REDO => self.with_doc(|d| d.redo()),
@@ -1035,6 +1041,7 @@ impl App {
             PickerAction::Info(message) => self.set_status(message),
             PickerAction::InstallTool(tool) => self.install_tool(tool),
             PickerAction::ApplyCodeAction(index) => self.apply_code_action(index),
+            PickerAction::DeletePath(path) => self.delete_path(&path),
         }
     }
 
@@ -1070,6 +1077,53 @@ impl App {
                     server.rename(&path, row, col, &input);
                 }
                 self.set_status("Renaming…");
+            }
+            PromptKind::NewFile => {
+                if input.is_empty() {
+                    self.set_error("No file name provided");
+                    return;
+                }
+                let path = if Path::new(&input).is_absolute() {
+                    PathBuf::from(&input)
+                } else {
+                    self.new_file_dir().join(&input)
+                };
+                match filesystem::create_empty_file(&path) {
+                    Ok(()) => {
+                        self.tree_visible = true;
+                        self.workspace.tree.refresh();
+                        self.workspace.tree.select_path(&path);
+                        self.open_path(path);
+                    }
+                    Err(err) => self.set_error(format!("Could not create file: {err}")),
+                }
+            }
+            PromptKind::RenameFile => {
+                let Some(old) = self.pending_rename_file.take() else {
+                    return;
+                };
+                if input.is_empty() {
+                    self.set_error("No new name provided");
+                    return;
+                }
+                let new = if Path::new(&input).is_absolute() {
+                    PathBuf::from(&input)
+                } else {
+                    old.parent()
+                        .map(|parent| parent.join(&input))
+                        .unwrap_or_else(|| PathBuf::from(&input))
+                };
+                if new == old {
+                    self.set_status("Name unchanged");
+                    return;
+                }
+                match filesystem::rename_path(&old, &new) {
+                    Ok(()) => {
+                        self.after_file_rename(&old, &new);
+                        self.set_status(format!("Renamed to {}", new.display()));
+                    }
+                    Err(err) => self.set_error(format!("Rename failed: {err}")),
+                }
             }
         }
     }
@@ -1399,6 +1453,172 @@ impl App {
             }
             Ok(false) => self.set_status("This file is not on disk"),
             Err(err) => self.set_error(format!("Revert failed: {err}")),
+        }
+    }
+
+    /// The directory a new file should be created in: the selected folder when
+    /// the tree has focus, otherwise the active file's folder or the root.
+    fn new_file_dir(&self) -> PathBuf {
+        if self.focus == Focus::FileTree
+            && let Some(entry) = self.workspace.tree.selected_entry()
+        {
+            return if entry.is_dir {
+                entry.path.clone()
+            } else {
+                entry
+                    .path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| self.workspace.root().to_path_buf())
+            };
+        }
+        self.editor
+            .active_document()
+            .and_then(|doc| doc.buffer.path.as_ref())
+            .and_then(|path| path.parent())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.workspace.root().to_path_buf())
+    }
+
+    fn new_file(&mut self) {
+        let dir = self.new_file_dir();
+        let label = match dir.strip_prefix(self.workspace.root()) {
+            Ok(relative) if !relative.as_os_str().is_empty() => {
+                format!("New file in {}", relative.display())
+            }
+            _ => "New file".to_string(),
+        };
+        self.open_prompt(PromptKind::NewFile, &label, "name.rs");
+    }
+
+    /// The file or folder a rename or delete should act on.
+    fn file_op_target(&self) -> Option<PathBuf> {
+        if self.focus == Focus::FileTree
+            && let Some(entry) = self.workspace.tree.selected_entry()
+        {
+            return Some(entry.path.clone());
+        }
+        if let Some(path) = self
+            .editor
+            .active_document()
+            .and_then(|doc| doc.buffer.path.clone())
+        {
+            return Some(path);
+        }
+        self.workspace
+            .tree
+            .selected_entry()
+            .map(|entry| entry.path.clone())
+    }
+
+    fn rename_selected(&mut self) {
+        let Some(path) = self.file_op_target() else {
+            self.set_status("Nothing to rename");
+            return;
+        };
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_string();
+        self.pending_rename_file = Some(path);
+        let mut prompt = Prompt::new(PromptKind::RenameFile, "Rename", "new name");
+        prompt.input = name;
+        self.overlay = Overlay::Prompt(prompt);
+    }
+
+    fn delete_selected(&mut self) {
+        let Some(path) = self.file_op_target() else {
+            self.set_status("Nothing to delete");
+            return;
+        };
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_string();
+        let kind = if path.is_dir() { "folder" } else { "file" };
+        let delete = PickerItem::new(
+            format!("Delete {kind}"),
+            format!("Permanently remove {name}"),
+            PickerAction::DeletePath(path),
+        )
+        .shortcut("Enter");
+        let cancel = PickerItem::new(
+            "Cancel",
+            "Keep it",
+            PickerAction::Info("Nothing deleted".to_string()),
+        );
+        let mut picker = Picker::new(format!("Delete {name}?"), "Choose…", vec![delete, cancel]);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+    }
+
+    /// Update open documents and recent files after a rename or move.
+    fn after_file_rename(&mut self, old: &Path, new: &Path) {
+        for doc in &mut self.editor.documents {
+            let Some(path) = doc.buffer.path.clone() else {
+                continue;
+            };
+            if path == old {
+                doc.set_path(new.to_path_buf());
+            } else if let Ok(relative) = path.strip_prefix(old) {
+                doc.set_path(new.join(relative));
+            }
+        }
+        self.recent_files = std::mem::take(&mut self.recent_files)
+            .into_iter()
+            .map(|path| {
+                if path == old {
+                    new.to_path_buf()
+                } else if let Ok(relative) = path.strip_prefix(old) {
+                    new.join(relative)
+                } else {
+                    path
+                }
+            })
+            .collect();
+        self.workspace.tree.refresh();
+        self.workspace.tree.select_path(new);
+        self.close_armed = None;
+        self.request_detection_for_active();
+    }
+
+    /// Delete `path` (a file or a whole directory), closing affected buffers.
+    fn delete_path(&mut self, path: &Path) {
+        let modified = self.editor.documents.iter().any(|doc| {
+            doc.is_dirty()
+                && doc
+                    .buffer
+                    .path
+                    .as_deref()
+                    .is_some_and(|candidate| candidate.starts_with(path))
+        });
+        if modified {
+            self.set_error("Save or close modified files before deleting");
+            return;
+        }
+        match filesystem::remove_path(path) {
+            Ok(()) => {
+                let mut index = self.editor.documents.len();
+                while index > 0 {
+                    index -= 1;
+                    let matches = self.editor.documents[index]
+                        .buffer
+                        .path
+                        .as_deref()
+                        .is_some_and(|candidate| candidate.starts_with(path));
+                    if matches {
+                        self.editor.close(index);
+                    }
+                }
+                self.recent_files
+                    .retain(|candidate| !candidate.starts_with(path));
+                self.workspace.tree.refresh();
+                self.close_armed = None;
+                self.set_status(format!("Deleted {}", path.display()));
+            }
+            Err(err) => self.set_error(format!("Delete failed: {err}")),
         }
     }
 
@@ -2635,6 +2855,9 @@ impl App {
             ids::REVERT if !document.is_some_and(|doc| doc.is_dirty()) => {
                 (false, Some("no changes to revert".to_string()))
             }
+            ids::RENAME_FILE | ids::DELETE_FILE if self.file_op_target().is_none() => {
+                (false, Some("select a file first".to_string()))
+            }
             ids::DIAGNOSTICS_NEXT | ids::DIAGNOSTICS_PREV
                 if !document.is_some_and(|doc| !doc.diagnostics().is_empty()) =>
             {
@@ -3039,6 +3262,61 @@ mod tests {
         assert!(!doc.is_dirty());
         assert!(!doc.buffer.text().contains("// changed"));
         assert!(doc.buffer.text().contains("fn main"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn new_file_creates_and_opens_it() {
+        let dir = temp_project("new-file");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        app.execute_command(ids::NEW_FILE);
+        assert!(matches!(app.overlay, Overlay::Prompt(_)));
+        app.submit_prompt(PromptKind::NewFile, "created.rs".to_string());
+
+        let created = dir.join("src/created.rs");
+        assert!(created.is_file());
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.path.as_deref(),
+            Some(created.as_path())
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rename_updates_the_open_document() {
+        let dir = temp_project("rename-file");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+
+        app.execute_command(ids::RENAME_FILE);
+        assert!(matches!(app.overlay, Overlay::Prompt(_)));
+        app.submit_prompt(PromptKind::RenameFile, "renamed.rs".to_string());
+
+        assert!(!file.exists());
+        let renamed = dir.join("src/renamed.rs");
+        assert!(renamed.is_file());
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.path.as_deref(),
+            Some(renamed.as_path())
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn delete_removes_the_file_and_closes_its_tab() {
+        let dir = temp_project("delete-file");
+        let a = dir.join("src/main.rs");
+        let b = dir.join("src/extra.rs");
+        fs::write(&b, "pub fn extra() {}\n").unwrap();
+        let mut app = App::new(Some(&a)).unwrap();
+        app.open_path(b.clone());
+        assert_eq!(app.editor.len(), 2);
+
+        app.delete_path(&b);
+        assert!(!b.exists());
+        assert_eq!(app.editor.len(), 1);
         fs::remove_dir_all(&dir).ok();
     }
 

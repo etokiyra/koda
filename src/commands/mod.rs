@@ -15,6 +15,9 @@ pub mod ids {
     pub const CLOSE_TAB: &str = "file.closeTab";
     pub const CLOSE_ALL: &str = "file.closeAll";
     pub const REVERT: &str = "file.revert";
+    pub const NEW_FILE: &str = "file.new";
+    pub const RENAME_FILE: &str = "file.rename";
+    pub const DELETE_FILE: &str = "file.delete";
     pub const QUIT: &str = "app.quit";
 
     pub const UNDO: &str = "edit.undo";
@@ -142,6 +145,12 @@ impl CommandRegistry {
             Command::new(REVERT, "Revert File", "File", None)
                 .describes("Discard changes and reload the file from disk")
                 .needs_doc(),
+            Command::new(NEW_FILE, "New File…", "File", None)
+                .describes("Create a file in the selected folder"),
+            Command::new(RENAME_FILE, "Rename…", "File", None)
+                .describes("Rename the selected file or folder"),
+            Command::new(DELETE_FILE, "Delete…", "File", None)
+                .describes("Delete the selected file or folder"),
             Command::new(QUIT, "Quit", "File", Some("Ctrl+Q")).describes("Leave Koda"),
             Command::new(UNDO, "Undo", "Edit", Some("Ctrl+Z"))
                 .describes("Undo the last change")

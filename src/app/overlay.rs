@@ -21,6 +21,8 @@ pub enum PickerAction {
     InstallTool(crate::language::tools::Tool),
     /// Apply the code action at an index in the last response.
     ApplyCodeAction(usize),
+    /// Delete a file or directory after confirmation.
+    DeletePath(PathBuf),
 }
 
 /// A single row in a picker.
@@ -174,6 +176,8 @@ pub enum PromptKind {
     OpenPath,
     SaveAs,
     Rename,
+    NewFile,
+    RenameFile,
 }
 
 /// A single-line text prompt.

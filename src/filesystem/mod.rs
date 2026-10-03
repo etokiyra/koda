@@ -101,6 +101,39 @@ pub fn write_string(path: &Path, contents: &str) -> std::io::Result<()> {
     std::fs::write(path, contents)
 }
 
+/// Create an empty file (and its parent directories), failing if it exists.
+pub fn create_empty_file(path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map(|_| ())
+}
+
+/// Rename or move a path.
+pub fn rename_path(from: &Path, to: &Path) -> std::io::Result<()> {
+    if let Some(parent) = to.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::rename(from, to)
+}
+
+/// Remove a file or a directory and everything inside it.
+pub fn remove_path(path: &Path) -> std::io::Result<()> {
+    if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}
+
 /// Collect files under `root`, breadth-first, skipping ignored directories and
 /// anything hidden by the project's `.gitignore` rules.
 ///
