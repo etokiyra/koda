@@ -139,6 +139,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Language intelligence
 
+- Completion matching is now fuzzy with a prefix bias: `mrs` finds
+  `main_result`, while an exact prefix (`if` over `impl`) still ranks first.
+  This applies to both built-in and language-server candidates.
 - **Go to definition now works across files without a language server.** When
   the word under the cursor is not defined in the current file, `F12` searches
   the project for a same-named symbol and opens the workspace-symbol picker

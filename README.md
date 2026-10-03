@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-232%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-234%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -87,7 +87,8 @@ keep you productive **offline**.
   navigation, a diagnostics list, and an optional inline note at the end of the
   affected line (**Toggle Inline Diagnostics**).
 - **Completion** — `Ctrl+Space`, instantly merging buffer identifiers, language
-  keywords, and server candidates.
+  keywords, and server candidates. Matching is fuzzy and prefix-biased, so
+  `mrs` finds `main_result` while exact prefixes still rank first.
 - **Hover** — `Ctrl+Shift+H`, with the symbol's kind, definition and usage count.
 - **Navigation** — `F12` go-to-definition and `Shift+F12` find-references,
   across files when a server is attached; without one, `F12` falls back to a

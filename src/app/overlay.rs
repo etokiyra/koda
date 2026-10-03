@@ -317,21 +317,37 @@ impl CompletionState {
     }
 
     /// Recompute `items` from the pool for the current prefix.
+    ///
+    /// Matching is a fuzzy subsequence so `mrs` still finds `main_result`, but
+    /// the ordering keeps prefix and short matches first: `if` ranks above
+    /// `impl`, and an exact prefix beats a scattered match.
     pub fn refilter(&mut self) {
         let lower = self.prefix.to_lowercase();
-        self.items = self
-            .pool
-            .iter()
-            .filter(|item| lower.is_empty() || item.label.to_lowercase().starts_with(&lower))
-            .cloned()
-            .collect();
-        // Prefer short names, then alphabetical: `if` ranks above `impl`.
-        self.items.sort_by(|a, b| {
-            a.label
-                .len()
-                .cmp(&b.label.len())
-                .then_with(|| a.label.cmp(&b.label))
-        });
+        if lower.is_empty() {
+            self.items = self.pool.clone();
+        } else {
+            let mut scored: Vec<(i32, &Completion)> = self
+                .pool
+                .iter()
+                .filter_map(|item| {
+                    fuzzy_score(&lower, &item.label).map(|score| {
+                        // A prefix match is a strong signal; bias it upward.
+                        let bias = if item.label.to_lowercase().starts_with(&lower) {
+                            -100
+                        } else {
+                            0
+                        };
+                        (score + bias, item)
+                    })
+                })
+                .collect();
+            scored.sort_by(|a, b| {
+                a.0.cmp(&b.0)
+                    .then_with(|| a.1.label.len().cmp(&b.1.label.len()))
+                    .then_with(|| a.1.label.cmp(&b.1.label))
+            });
+            self.items = scored.into_iter().map(|(_, item)| item.clone()).collect();
+        }
         if self.selected >= self.items.len() {
             self.selected = self.items.len().saturating_sub(1);
         }
@@ -497,5 +513,38 @@ impl TreeFilter {
     pub fn backspace(&mut self) {
         self.query.pop();
         self.refilter();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::language::completion::CompletionKind;
+
+    #[test]
+    fn completion_matches_fuzzy_subsequences() {
+        let pool = vec![
+            Completion::new("main_result", CompletionKind::Variable),
+            Completion::new("map", CompletionKind::Variable),
+            Completion::new("maximum", CompletionKind::Variable),
+        ];
+        let state = CompletionState::new(pool, "mrs".to_string());
+        let labels: Vec<&str> = state.items.iter().map(|item| item.label.as_str()).collect();
+        assert!(labels.contains(&"main_result"), "labels: {labels:?}");
+        assert!(!labels.contains(&"map"), "labels: {labels:?}");
+    }
+
+    #[test]
+    fn completion_ranks_prefix_matches_first() {
+        let pool = vec![
+            Completion::new("account", CompletionKind::Variable),
+            Completion::new("counter", CompletionKind::Variable),
+            Completion::new("count", CompletionKind::Variable),
+        ];
+        let state = CompletionState::new(pool, "count".to_string());
+        let labels: Vec<&str> = state.items.iter().map(|item| item.label.as_str()).collect();
+        assert_eq!(labels.first(), Some(&"count"), "labels: {labels:?}");
+        assert!(labels.contains(&"counter"));
+        assert!(labels.contains(&"account"));
     }
 }
