@@ -4874,6 +4874,28 @@ done
     }
 
     #[test]
+    fn detects_python_from_extension_and_shebang() {
+        let dir = temp_project("python");
+        let file = dir.join("app.py");
+        fs::write(&file, "def main():\n    pass\n").unwrap();
+        let app = App::new(Some(&file)).unwrap();
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.language,
+            LanguageId::Python
+        );
+
+        // An extensionless script is recognised from its shebang.
+        let script = dir.join("tool");
+        fs::write(&script, "#!/usr/bin/env python3\nprint('hi')\n").unwrap();
+        let app = App::new(Some(&script)).unwrap();
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.language,
+            LanguageId::Python
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn warns_when_a_dirty_file_changes_on_disk() {
         let dir = temp_project("external-dirty");
         let file = dir.join("src/main.rs");

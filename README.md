@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-203%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-210%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -136,6 +136,7 @@ them.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | **Rust** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **Go** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
+| **Python** | built-in | built-in | built-in | built-in | built-in | built-in | — |
 | **Markdown** | built-in | — | built-in (headings) | — | — | — | — |
 | **JSON** | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — |
 | **TOML** | built-in | built-in | built-in (tables & keys) | built-in (literals) | — | — | — |
@@ -143,8 +144,11 @@ them.
 
 Prose and configuration files are first-class too. Markdown, JSON, TOML and YAML
 get syntax highlighting, structural diagnostics where they make sense, and a
-symbol outline, all offline and with no setup. Adding a language means
-implementing one trait and registering it — no changes to the editor or the UI.
+symbol outline, all offline and with no setup. **Python** is supported entirely
+by Koda's built-in intelligence for now — highlighting, diagnostics, symbols,
+completion, hover and navigation — with no language server to install; rename
+and code actions wait for one. Adding a language means implementing one trait
+and registering it — no changes to the editor or the UI.
 
 ## ❯ Editing & workflow
 
@@ -286,6 +290,7 @@ src/
 │   ├── data.rs     # shared scanners for JSON/TOML/YAML
 │   ├── rust/       # Rust provider
 │   ├── go/          # Go provider
+│   ├── python/     # Python provider (built-in, offline)
 │   ├── markdown/   # Markdown provider (headings as symbols)
 │   └── json|toml|yaml/  # configuration-data providers
 ├── project/      # workspace, project detection, file tree

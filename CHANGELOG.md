@@ -52,6 +52,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Language support
 
+- Added **Python** support, entirely through Koda's built-in intelligence so it
+  works offline with nothing to install: syntax highlighting (triple-quoted
+  strings, decorators, f-string text), structural diagnostics, symbols
+  (functions, classes, module constants), completion, hover and within-file
+  navigation. Rename and code actions remain unavailable until a Python
+  language server is offered.
+- Detection now corroborates the file's own language when a repository has
+  several project markers, so a `.rs` file next to a `pyproject.toml` is still
+  confidently Rust (and vice versa) instead of depending on descriptor order.
 - Added built-in support for **Markdown, JSON, TOML and YAML**. Each gets
   syntax highlighting with no setup, so documentation and configuration files
   are no longer plain text.

@@ -36,6 +36,7 @@ mod tests {
             extensions: match id {
                 LanguageId::Rust => &["rs"],
                 LanguageId::Go => &["go"],
+                LanguageId::Python => &["py"],
                 LanguageId::Markdown => &["md"],
                 LanguageId::Json => &["json"],
                 LanguageId::Toml => &["toml"],
@@ -45,6 +46,7 @@ mod tests {
             project_markers: match id {
                 LanguageId::Rust => &["Cargo.toml"],
                 LanguageId::Go => &["go.mod"],
+                LanguageId::Python => &["pyproject.toml"],
                 _ => &[],
             },
             file_names: &[],
@@ -137,5 +139,39 @@ mod tests {
             content_sample: Some("package main\n"),
         });
         assert_eq!(result.language, LanguageId::Go);
+    }
+
+    #[test]
+    fn python_file_in_a_python_project_is_high() {
+        let mut e = engine();
+        e.register(descriptor(LanguageId::Python));
+        let result = e.detect(&DetectionInput {
+            path: None,
+            file_name: Some("main.py"),
+            extension: Some("py"),
+            project_markers: &["pyproject.toml".to_string()],
+            content_sample: None,
+        });
+        assert_eq!(result.language, LanguageId::Python);
+        assert_eq!(result.confidence, Confidence::High);
+    }
+
+    #[test]
+    fn mixed_project_corroborates_the_files_own_language() {
+        // Python is listed first, but the `.rs` file must still win so the
+        // project bonus is deterministic.
+        let e = DetectionEngine::new(vec![
+            descriptor(LanguageId::Python),
+            descriptor(LanguageId::Rust),
+        ]);
+        let result = e.detect(&DetectionInput {
+            path: None,
+            file_name: Some("main.rs"),
+            extension: Some("rs"),
+            project_markers: &["Cargo.toml".to_string(), "pyproject.toml".to_string()],
+            content_sample: None,
+        });
+        assert_eq!(result.language, LanguageId::Rust);
+        assert_eq!(result.confidence, Confidence::High);
     }
 }

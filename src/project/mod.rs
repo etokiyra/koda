@@ -17,6 +17,7 @@ use file_tree::FileTree;
 pub enum ProjectKind {
     Rust,
     Go,
+    Python,
     Generic,
 }
 
@@ -26,6 +27,10 @@ pub const KNOWN_MARKERS: &[(&str, ProjectKind)] = &[
     ("Cargo.lock", ProjectKind::Rust),
     ("go.mod", ProjectKind::Go),
     ("go.sum", ProjectKind::Go),
+    ("pyproject.toml", ProjectKind::Python),
+    ("setup.py", ProjectKind::Python),
+    ("requirements.txt", ProjectKind::Python),
+    ("Pipfile", ProjectKind::Python),
 ];
 
 impl ProjectKind {
@@ -33,6 +38,7 @@ impl ProjectKind {
         match self {
             ProjectKind::Rust => "Rust",
             ProjectKind::Go => "Go",
+            ProjectKind::Python => "Python",
             ProjectKind::Generic => "Workspace",
         }
     }
@@ -41,6 +47,7 @@ impl ProjectKind {
         match self {
             ProjectKind::Rust => LanguageId::Rust,
             ProjectKind::Go => LanguageId::Go,
+            ProjectKind::Python => LanguageId::Python,
             ProjectKind::Generic => LanguageId::Unknown,
         }
     }

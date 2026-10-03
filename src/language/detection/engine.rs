@@ -206,7 +206,7 @@ impl DetectionEngine {
         }
 
         // ---- Phase 2: project context corroborates the file's own signals ----
-        if let Some((project_language, project_reason)) = self.project_language(input)
+        if let Some((project_language, project_reason)) = self.project_language(input, &scores)
             && let Some((_, score)) = scores.iter_mut().find(|(id, _)| *id == project_language)
         {
             *score += W_PROJECT_CONTEXT_BONUS;
@@ -242,7 +242,16 @@ impl DetectionEngine {
     }
 
     /// The language implied by the project markers, if any.
-    fn project_language(&self, input: &DetectionInput<'_>) -> Option<(LanguageId, String)> {
+    ///
+    /// When several markers match (a mixed repository), prefer the language that
+    /// already has file-level evidence so corroboration is deterministic and
+    /// always supports the file's own nature.
+    fn project_language(
+        &self,
+        input: &DetectionInput<'_>,
+        scores: &[(LanguageId, u32)],
+    ) -> Option<(LanguageId, String)> {
+        let mut candidates: Vec<(LanguageId, String)> = Vec::new();
         for descriptor in &self.descriptors {
             for marker in input.project_markers {
                 if descriptor
@@ -250,11 +259,16 @@ impl DetectionEngine {
                     .iter()
                     .any(|m| m.eq_ignore_ascii_case(marker))
                 {
-                    return Some((descriptor.id, format!("`{marker}` project context")));
+                    candidates.push((descriptor.id, format!("`{marker}` project context")));
+                    break;
                 }
             }
         }
-        None
+        candidates
+            .iter()
+            .find(|(id, _)| scores.iter().any(|(score_id, _)| score_id == id))
+            .cloned()
+            .or_else(|| candidates.into_iter().next())
     }
 }
 

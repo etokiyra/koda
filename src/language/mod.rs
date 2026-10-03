@@ -21,6 +21,7 @@ pub mod json;
 pub mod lsp;
 pub mod markdown;
 pub mod provider;
+pub mod python;
 pub mod rust;
 pub mod symbols;
 pub mod toml;

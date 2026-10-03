@@ -50,6 +50,7 @@ src/
 │   ├── provider/         # LanguageProvider trait + ProviderRegistry
 │   ├── rust/mod.rs       # Rust provider
 │   ├── go/mod.rs         # Go provider
+│   ├── python/mod.rs     # Python provider
 │   ├── markdown/mod.rs   # Markdown provider
 │   ├── json/mod.rs       # JSON provider
 │   ├── toml/mod.rs       # TOML provider
@@ -119,7 +120,7 @@ These are separate concerns and must stay separate:
   `LanguageDescriptor`s and combines signals into a `DetectionResult`
   (`language`, `confidence`, `reasons`). It never imports provider
   implementations.
-- **Providers** (`language/provider` + `language/{rust,go,markdown,json,toml,yaml}`)
+- **Providers** (`language/provider` + `language/{rust,go,python,markdown,json,toml,yaml}`)
   implement the `LanguageProvider` trait and *produce* those descriptors via
   `descriptor()`.
 
