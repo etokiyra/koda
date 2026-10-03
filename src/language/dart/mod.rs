@@ -9,11 +9,14 @@
 use crate::language::completion::{Completion, CompletionKind};
 use crate::language::data::{push_merged, scan_number, scan_quoted};
 use crate::language::detection::LanguageDescriptor;
+use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
 use crate::language::provider::{
     Capability, HighlightSpan, HighlightState, LanguageProvider, TokenKind,
 };
 use crate::language::symbols::{Location, Symbol, SymbolKind, word_at};
+
+use std::path::Path;
 
 const KEYWORDS: &[&str] = &[
     "abstract",
@@ -135,7 +138,16 @@ impl LanguageProvider for DartProvider {
             Capability::GotoReference,
             Capability::Completion,
             Capability::Hover,
+            Capability::Formatting,
         ]
+    }
+
+    fn format(&self, path: &Path, text: &str) -> FormatOutcome {
+        crate::language::format::dart_format(path, text)
+    }
+
+    fn formatter(&self) -> Option<&'static str> {
+        Some("dart")
     }
 
     fn diagnostics(&self, text: &str) -> Vec<crate::language::diagnostics::Diagnostic> {
@@ -437,5 +449,16 @@ typedef Handler = void Function();
     fn diagnostics_report_unbalanced_braces() {
         let diagnostics = DartProvider.diagnostics("void main() {\n");
         assert!(diagnostics.iter().any(|d| d.message.contains("unclosed")));
+    }
+
+    #[test]
+    fn dart_offers_sdk_formatting() {
+        assert!(
+            DartProvider
+                .capabilities()
+                .contains(&Capability::Formatting),
+            "Dart exposes Formatting"
+        );
+        assert_eq!(DartProvider.formatter(), Some("dart"));
     }
 }

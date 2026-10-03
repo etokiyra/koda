@@ -45,6 +45,10 @@ const LUA_LS_VERSION: &str = "3.19.1";
 /// bundled Kotlin compiler must run on the dedicated JDK 21 Koda installs.
 const KOTLIN_LS_VERSION: &str = "1.3.13";
 
+/// The Dart SDK release Koda provisions. Pinned so the archive and Google's
+/// published `.sha256sum` stay in step.
+const DART_SDK_VERSION: &str = "3.13.5";
+
 /// The longest a single install command may run before it is killed. Package
 /// managers can legitimately take a while on a slow link, but a hung process
 /// must never wedge the background worker forever.
@@ -143,7 +147,8 @@ impl Tool {
             Tool::Sqls => "sqls",
             Tool::RubyLs => "solargraph",
             Tool::AsmLsp => "asm-lsp",
-            Tool::PerlLs => "perl-language-server",
+            // The module has no installed script; it is launched through `perl`.
+            Tool::PerlLs => "perl",
             Tool::DartAnalyzer => "dart",
             Tool::ElixirLs => "elixir-ls",
             Tool::SwiftLs => "sourcekit-lsp",
@@ -155,6 +160,19 @@ impl Tool {
             Tool::ClangFormat => "clang-format",
             Tool::Shfmt => "shfmt",
             Tool::PerlTidy => "perltidy",
+        }
+    }
+
+    /// Additional executable names a tool may be installed under.
+    ///
+    /// Some ecosystems ship different launcher names depending on how the tool
+    /// was installed (for example ElixirLS's `language_server.sh` release
+    /// script versus the `elixir-ls` binary packaged by Homebrew/Mason). Koda
+    /// probes every name so an existing install is still found.
+    pub fn candidates(self) -> &'static [&'static str] {
+        match self {
+            Tool::ElixirLs => &["language_server.sh"],
+            _ => &[],
         }
     }
 
@@ -318,6 +336,9 @@ impl Tool {
             Tool::RubyLs => &["stdio"],
             // The Dart SDK's analysis server is launched as a subcommand.
             Tool::DartAnalyzer => &["language-server"],
+            // `Perl::LanguageServer` has no installed script; it runs as a Perl
+            // one-liner over stdio.
+            Tool::PerlLs => &["-MPerl::LanguageServer", "-e", "Perl::LanguageServer->run"],
             // The extracted VS Code servers speak stdio.
             Tool::HtmlLs | Tool::CssLs => &["--stdio"],
             _ => &[],
@@ -364,9 +385,9 @@ impl Tool {
             Tool::RubyLs => "install with `gem install solargraph`",
             Tool::AsmLsp => "install with `cargo install asm-lsp`",
             Tool::PerlLs => {
-                "install the Perl::LanguageServer module (for example `cpan Perl::LanguageServer`)"
+                "Koda installs Perl::LanguageServer with `cpanm` into an isolated local::lib"
             }
-            Tool::DartAnalyzer => "install the Dart SDK — Koda uses its bundled analysis server",
+            Tool::DartAnalyzer => "Koda can install a managed Dart SDK for the analysis server",
             Tool::ElixirLs => "install ElixirLS; it needs your Erlang/Elixir toolchain",
             Tool::SwiftLs => "install the Swift toolchain — it ships `sourcekit-lsp`",
             Tool::HtmlLs | Tool::CssLs => "install with npm — Koda provisions Node.js if missing",
@@ -420,7 +441,8 @@ impl Tool {
             Tool::AsmLsp => Some(("cargo", &["install", "asm-lsp"])),
             // Perl, Dart, Elixir and Swift servers need a toolchain Koda does
             // not manage; they are discovered when present.
-            Tool::PerlLs | Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => None,
+            Tool::PerlLs => Some(("cpanm", &["Perl::LanguageServer"])),
+            Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => None,
             // `jdtls` and `OmniSharp` are installed by Koda's own managed
             // download plan rather than a single package-manager command.
             Tool::Jdtls | Tool::OmniSharp => None,
@@ -459,8 +481,9 @@ impl Tool {
             Tool::Sqls => &["go"],
             Tool::RubyLs => &["gem"],
             Tool::AsmLsp => &["cargo"],
-            Tool::PerlLs => &["perl"],
-            Tool::DartAnalyzer => &["dart"],
+            Tool::PerlLs => &["cpanm"],
+            // The Dart SDK is provided by Koda's managed download plan.
+            Tool::DartAnalyzer => &[],
             Tool::ElixirLs => &["elixir"],
             Tool::SwiftLs => &["swift"],
             // Formatters.
@@ -522,9 +545,13 @@ impl Tool {
                 "cargo install",
                 InstallCommand::new("cargo", &["install", "asm-lsp"]),
             )],
+            // The Dart SDK is self-contained and managed by Koda.
+            Tool::DartAnalyzer => dart_sdk_attempts(),
+            // `Perl::LanguageServer` installs into an isolated local::lib.
+            Tool::PerlLs => perl_attempts(),
             // These servers need a toolchain Koda does not manage; they are
             // discovered when the user already has one.
-            Tool::PerlLs | Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => Vec::new(),
+            Tool::ElixirLs | Tool::SwiftLs => Vec::new(),
             Tool::Jdtls => jdtls_attempts(),
             Tool::OmniSharp => omnisharp_attempts(),
             Tool::HtmlLs | Tool::CssLs => npm_attempts(&["vscode-langservers-extracted"]),
@@ -582,6 +609,10 @@ pub enum InstallStep {
     /// Node.js project publishes in `SHASUMS256.txt`. The archive still needs
     /// an [`InstallStep::Extract`].
     NodeRuntime { dest: PathBuf },
+    /// Download and verify a Koda-managed Dart SDK, whose checksum Google
+    /// publishes beside the archive. The archive still needs an
+    /// [`InstallStep::Extract`].
+    DartSdk { dest: PathBuf },
     /// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`, optionally
     /// dropping `strip` leading path components.
     Extract {
@@ -943,6 +974,7 @@ fn run_step(step: &InstallStep) -> Result<(), String> {
         InstallStep::Download { url, dest, sha256 } => download(url, dest, sha256.as_deref()),
         InstallStep::AdoptiumJdk { feature, dest } => adoptium_jdk(*feature, dest),
         InstallStep::NodeRuntime { dest } => node_runtime(dest),
+        InstallStep::DartSdk { dest } => dart_sdk(dest),
         InstallStep::Extract {
             archive,
             dest,
@@ -1207,6 +1239,62 @@ fn checksum_for(sums: &str, asset: &str) -> Option<String> {
     })
 }
 
+/// The Dart SDK archive for this platform, or `None` when Google publishes none.
+fn dart_sdk_asset() -> Option<&'static str> {
+    Some(match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "dartsdk-linux-x64-release.zip",
+        ("linux", "aarch64") => "dartsdk-linux-arm64-release.zip",
+        ("macos", "x86_64") => "dartsdk-macos-x64-release.zip",
+        ("macos", "aarch64") => "dartsdk-macos-arm64-release.zip",
+        ("windows", "x86_64") => "dartsdk-windows-x64-release.zip",
+        _ => return None,
+    })
+}
+
+/// Download and verify a Koda-managed Dart SDK.
+///
+/// Google publishes a sibling `.sha256sum` for every SDK archive, so Koda reads
+/// the checksum for *this* platform's asset and verifies it before extraction.
+/// Only the Dart SDK is downloaded; Flutter is not, because the analysis server
+/// is part of Dart and a Dart-only project does not need it.
+fn dart_sdk(dest: &Path) -> Result<(), String> {
+    let asset = dart_sdk_asset().ok_or_else(|| {
+        "no managed Dart SDK is published for this platform; install the Dart SDK manually"
+            .to_string()
+    })?;
+    let base = format!(
+        "https://storage.googleapis.com/dart-archive/channels/stable/release/{DART_SDK_VERSION}/sdk/{asset}"
+    );
+    let sums_url = format!("{base}.sha256sum");
+    let output = install_command("curl")
+        .args([
+            "--proto",
+            "=https",
+            "--tlsv1.2",
+            "-sS",
+            "-L",
+            "--fail",
+            "--connect-timeout",
+            "30",
+            "--max-time",
+            "60",
+        ])
+        .arg(&sums_url)
+        .output()
+        .map_err(|err| format!("could not query the Dart SDK checksum: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "could not query the Dart SDK checksum: {}",
+            first_stderr_line(&output.stderr)
+        ));
+    }
+    // Fail closed: the SDK runs as the language server, so never install it
+    // without a verified checksum.
+    let checksum = checksum_for(&String::from_utf8_lossy(&output.stdout), asset)
+        .ok_or_else(|| format!("Dart published no checksum for {asset}"))?;
+    download(&base, dest, Some(&checksum))
+}
+
 /// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`.
 ///
 /// `tar` supports `--strip-components`; `unzip` does not, so a stripped zip is
@@ -1378,7 +1466,8 @@ fn step_available(step: &InstallStep) -> bool {
         }
         InstallStep::Download { .. }
         | InstallStep::AdoptiumJdk { .. }
-        | InstallStep::NodeRuntime { .. } => locate("curl").is_some(),
+        | InstallStep::NodeRuntime { .. }
+        | InstallStep::DartSdk { .. } => locate("curl").is_some(),
         InstallStep::Extract { archive, .. } => {
             let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
             locate(if zip { "unzip" } else { "tar" }).is_some()
@@ -1497,7 +1586,7 @@ impl ToolRegistry {
 }
 
 fn probe(tool: Tool) -> ToolStatus {
-    let Some(path) = locate(tool.program()) else {
+    let Some(path) = locate_tool(tool) else {
         return ToolStatus {
             tool,
             available: false,
@@ -1599,6 +1688,13 @@ fn alive_or_clean(child: &mut std::process::Child) -> bool {
     )
 }
 
+/// Locate a tool's executable, trying its primary name and any alternates.
+fn locate_tool(tool: Tool) -> Option<PathBuf> {
+    std::iter::once(tool.program())
+        .chain(tool.candidates().iter().copied())
+        .find_map(locate)
+}
+
 /// Whether `program` can be found, returning its full path.
 ///
 /// `PATH` is searched first, then a handful of well-known user and system bin
@@ -1671,6 +1767,8 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         dirs.push(tools.join("jdtls/bin"));
         dirs.push(tools.join("lua-language-server/bin"));
         dirs.push(tools.join("kotlin-language-server/bin"));
+        dirs.push(tools.join("dart-sdk/bin"));
+        dirs.push(tools.join("perl5/bin"));
         dirs.push(tools.join("jdk/bin"));
         dirs.push(tools.join("dotnet"));
         dirs.push(tools.join("bin"));
@@ -1779,6 +1877,17 @@ pub fn kotlin_ls_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("kotlin-language-server"))
 }
 
+/// Koda's managed Dart SDK directory.
+pub fn dart_sdk_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("dart-sdk"))
+}
+
+/// Koda's isolated Perl `local::lib`, used to install `Perl::LanguageServer`
+/// without touching the system Perl.
+pub fn perl_local_lib_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("perl5"))
+}
+
 /// Scratch space for downloaded archives.
 fn downloads_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("downloads"))
@@ -1818,6 +1927,15 @@ pub fn launch_env(tool: Tool) -> Vec<(String, String)> {
         Tool::BashLs | Tool::TypeScriptLs | Tool::HtmlLs | Tool::CssLs => {
             if let Some(node) = node_bin_dir() {
                 env.push(("PATH".to_string(), prepend_path(&node.to_string_lossy())));
+            }
+        }
+        // A server installed into Koda's isolated Perl local::lib needs that
+        // library and its bin directory, and nothing from the system Perl.
+        Tool::PerlLs => {
+            if let Some(lib) = perl_local_lib_dir() {
+                let lib = lib.to_string_lossy().into_owned();
+                env.push(("PERL5LIB".to_string(), format!("{lib}/lib/perl5")));
+                env.push(("PATH".to_string(), prepend_path(&format!("{lib}/bin"))));
             }
         }
         _ => {}
@@ -1972,6 +2090,57 @@ fn kotlin_ls_attempts() -> Vec<InstallAttempt> {
             // The distribution's archive root is `server/`.
             InstallStep::Extract {
                 archive: ls_archive,
+                dest,
+                strip: 1,
+            },
+        ],
+    )]
+}
+
+/// Install `Perl::LanguageServer` into an isolated `local::lib`.
+///
+/// `cpanm --local-lib` never touches the system Perl; it compiles the module and
+/// its dependencies (some XS) under Koda's data directory. If `cpanm` is not
+/// present Koda reports the requirement instead of running an interactive
+/// `cpan`.
+fn perl_attempts() -> Vec<InstallAttempt> {
+    let Some(dest) = perl_local_lib_dir() else {
+        return Vec::new();
+    };
+    vec![InstallAttempt::one(
+        "cpanm (isolated local::lib)",
+        InstallCommand::with_args(
+            "cpanm",
+            vec![
+                "--local-lib".to_string(),
+                dest.to_string_lossy().into_owned(),
+                "--notest".to_string(),
+                "Perl::LanguageServer".to_string(),
+            ],
+        ),
+    )]
+}
+
+/// A Koda-managed Dart SDK for the analysis server (`dart language-server`).
+///
+/// The SDK archive extracts to a `dart-sdk/` root, so it is stripped by one
+/// level. Only Dart is installed; Flutter is not downloaded.
+fn dart_sdk_attempts() -> Vec<InstallAttempt> {
+    let (Some(downloads), Some(dest)) = (downloads_dir(), dart_sdk_dir()) else {
+        return Vec::new();
+    };
+    let Some(asset) = dart_sdk_asset() else {
+        return Vec::new();
+    };
+    let archive = downloads.join(asset);
+    vec![InstallAttempt::managed(
+        "a managed Dart SDK",
+        vec![
+            InstallStep::DartSdk {
+                dest: archive.clone(),
+            },
+            InstallStep::Extract {
+                archive,
                 dest,
                 strip: 1,
             },
@@ -2165,18 +2334,21 @@ mod tests {
             Some(("cargo", &["install", "asm-lsp"][..]))
         );
         // Toolchains Koda does not manage are discovered, never promised.
-        for tool in [
-            Tool::DartAnalyzer,
-            Tool::ElixirLs,
-            Tool::SwiftLs,
-            Tool::PerlLs,
-        ] {
+        for tool in [Tool::ElixirLs, Tool::SwiftLs] {
             assert!(
                 tool.install_command().is_none(),
                 "{tool:?} must not advertise an installer"
             );
             assert!(!can_install(tool), "{tool:?} must not promise an install");
         }
+        // Perl installs into an isolated local::lib when `cpanm` is present.
+        assert_eq!(can_install(Tool::PerlLs), locate("cpanm").is_some());
+        // The Dart SDK is managed, so Koda can install it where published.
+        assert!(Tool::DartAnalyzer.install_command().is_none());
+        assert!(
+            can_install(Tool::DartAnalyzer) || dart_sdk_asset().is_none(),
+            "Dart should be installable where an SDK is published"
+        );
         assert_eq!(
             Tool::for_language(LanguageId::Dart, ToolPurpose::LanguageServer),
             Some(Tool::DartAnalyzer)
@@ -2185,6 +2357,66 @@ mod tests {
             Tool::for_language(LanguageId::Swift, ToolPurpose::LanguageServer),
             Some(Tool::SwiftLs)
         );
+    }
+
+    #[test]
+    fn perl_runs_as_a_perl_one_liner_with_an_isolated_lib() {
+        assert_eq!(Tool::PerlLs.program(), "perl");
+        assert!(
+            Tool::PerlLs
+                .server_args()
+                .contains(&"-MPerl::LanguageServer"),
+            "Perl is launched through the module: {:?}",
+            Tool::PerlLs.server_args()
+        );
+        if let Some(lib) = perl_local_lib_dir() {
+            let env = launch_env(Tool::PerlLs);
+            let perl5lib = env
+                .iter()
+                .find(|(key, _)| key == "PERL5LIB")
+                .map(|(_, value)| value.clone());
+            assert_eq!(
+                perl5lib,
+                Some(format!("{}/lib/perl5", lib.display())),
+                "the managed local::lib must be on PERL5LIB"
+            );
+        }
+    }
+
+    #[test]
+    fn elixir_has_alternate_launcher_names() {
+        assert!(Tool::ElixirLs.candidates().contains(&"language_server.sh"));
+        assert!(Tool::RustAnalyzer.candidates().is_empty());
+        assert_eq!(Tool::ElixirLs.program(), "elixir-ls");
+    }
+
+    #[test]
+    fn dart_sdk_plan_is_checksum_verified() {
+        let attempts = Tool::DartAnalyzer.install_attempts();
+        if dart_sdk_asset().is_none() || tools_dir().is_none() {
+            assert!(attempts.is_empty());
+            return;
+        }
+        let steps = &attempts.first().expect("a Dart plan").steps;
+        assert!(
+            steps
+                .iter()
+                .any(|step| matches!(step, InstallStep::DartSdk { .. })),
+            "Dart must download the SDK: {steps:?}"
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| matches!(step, InstallStep::Extract { strip: 1, .. })),
+            "the SDK archive root must be stripped: {steps:?}"
+        );
+        // The sibling `.sha256sum` uses `<hash> *<name>`.
+        let body = "ea864bc64df30a6b8bdf30b2e32550f7717d9a890de8f40293aeabb924fe232b *dartsdk-linux-x64-release.zip\n";
+        assert_eq!(
+            checksum_for(body, "dartsdk-linux-x64-release.zip").as_deref(),
+            Some("ea864bc64df30a6b8bdf30b2e32550f7717d9a890de8f40293aeabb924fe232b")
+        );
+        assert_eq!(checksum_for(body, "missing.zip"), None);
     }
 
     #[test]

@@ -116,6 +116,40 @@ pub fn perltidy(text: &str) -> FormatOutcome {
     )
 }
 
+/// Format Dart with the SDK's `dart format`.
+///
+/// `dart format` does not read stdin, so the snapshot is staged in a temporary
+/// `.dart` file, formatted with `--output=show --summary=none` (which prints to
+/// stdout without modifying the file and omits the summary line), and the
+/// result is read back. The temporary file is removed on every path.
+pub fn dart_format(path: &Path, text: &str) -> FormatOutcome {
+    let stem = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "koda".to_string());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_nanos())
+        .unwrap_or(0);
+    let temp = std::env::temp_dir().join(format!(
+        "koda-format-{stem}-{}-{stamp}.dart",
+        std::process::id()
+    ));
+    if let Err(err) = std::fs::write(&temp, text) {
+        return FormatOutcome::Failed(format!("could not stage Dart source: {err}"));
+    }
+    let filename = temp.to_string_lossy().into_owned();
+    let outcome = run(
+        "dart",
+        &["format", "--output=show", "--summary=none", &filename],
+        "",
+        "dart format",
+        "install the Dart SDK",
+    );
+    let _ = std::fs::remove_file(&temp);
+    outcome
+}
+
 fn run(program: &str, args: &[&str], text: &str, tool: &str, hint: &str) -> FormatOutcome {
     // Prefer a located executable: the process PATH may be minimal when Koda is
     // launched from a GUI or a non-login shell.
@@ -248,6 +282,22 @@ mod tests {
                 assert!(formatted.contains("    let x = 1;"));
             }
             other => panic!("expected rustfmt to format, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dart_format_formats_when_installed() {
+        // Skip silently when the Dart SDK is not available (offline/CI).
+        if crate::language::tools::locate("dart").is_none() {
+            return;
+        }
+        let outcome = dart_format(Path::new("example.dart"), "void main(){print(  \"hi\");}\n");
+        match outcome {
+            FormatOutcome::Formatted(text) => {
+                assert!(text.contains("void main() {"), "formatted: {text:?}");
+                assert!(text.contains("  print(\"hi\");"), "formatted: {text:?}");
+            }
+            other => panic!("expected dart format to format, got {other:?}"),
         }
     }
 
