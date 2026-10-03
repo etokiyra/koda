@@ -57,7 +57,10 @@ The highest-value work. These turn Koda from an editor into an IDE.
 - [ ] **Completion.** A completion popup driven by providers, with filtering and
       acceptance via `Tab`/`Enter`.
 - [ ] **Hover information.** Show type/docs for the symbol under the cursor.
-- [ ] **Go-to-definition and references.** Jump within and across files.
+- [x] **Go-to-definition and references (within file).** `F12` resolves the word
+      under the cursor to its definition in the active file and `Shift+F12`
+      lists every occurrence. Providers own the resolution; cross-file
+      resolution arrives with the language-server backends.
 - [x] **Document symbols and symbol navigation** (`Ctrl+Shift+O`). Rust and Go
       providers scan the active file for definitions and offer a filterable
       outline; the chosen symbol is revealed. Heuristic today, LSP symbols later.

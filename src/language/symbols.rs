@@ -66,6 +66,74 @@ impl Symbol {
     }
 }
 
+/// A range in a document, used for references.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Location {
+    pub line: usize,
+    pub col: usize,
+    pub end_col: usize,
+}
+
+impl Location {
+    pub fn new(line: usize, col: usize, end_col: usize) -> Self {
+        Location { line, col, end_col }
+    }
+}
+
+/// The identifier-like word at `(line, col)`, if the cursor touches one.
+///
+/// Looks at the character under the cursor first, then the one before it, so
+/// the cursor may sit either inside or just after a word.
+pub fn word_at(text: &str, line: usize, col: usize) -> Option<String> {
+    let source_line = text.lines().nth(line)?;
+    let chars: Vec<char> = source_line.chars().collect();
+    if chars.is_empty() {
+        return None;
+    }
+    let mut start = col.min(chars.len().saturating_sub(1));
+    if !is_ident_char(chars[start]) {
+        if start == 0 || !is_ident_char(chars[start - 1]) {
+            return None;
+        }
+        start -= 1;
+    }
+    let mut from = start;
+    while from > 0 && is_ident_char(chars[from - 1]) {
+        from -= 1;
+    }
+    let mut to = start;
+    while to + 1 < chars.len() && is_ident_char(chars[to + 1]) {
+        to += 1;
+    }
+    Some(chars[from..=to].iter().collect())
+}
+
+/// Every whole-word occurrence of `word` in `text`.
+pub fn locations_of_word(text: &str, word: &str) -> Vec<Location> {
+    let needle: Vec<char> = word.chars().collect();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    let mut locations = Vec::new();
+    for (row, line) in text.lines().enumerate() {
+        let chars: Vec<char> = line.chars().collect();
+        let mut index = 0;
+        while index + needle.len() <= chars.len() {
+            let matches = chars[index..index + needle.len()] == needle[..];
+            let left_ok = index == 0 || !is_ident_char(chars[index - 1]);
+            let right_ok =
+                index + needle.len() == chars.len() || !is_ident_char(chars[index + needle.len()]);
+            if matches && left_ok && right_ok {
+                locations.push(Location::new(row, index, index + needle.len()));
+                index += needle.len();
+            } else {
+                index += 1;
+            }
+        }
+    }
+    locations
+}
+
 /// Symbols in a Rust document.
 pub fn rust_symbols(text: &str) -> Vec<Symbol> {
     let mut symbols = Vec::new();
@@ -339,5 +407,26 @@ var counter int
     fn column_points_at_the_name() {
         let symbols = rust_symbols("    pub fn helper() {}\n");
         assert_eq!(symbols[0].col, 11);
+    }
+
+    #[test]
+    fn word_at_finds_the_identifier() {
+        let text = "fn main() {\n    helper();\n}\n";
+        assert_eq!(word_at(text, 1, 4).as_deref(), Some("helper"));
+        assert_eq!(word_at(text, 1, 9).as_deref(), Some("helper"));
+        assert_eq!(word_at(text, 0, 3).as_deref(), Some("main"));
+        assert_eq!(word_at(text, 0, 2).as_deref(), Some("fn"));
+        assert_eq!(word_at(text, 1, 12), None);
+    }
+
+    #[test]
+    fn locations_are_whole_words_only() {
+        let text = "let counter = 1;\nlet discount = counter;\n";
+        let locations = locations_of_word(text, "count");
+        assert!(locations.is_empty(), "`count` is not a whole word");
+        let locations = locations_of_word(text, "counter");
+        assert_eq!(locations.len(), 2);
+        assert_eq!(locations[0], Location::new(0, 4, 11));
+        assert_eq!(locations[1], Location::new(1, 15, 22));
     }
 }

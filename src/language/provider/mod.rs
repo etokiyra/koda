@@ -10,7 +10,7 @@ use std::ops::Range;
 use crate::language::detection::LanguageDescriptor;
 use crate::language::diagnostics::Diagnostic;
 use crate::language::id::LanguageId;
-use crate::language::symbols::Symbol;
+use crate::language::symbols::{Location, Symbol};
 
 /// A feature a provider may offer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -112,6 +112,17 @@ pub trait LanguageProvider: Send + Sync {
     ///
     /// Providers without symbol support return nothing.
     fn symbols(&self, _text: &str) -> Vec<Symbol> {
+        Vec::new()
+    }
+
+    /// The definition of the symbol at `(line, col)`, if the provider can find
+    /// one. Built-in providers resolve within the current file.
+    fn definition(&self, _text: &str, _line: usize, _col: usize) -> Option<Symbol> {
+        None
+    }
+
+    /// Whole-word occurrences of the symbol at `(line, col)`.
+    fn references(&self, _text: &str, _line: usize, _col: usize) -> Vec<Location> {
         Vec::new()
     }
 

@@ -547,11 +547,9 @@ impl App {
             ids::NEXT_TAB => self.editor.next_tab(),
             ids::PREV_TAB => self.editor.previous_tab(),
             ids::PALETTE => self.open_command_palette(),
-            ids::FORMAT
-            | ids::GOTO_DEFINITION
-            | ids::FIND_REFERENCES
-            | ids::RENAME
-            | ids::CODE_ACTIONS => self.report_language_capability(id),
+            ids::FORMAT | ids::RENAME | ids::CODE_ACTIONS => self.report_language_capability(id),
+            ids::GOTO_DEFINITION => self.goto_definition(),
+            ids::FIND_REFERENCES => self.find_references(),
             ids::SHOW_SYMBOLS => self.open_symbols(),
             ids::DIAGNOSTICS_NEXT => self.goto_diagnostic(1),
             ids::DIAGNOSTICS_PREV => self.goto_diagnostic(-1),
@@ -1099,11 +1097,98 @@ impl App {
     /// Open `path` and place the cursor at `position`, centred in the viewport.
     fn reveal(&mut self, path: PathBuf, position: Position) {
         self.open_path(path);
+        self.jump_to(position);
+    }
+
+    /// Centre `position` in the viewport and move the cursor there.
+    fn jump_to(&mut self, position: Position) {
         let center = self.viewport_height / 2;
         self.with_doc(|doc| {
             doc.move_to(position);
             doc.scroll_top = position.row.saturating_sub(center);
         });
+    }
+
+    /// Jump to the definition of the word under the cursor (within this file).
+    fn goto_definition(&mut self) {
+        let (path, language, file, text, cursor) = match self.editor.active_document() {
+            Some(doc) => (
+                doc.buffer.path.clone(),
+                doc.buffer.language,
+                doc.file_name(),
+                doc.buffer.text(),
+                doc.clamped_cursor(),
+            ),
+            None => return,
+        };
+        let Some(path) = path else {
+            return;
+        };
+        let Some(symbol) = self
+            .language
+            .provider(language)
+            .definition(&text, cursor.row, cursor.col)
+        else {
+            self.set_status("No definition found in this file");
+            return;
+        };
+        let target = Position::new(symbol.line, symbol.col);
+        self.reveal(path, target);
+        self.set_status(format!(
+            "{} {} · {file}:{}",
+            symbol.kind.label(),
+            symbol.name,
+            symbol.line + 1
+        ));
+    }
+
+    /// List every occurrence of the word under the cursor in this file.
+    fn find_references(&mut self) {
+        let (path, language, file, text, cursor) = match self.editor.active_document() {
+            Some(doc) => (
+                doc.buffer.path.clone(),
+                doc.buffer.language,
+                doc.file_name(),
+                doc.buffer.text(),
+                doc.clamped_cursor(),
+            ),
+            None => return,
+        };
+        let Some(path) = path else {
+            return;
+        };
+        let locations = self
+            .language
+            .provider(language)
+            .references(&text, cursor.row, cursor.col);
+        if locations.is_empty() {
+            self.set_status("No symbol under the cursor");
+            return;
+        }
+
+        let lines: Vec<&str> = text.lines().collect();
+        let items = locations
+            .into_iter()
+            .map(|location| {
+                let snippet = lines
+                    .get(location.line)
+                    .map(|line| line.trim().to_string())
+                    .filter(|line| !line.is_empty())
+                    .unwrap_or_else(|| format!("line {}", location.line + 1));
+                let detail = format!("{file}:{}:{}", location.line + 1, location.col + 1);
+                PickerItem::new(
+                    snippet,
+                    detail,
+                    PickerAction::Reveal {
+                        path: path.clone(),
+                        position: Position::new(location.line, location.col),
+                    },
+                )
+            })
+            .collect();
+        let mut picker = Picker::new("References", "Filter occurrences…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
     }
 
     /// List the active document's definitions and jump to the chosen one.
@@ -1462,9 +1547,6 @@ impl App {
     fn report_language_capability(&mut self, id: &str) {
         let (capability, label) = match id {
             ids::FORMAT => (Capability::Formatting, "Formatting"),
-            ids::GOTO_DEFINITION => (Capability::GotoDefinition, "Go to definition"),
-            ids::FIND_REFERENCES => (Capability::GotoReference, "Find references"),
-            ids::SHOW_SYMBOLS => (Capability::DocumentSymbols, "Symbol navigation"),
             ids::RENAME => (Capability::Rename, "Rename"),
             ids::CODE_ACTIONS => (Capability::CodeActions, "Code actions"),
             _ => return,
@@ -1834,6 +1916,44 @@ mod tests {
             .map(|item| item.label.clone())
             .collect();
         assert!(labels.iter().any(|label| label == "main"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn go_to_definition_jumps_to_the_symbol() {
+        let dir = temp_project("definition");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main() {\n    helper();\n}\n\nfn helper() {}\n").unwrap();
+
+        let mut app = App::new(Some(&file)).unwrap();
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .move_to(Position::new(1, 4));
+
+        app.execute_command(ids::GOTO_DEFINITION);
+        let cursor = app.editor.active_document().unwrap().clamped_cursor();
+        assert_eq!(cursor, Position::new(4, 3));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_references_lists_every_occurrence() {
+        let dir = temp_project("references");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main() {\n    helper();\n}\n\nfn helper() {}\n").unwrap();
+
+        let mut app = App::new(Some(&file)).unwrap();
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .move_to(Position::new(1, 4));
+
+        app.execute_command(ids::FIND_REFERENCES);
+        let Overlay::Picker(picker) = &app.overlay else {
+            panic!("expected the references list");
+        };
+        assert_eq!(picker.filtered.len(), 2);
         fs::remove_dir_all(&dir).ok();
     }
 }

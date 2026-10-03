@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   interfaces, modules, types, constants and macros) and jumps to the chosen one.
   Extraction is a lightweight provider scan; language-server symbols can replace
   it later without changing the UI.
+- Go to definition (`F12`) resolves the word under the cursor to its definition
+  in the same file, and Find References (`Shift+F12`) lists every occurrence in
+  the file. Providers own the resolution; cross-file resolution comes with the
+  language-server backends.
 
 ### Performance
 

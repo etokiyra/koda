@@ -79,7 +79,8 @@ Implemented:
   surfaced as gutter markers, underlines, a statusline count, and `F8`/`Shift+F8`
   navigation.
 - A document-symbol outline (`Ctrl+Shift+O`) for Rust and Go, with fuzzy
-  filtering and jump-to-symbol.
+  filtering and jump-to-symbol, plus within-file go-to-definition (`F12`) and
+  find-references (`Shift+F12`).
 - Lightweight git integration (branch + per-file status, via the `git` binary).
 - A distinctive Mellow-based visual identity: a semantic theme layer, an
   adaptive ASCII welcome scene, the Koda familiar and personality-rich empty
@@ -140,6 +141,7 @@ and establishes language context automatically.
 | `Ctrl+/` | Toggle comment |
 | `F8` / `Shift+F8` | Next / previous diagnostic |
 | `Ctrl+Shift+O` | Go to symbol in the active file |
+| `F12` / `Shift+F12` | Go to definition / find references |
 | `Tab` / `Shift+Tab` | Indent / outdent selection |
 | `Alt+↑` / `Alt+↓` | Move line up / down |
 | `Ctrl+Shift+D` | Duplicate line |

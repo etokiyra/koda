@@ -97,6 +97,8 @@ impl LanguageProvider for GoProvider {
             Capability::SyntaxHighlighting,
             Capability::Diagnostics,
             Capability::DocumentSymbols,
+            Capability::GotoDefinition,
+            Capability::GotoReference,
         ]
     }
 
@@ -106,6 +108,30 @@ impl LanguageProvider for GoProvider {
 
     fn symbols(&self, text: &str) -> Vec<crate::language::symbols::Symbol> {
         crate::language::symbols::go_symbols(text)
+    }
+
+    fn definition(
+        &self,
+        text: &str,
+        line: usize,
+        col: usize,
+    ) -> Option<crate::language::symbols::Symbol> {
+        let word = crate::language::symbols::word_at(text, line, col)?;
+        crate::language::symbols::go_symbols(text)
+            .into_iter()
+            .find(|symbol| symbol.name == word)
+    }
+
+    fn references(
+        &self,
+        text: &str,
+        line: usize,
+        col: usize,
+    ) -> Vec<crate::language::symbols::Location> {
+        match crate::language::symbols::word_at(text, line, col) {
+            Some(word) => crate::language::symbols::locations_of_word(text, &word),
+            None => Vec::new(),
+        }
     }
 
     fn line_comment(&self) -> &'static str {
