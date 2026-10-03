@@ -276,6 +276,8 @@ pub struct App {
     pub tree_visible: bool,
     /// Whether diagnostic messages are shown at the end of their line.
     pub inline_diagnostics: bool,
+    /// Whether long lines soft-wrap instead of scrolling horizontally.
+    pub wrap: bool,
     /// Whether the editor shows two panes side by side.
     pub split: bool,
     /// The document shown in the left (primary) pane.
@@ -410,6 +412,7 @@ impl App {
             cursor_screen: None,
             tree_visible: true,
             inline_diagnostics: true,
+            wrap: false,
             split: false,
             pane_left: 0,
             pane_right: None,
@@ -737,6 +740,10 @@ impl App {
                 }
                 KeyCode::Char('i') | KeyCode::Char('I') => {
                     self.execute_command(ids::TOGGLE_INLINE_DIAGNOSTICS);
+                    return true;
+                }
+                KeyCode::Char('z') | KeyCode::Char('Z') => {
+                    self.execute_command(ids::TOGGLE_WRAP);
                     return true;
                 }
                 _ => {}
@@ -1833,6 +1840,7 @@ impl App {
             ids::FOCUS_TREE => self.focus_tree(),
             ids::TOGGLE_HIDDEN => self.toggle_hidden(),
             ids::TOGGLE_INLINE_DIAGNOSTICS => self.toggle_inline_diagnostics(),
+            ids::TOGGLE_WRAP => self.toggle_wrap(),
             ids::REFRESH => self.refresh_workspace(),
             ids::SPLIT => self.toggle_split(),
             ids::FOCUS_PANE => self.focus_other_pane(),
@@ -3032,6 +3040,19 @@ impl App {
             "hidden"
         };
         self.set_status(format!("Inline diagnostics {state}"));
+    }
+
+    /// Turn soft wrap on or off. The wrap width itself is recomputed by the
+    /// renderer on the next frame.
+    fn toggle_wrap(&mut self) {
+        self.wrap = !self.wrap;
+        if let Some(doc) = self.editor.active_document_mut() {
+            doc.preferred_col = None;
+            doc.scroll_left = 0;
+            doc.scroll_subline = 0;
+        }
+        let state = if self.wrap { "on" } else { "off" };
+        self.set_status(format!("Soft wrap {state}"));
     }
 
     fn open_tree_filter(&mut self) {

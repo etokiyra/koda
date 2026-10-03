@@ -131,6 +131,7 @@ fn render_editor_area(frame: &mut Frame, area: Rect, app: &mut App) {
             index,
             editor_focused,
             app.inline_diagnostics,
+            app.wrap,
         );
     }
 }
@@ -168,6 +169,7 @@ fn render_split(frame: &mut Frame, area: Rect, app: &mut App, editor_focused: bo
         left_index,
         left_focused,
         app.inline_diagnostics,
+        app.wrap,
     );
     if left_focused {
         app.cursor_screen = left;
@@ -182,6 +184,7 @@ fn render_split(frame: &mut Frame, area: Rect, app: &mut App, editor_focused: bo
         right_index,
         right_focused,
         app.inline_diagnostics,
+        app.wrap,
     );
     if right_focused {
         app.cursor_screen = right;
@@ -200,6 +203,7 @@ fn render_pane(
     index: usize,
     focused: bool,
     inline_diagnostics: bool,
+    wrap: bool,
 ) -> Option<(u16, u16)> {
     let language_id = documents.get(index)?.buffer.language;
     let provider = language.provider(language_id);
@@ -212,6 +216,7 @@ fn render_pane(
         search,
         focused,
         inline_diagnostics,
+        wrap,
     )
 }
 

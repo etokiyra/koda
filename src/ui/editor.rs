@@ -3,6 +3,11 @@
 //! Koda's editor is intentionally bare — no box, no chrome. Code dominates.
 //! A subtle cursorline (`ui.cursorline.primary`) and faint indent guides add
 //! warmth without fighting the code.
+//!
+//! When soft wrap is on, one logical line may occupy several visual rows. The
+//! character ↔ display-column mapping and the wrap boundaries come from
+//! [`crate::editor::layout`], the same code the cursor movement uses, so the
+//! renderer and the editor never disagree about where a line breaks.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -11,13 +16,19 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 
 use crate::app::overlay::Search;
+use crate::editor::layout::{LineLayout, segment_index, wrap_segments};
 use crate::editor::{Document, Position};
 use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::provider::{LanguageProvider, TokenKind};
 use crate::ui::{art, theme};
 
+/// Keep a little context visible around the cursor so it never sits glued to an
+/// edge (scrolloff, as in Helix).
+const SCROLL_OFF: usize = 3;
+
 /// Render the active document, returning the screen position of the cursor when
 /// it is visible (used to anchor the completion popup).
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     frame: &mut Frame,
     area: Rect,
@@ -26,6 +37,7 @@ pub fn render(
     search: &Search,
     focused: bool,
     inline_diagnostics: bool,
+    wrap: bool,
 ) -> Option<(u16, u16)> {
     if area.width == 0 || area.height == 0 {
         return None;
@@ -49,37 +61,12 @@ pub fn render(
         return None;
     }
     let view_height = area.height as usize;
-    // Keep a little context visible around the cursor so it never sits glued to
-    // an edge (scrolloff, as in Helix).
-    const SCROLL_OFF: usize = 3;
 
-    // Keep the cursor inside the viewport, with a margin.
+    doc.wrap_width = if wrap { text_width } else { 0 };
+    scroll_viewport(doc, text_width, view_height, SCROLL_OFF);
+
     let cursor = doc.clamped_cursor();
-    let max_top = total_lines.saturating_sub(view_height);
-    if cursor.row < doc.scroll_top + SCROLL_OFF {
-        doc.scroll_top = cursor.row.saturating_sub(SCROLL_OFF);
-    }
-    if cursor.row + SCROLL_OFF >= doc.scroll_top + view_height {
-        doc.scroll_top = (cursor.row + SCROLL_OFF + 1).saturating_sub(view_height);
-    }
-    doc.scroll_top = doc.scroll_top.min(max_top);
-
-    // Horizontal scroll is driven by the cursor line, with the same margin.
-    let indent = doc.indent_width().max(1);
-    let cursor_line = doc.buffer.line_text(cursor.row);
-    let cursor_layout = LineLayout::new(&cursor_line, indent);
-    let cursor_col = cursor_layout.display_col(cursor.col);
-    if cursor_col < doc.scroll_left + SCROLL_OFF {
-        doc.scroll_left = cursor_col.saturating_sub(SCROLL_OFF);
-    }
-    if cursor_col + SCROLL_OFF >= doc.scroll_left + text_width {
-        doc.scroll_left = (cursor_col + SCROLL_OFF + 1).saturating_sub(text_width);
-    }
-    doc.scroll_left = doc
-        .scroll_left
-        .min(cursor_layout.len.saturating_sub(text_width));
-
-    let mut lines: Vec<Line> = Vec::with_capacity(view_height);
+    let cursor_display = doc.display_col_of(cursor.row, cursor.col);
     let brackets = doc.matching_brackets(provider);
     // Secondary cursors: their selections share the selection background, and
     // each caret gets a solid accent block (the terminal can only place one
@@ -92,79 +79,258 @@ pub fn render(
         .collect();
     let secondary_carets: std::collections::HashSet<Position> =
         doc.cursors.iter().map(|cursor| cursor.cursor).collect();
-    for row in doc.scroll_top..(doc.scroll_top + view_height).min(total_lines) {
-        lines.push(render_line(
-            doc,
-            provider,
-            search,
-            row,
-            gutter,
-            text_width,
-            area.width,
-            brackets,
-            inline_diagnostics,
-            &secondary_selections,
-            &secondary_carets,
-        ));
+
+    let mut lines: Vec<Line> = Vec::with_capacity(view_height);
+    let mut cursor_screen = None;
+
+    if wrap {
+        let mut row = doc.scroll_top;
+        let mut subline = doc.scroll_subline;
+        while lines.len() < view_height && row < total_lines {
+            let segments = doc.row_segments(row, text_width);
+            if subline >= segments.len() {
+                subline = 0;
+                row += 1;
+                continue;
+            }
+            let context = build_row(
+                doc,
+                provider,
+                search,
+                row,
+                &secondary_selections,
+                &secondary_carets,
+            );
+            let cursor_segment =
+                (focused && row == cursor.row).then(|| segment_index(&segments, cursor_display));
+            for (index, &(start, end)) in segments.iter().enumerate().skip(subline) {
+                if lines.len() >= view_height {
+                    break;
+                }
+                if cursor_segment == Some(index) {
+                    let x = area.x + gutter + (cursor_display.saturating_sub(start)) as u16;
+                    let y = area.y + lines.len() as u16;
+                    if x < area.x + area.width {
+                        cursor_screen = Some((x, y));
+                    }
+                }
+                let first = index == 0;
+                let last = index + 1 == segments.len();
+                lines.push(render_segment(
+                    &context,
+                    row,
+                    start,
+                    end,
+                    first,
+                    last,
+                    gutter,
+                    area.width,
+                    brackets,
+                    inline_diagnostics,
+                    true,
+                ));
+            }
+            row += 1;
+            subline = 0;
+        }
+    } else {
+        for row in doc.scroll_top..(doc.scroll_top + view_height).min(total_lines) {
+            let context = build_row(
+                doc,
+                provider,
+                search,
+                row,
+                &secondary_selections,
+                &secondary_carets,
+            );
+            let start = doc.scroll_left.min(context.layout.len());
+            let end = (start + text_width).min(context.layout.len());
+            if focused && row == cursor.row {
+                let x = area.x + gutter + (cursor_display.saturating_sub(doc.scroll_left)) as u16;
+                let y = area.y + (row - doc.scroll_top) as u16;
+                if x < area.x + area.width && y < area.y + area.height {
+                    cursor_screen = Some((x, y));
+                }
+            }
+            lines.push(render_segment(
+                &context,
+                row,
+                start,
+                end,
+                true,
+                true,
+                gutter,
+                area.width,
+                brackets,
+                inline_diagnostics,
+                false,
+            ));
+        }
     }
 
     frame.render_widget(Paragraph::new(Text::from(lines)), area);
 
-    // Place the terminal cursor and report where it landed.
-    let mut cursor_screen = None;
-    if focused && cursor.row >= doc.scroll_top && cursor.row < doc.scroll_top + view_height {
-        let x = area.x + gutter + (cursor_col.saturating_sub(doc.scroll_left)) as u16;
-        let y = area.y + (cursor.row - doc.scroll_top) as u16;
-        if x < area.x + area.width && y < area.y + area.height {
-            frame.set_cursor_position((x, y));
-            cursor_screen = Some((x, y));
-        }
+    if let Some((x, y)) = cursor_screen {
+        frame.set_cursor_position((x, y));
     }
     cursor_screen
 }
 
-fn render_empty(frame: &mut Frame, area: Rect, focused: bool) {
-    let mut lines: Vec<Line> = vec![Line::from("")];
-    lines.extend(art::art_lines(art::CAT, theme::dim()));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("an empty file · start typing", theme::muted())).centered());
+/// Scroll the viewport so the cursor is visible, in visual rows when wrapping
+/// and in logical rows otherwise.
+///
+/// `doc.wrap_width` must already be set. With wrapping the top is kept at or
+/// before the cursor's logical line, which bounds the work to the visible rows
+/// instead of scanning the whole document.
+fn scroll_viewport(doc: &mut Document, width: usize, height: usize, scroll_off: usize) {
+    let width = width.max(1);
+    let height = height.max(1);
+    let cursor = doc.clamped_cursor();
 
-    let block_height = lines.len() as u16;
-    if area.height > block_height {
-        let top = (area.height - block_height) / 2;
-        let mut padded: Vec<Line> = (0..top).map(|_| Line::from("")).collect();
-        padded.extend(lines);
-        lines = padded;
-    }
-    frame.render_widget(Paragraph::new(Text::from(lines)), area);
+    if doc.wrap_width == 0 {
+        doc.scroll_subline = 0;
+        let total = doc.buffer.len_lines();
+        if cursor.row < doc.scroll_top + scroll_off {
+            doc.scroll_top = cursor.row.saturating_sub(scroll_off);
+        }
+        if cursor.row + scroll_off >= doc.scroll_top + height {
+            doc.scroll_top = (cursor.row + scroll_off + 1).saturating_sub(height);
+        }
+        let max_top = total.saturating_sub(height);
+        doc.scroll_top = doc.scroll_top.min(max_top);
 
-    if focused {
-        frame.set_cursor_position((area.x, area.y));
+        // Horizontal scroll is driven by the cursor line, with the same margin.
+        let layout = doc.line_layout(cursor.row);
+        let cursor_col = layout.display_col(cursor.col);
+        if cursor_col < doc.scroll_left + scroll_off {
+            doc.scroll_left = cursor_col.saturating_sub(scroll_off);
+        }
+        if cursor_col + scroll_off >= doc.scroll_left + width {
+            doc.scroll_left = (cursor_col + scroll_off + 1).saturating_sub(width);
+        }
+        doc.scroll_left = doc.scroll_left.min(layout.len().saturating_sub(width));
+        return;
     }
+
+    // Wrapping: no horizontal scrolling.
+    doc.scroll_left = 0;
+    if cursor.row < doc.scroll_top {
+        doc.scroll_top = cursor.row;
+        doc.scroll_subline = 0;
+    }
+    // If the cursor is far below, recenter on its line before measuring, so the
+    // visual-offset walk stays bounded by the viewport height.
+    if cursor.row > doc.scroll_top.saturating_add(height) {
+        doc.scroll_top = cursor.row;
+        doc.scroll_subline = 0;
+    }
+
+    let cursor_segment = segment_of(doc, cursor.row, cursor.col, width);
+    // A subline beyond the cursor's segment would make the offset negative.
+    if cursor.row == doc.scroll_top && cursor_segment < doc.scroll_subline {
+        doc.scroll_subline = cursor_segment;
+    }
+
+    let offset = visual_offset(
+        doc,
+        width,
+        doc.scroll_top,
+        doc.scroll_subline,
+        cursor.row,
+        cursor_segment,
+    );
+    if offset < scroll_off {
+        let (row, subline) = walk_back(doc, width, cursor.row, cursor_segment, scroll_off);
+        doc.scroll_top = row;
+        doc.scroll_subline = subline;
+    } else if offset + 1 + scroll_off > height {
+        let above = height.saturating_sub(scroll_off + 1);
+        let (row, subline) = walk_back(doc, width, cursor.row, cursor_segment, above);
+        doc.scroll_top = row;
+        doc.scroll_subline = subline;
+    }
+
+    // Never point the subline past the row's last visual segment.
+    let count = doc.row_visual_count(doc.scroll_top, width).max(1);
+    if doc.scroll_subline >= count {
+        doc.scroll_subline = count - 1;
+    }
+    doc.scroll_top = doc.scroll_top.min(doc.buffer.len_lines().saturating_sub(1));
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_line(
+/// The visual row of `(row, col)` at `width`.
+fn segment_of(doc: &Document, row: usize, col: usize, width: usize) -> usize {
+    let layout = doc.line_layout(row);
+    let display = layout.display_col(col);
+    let segments = wrap_segments(&layout, width);
+    segment_index(&segments, display)
+}
+
+/// How many visual rows separate `(top_row, top_subline)` from `(row, seg)`.
+fn visual_offset(
+    doc: &Document,
+    width: usize,
+    top_row: usize,
+    top_subline: usize,
+    row: usize,
+    seg: usize,
+) -> usize {
+    let mut offset = 0usize;
+    for r in top_row..row {
+        let count = doc.row_visual_count(r, width);
+        offset += count - if r == top_row { top_subline } else { 0 };
+    }
+    offset + seg.saturating_sub(if row == top_row { top_subline } else { 0 })
+}
+
+/// The `(row, subline)` `n` visual rows above `(row, seg)`.
+fn walk_back(doc: &Document, width: usize, row: usize, seg: usize, n: usize) -> (usize, usize) {
+    let mut r = row;
+    let mut s = seg;
+    for _ in 0..n {
+        if s > 0 {
+            s -= 1;
+        } else if r > 0 {
+            r -= 1;
+            s = doc.row_visual_count(r, width).saturating_sub(1);
+        } else {
+            break;
+        }
+    }
+    (r, s)
+}
+
+/// Per-character overlays for one logical line, computed once and reused for
+/// every visual row the line occupies.
+struct RowContext {
+    layout: LineLayout,
+    kinds: Vec<TokenKind>,
+    diagnostic_severity: Vec<Option<Severity>>,
+    selected: Vec<bool>,
+    matched: Vec<bool>,
+    current_match: Vec<bool>,
+    secondary_caret: Vec<bool>,
+    trailing_caret: bool,
+    leading_display: usize,
+    indent: usize,
+    current: bool,
+    marker_severity: Option<Severity>,
+    /// The most severe diagnostic touching this line, with how many touch it,
+    /// for the inline note.
+    note: Option<(Diagnostic, usize)>,
+}
+
+fn build_row(
     doc: &mut Document,
     provider: &dyn LanguageProvider,
     search: &Search,
     row: usize,
-    gutter: u16,
-    text_width: usize,
-    line_width: u16,
-    brackets: Option<(Position, Position)>,
-    inline_diagnostics: bool,
     secondary_selections: &[(Position, Position)],
     secondary_carets: &std::collections::HashSet<Position>,
-) -> Line<'static> {
+) -> RowContext {
     let text = doc.buffer.line_text(row);
     let char_count = text.chars().count();
     let current = doc.cursor.row == row;
-    let base_bg = if current {
-        Some(theme::CURSORLINE_BG)
-    } else {
-        None
-    };
 
     // Token kinds per original character.
     let mut kinds = vec![TokenKind::Plain; char_count];
@@ -243,49 +409,112 @@ fn render_line(
     }
 
     let indent = doc.indent_width().max(1);
-    let layout = LineLayout::new(&text, indent);
+    let layout = doc.line_layout(row);
     let leading_ws = text.chars().take_while(|c| *c == ' ' || *c == '\t').count();
     let leading_display = layout.display_col(leading_ws.min(char_count));
 
-    let start = doc.scroll_left.min(layout.len);
-    let end = (start + text_width).min(layout.len);
+    // The most severe diagnostic touching this line, plus the count on the line.
+    let on_line: Vec<Diagnostic> = doc
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.start.line <= row && diagnostic.end.line >= row)
+        .cloned()
+        .collect();
+    let count = on_line.len();
+    let note = on_line
+        .into_iter()
+        .max_by_key(|diagnostic| diagnostic.severity)
+        .map(|diagnostic| (diagnostic, count));
 
-    let marker_severity = doc.diagnostic_severity_on_line(row);
-    let gutter_style = if current {
+    RowContext {
+        layout,
+        kinds,
+        diagnostic_severity,
+        selected,
+        matched,
+        current_match,
+        secondary_caret,
+        trailing_caret,
+        leading_display,
+        indent,
+        current,
+        marker_severity: doc.diagnostic_severity_on_line(row),
+        note,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_segment(
+    context: &RowContext,
+    row: usize,
+    display_start: usize,
+    display_end: usize,
+    first: bool,
+    last: bool,
+    gutter: u16,
+    line_width: u16,
+    brackets: Option<(Position, Position)>,
+    inline_diagnostics: bool,
+    wrapped: bool,
+) -> Line<'static> {
+    let base_bg = if context.current {
+        Some(theme::CURSORLINE_BG)
+    } else {
+        None
+    };
+    let gutter_style = if context.current {
         theme::accent_bold()
     } else {
         theme::dim()
     };
-    let marker_style = match marker_severity {
-        Some(severity) => with_bg(severity_style(severity), base_bg),
-        None => with_bg(gutter_style, base_bg),
-    };
-    let marker = marker_severity.map(Severity::gutter).unwrap_or(' ');
-    let mut spans: Vec<Span> = vec![Span::styled(marker.to_string(), marker_style)];
-    spans.push(Span::styled(
-        format!(
-            "{:>width$} ",
-            row + 1,
-            width = gutter.saturating_sub(2) as usize
-        ),
-        with_bg(gutter_style, base_bg),
-    ));
+    let mut spans: Vec<Span> = Vec::new();
+
+    if first {
+        let marker_style = match context.marker_severity {
+            Some(severity) => with_bg(severity_style(severity), base_bg),
+            None => with_bg(gutter_style, base_bg),
+        };
+        let marker = context.marker_severity.map(Severity::gutter).unwrap_or(' ');
+        spans.push(Span::styled(marker.to_string(), marker_style));
+        spans.push(Span::styled(
+            format!(
+                "{:>width$} ",
+                row + 1,
+                width = gutter.saturating_sub(2) as usize
+            ),
+            with_bg(gutter_style, base_bg),
+        ));
+    } else {
+        // Continuation rows keep the gutter blank so the number reads as one row.
+        spans.push(Span::styled(
+            " ".repeat(gutter as usize),
+            with_bg(gutter_style, base_bg),
+        ));
+    }
 
     // Group consecutive cells that share a style.
     let mut run = String::new();
     let mut run_style: Option<Style> = None;
-    for cell in start..end {
-        let (mut ch, original) = layout.cells[cell];
-        let mut style =
-            theme::token_style(kinds.get(original).copied().unwrap_or(TokenKind::Plain));
+    for cell in display_start..display_end {
+        let Some((mut ch, original)) = context.layout.cell(cell) else {
+            break;
+        };
+        let mut style = theme::token_style(
+            context
+                .kinds
+                .get(original)
+                .copied()
+                .unwrap_or(TokenKind::Plain),
+        );
 
         // Indent guides inside leading whitespace, one per detected level.
-        if cell < leading_display && cell > 0 && cell % indent == 0 {
+        if cell < context.leading_display && cell > 0 && cell % context.indent == 0 {
             ch = '│';
             style = theme::dim();
         }
         style = with_bg(style, base_bg);
-        if diagnostic_severity
+        if context
+            .diagnostic_severity
             .get(original)
             .is_some_and(|slot| slot.is_some())
         {
@@ -298,18 +527,30 @@ fn render_line(
             // Mellow `ui.cursor.match`: yellow, bold and underlined.
             style = with_bg(theme::bracket_match(), base_bg);
         }
-        if selected.get(original).copied().unwrap_or(false) {
+        if context.selected.get(original).copied().unwrap_or(false) {
             style = style.bg(theme::SELECTION_BG);
         }
-        if matched.get(original).copied().unwrap_or(false) {
-            style = style.bg(if current_match.get(original).copied().unwrap_or(false) {
-                theme::SEARCH_CURRENT_BG
-            } else {
-                theme::SEARCH_BG
-            });
+        if context.matched.get(original).copied().unwrap_or(false) {
+            style = style.bg(
+                if context
+                    .current_match
+                    .get(original)
+                    .copied()
+                    .unwrap_or(false)
+                {
+                    theme::SEARCH_CURRENT_BG
+                } else {
+                    theme::SEARCH_BG
+                },
+            );
         }
         // A secondary caret is a solid accent block over whatever is beneath it.
-        if secondary_caret.get(original).copied().unwrap_or(false) {
+        if context
+            .secondary_caret
+            .get(original)
+            .copied()
+            .unwrap_or(false)
+        {
             style = style.bg(theme::MULTI_CURSOR).fg(theme::palette::BG_DARK);
         }
 
@@ -327,8 +568,9 @@ fn render_line(
         spans.push(Span::styled(run, style));
     }
 
-    // A secondary caret sitting past the last character is drawn as a block.
-    if trailing_caret && end == layout.len {
+    // A secondary caret sitting past the last character is drawn as a block on
+    // the final visual row.
+    if last && context.trailing_caret {
         spans.push(Span::styled(
             " ",
             Style::default()
@@ -337,35 +579,28 @@ fn render_line(
         ));
     }
 
-    // An inline note for the most severe diagnostic on this line. Shown only
-    // when the line is not horizontally scrolled and there is room for it, so
-    // it never pushes code off the edge.
+    // An inline note for the most severe diagnostic on this line, on its last
+    // visual row. Shown only when there is room, so it never pushes code off.
     let mut note_width = 0usize;
-    if inline_diagnostics && doc.scroll_left == 0 {
-        let on_line: Vec<&Diagnostic> = doc
-            .diagnostics()
-            .iter()
-            .filter(|diagnostic| diagnostic.start.line <= row && diagnostic.end.line >= row)
-            .collect();
-        if let Some(diagnostic) = on_line.iter().copied().max_by_key(|d| d.severity) {
-            let used = gutter as usize + (end - start);
-            let available = (line_width as usize).saturating_sub(used);
-            if let Some((note, severity)) = inline_note(diagnostic, on_line.len(), available) {
-                note_width = note.chars().count();
-                spans.push(Span::styled(
-                    note,
-                    with_bg(
-                        severity_style(severity).add_modifier(Modifier::ITALIC),
-                        base_bg,
-                    ),
-                ));
-            }
+    let note_allowed = inline_diagnostics && last && (wrapped || display_start == 0);
+    if note_allowed && let Some((diagnostic, count)) = &context.note {
+        let used = gutter as usize + (display_end - display_start);
+        let available = (line_width as usize).saturating_sub(used);
+        if let Some((note, severity)) = inline_note(diagnostic, *count, available) {
+            note_width = note.chars().count();
+            spans.push(Span::styled(
+                note,
+                with_bg(
+                    severity_style(severity).add_modifier(Modifier::ITALIC),
+                    base_bg,
+                ),
+            ));
         }
     }
 
     // Paint the cursorline band across the full width.
     if let Some(bg) = base_bg {
-        let used = gutter as usize + (end - start) + note_width;
+        let used = gutter as usize + (display_end - display_start) + note_width;
         let pad = (line_width as usize).saturating_sub(used);
         if pad > 0 {
             spans.push(Span::styled(" ".repeat(pad), Style::default().bg(bg)));
@@ -373,6 +608,26 @@ fn render_line(
     }
 
     Line::from(spans)
+}
+
+fn render_empty(frame: &mut Frame, area: Rect, focused: bool) {
+    let mut lines: Vec<Line> = vec![Line::from("")];
+    lines.extend(art::art_lines(art::CAT, theme::dim()));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("an empty file · start typing", theme::muted())).centered());
+
+    let block_height = lines.len() as u16;
+    if area.height > block_height {
+        let top = (area.height - block_height) / 2;
+        let mut padded: Vec<Line> = (0..top).map(|_| Line::from("")).collect();
+        padded.extend(lines);
+        lines = padded;
+    }
+    frame.render_widget(Paragraph::new(Text::from(lines)), area);
+
+    if focused {
+        frame.set_cursor_position((area.x, area.y));
+    }
 }
 
 /// Format an inline diagnostic note that fits within `available` columns.
@@ -441,53 +696,18 @@ fn selection_columns(doc: &Document, row: usize) -> Option<(usize, usize)> {
     Some((from, to))
 }
 
-/// A line expanded for display, with a mapping back to original character indices.
-struct LineLayout {
-    cells: Vec<(char, usize)>,
-    /// `map[original_index]` is the display column where that character begins.
-    map: Vec<usize>,
-    len: usize,
-}
-
-impl LineLayout {
-    fn new(text: &str, tab_width: usize) -> Self {
-        let mut cells = Vec::with_capacity(text.len());
-        let mut map = Vec::with_capacity(text.chars().count() + 1);
-        let mut column = 0usize;
-
-        for (index, ch) in text.chars().enumerate() {
-            map.push(column);
-            if ch == '\t' {
-                let spaces = tab_width - (column % tab_width);
-                for _ in 0..spaces {
-                    cells.push((' ', index));
-                    column += 1;
-                }
-            } else {
-                cells.push((ch, index));
-                column += 1;
-            }
-        }
-        map.push(column);
-        LineLayout {
-            cells,
-            map,
-            len: column,
-        }
-    }
-
-    fn display_col(&self, original: usize) -> usize {
-        self.map.get(original).copied().unwrap_or(self.len)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::buffer::Buffer;
     use crate::language::diagnostics::TextPos;
 
     fn diagnostic(message: &str, severity: Severity) -> Diagnostic {
         Diagnostic::new(TextPos::new(0, 0), TextPos::new(0, 1), severity, message)
+    }
+
+    fn doc(text: &str) -> Document {
+        Document::new(Buffer::from_text(text, None))
     }
 
     #[test]
@@ -513,5 +733,47 @@ mod tests {
         let (note, _) = inline_note(&diagnostic, 1, 30).unwrap();
         assert!(note.chars().count() <= 30);
         assert!(note.contains('…'));
+    }
+
+    #[test]
+    fn wrapped_scroll_keeps_the_cursor_inside_the_viewport() {
+        let mut d = doc(&"x".repeat(400));
+        d.wrap_width = 20;
+        // Put the cursor at the far end of the very long line.
+        d.move_to(Position::new(0, 400));
+        scroll_viewport(&mut d, 20, 10, SCROLL_OFF);
+
+        let cursor = d.clamped_cursor();
+        let seg = segment_of(&d, cursor.row, cursor.col, 20);
+        let offset = visual_offset(&d, 20, d.scroll_top, d.scroll_subline, cursor.row, seg);
+        assert!(
+            offset < 10,
+            "cursor visual row {offset} should be inside a 10-row viewport"
+        );
+        // With scrolloff at the bottom, there is context below the cursor.
+        assert!(d.scroll_top <= cursor.row);
+    }
+
+    #[test]
+    fn wrapped_scroll_backs_up_at_the_top() {
+        // The cursor on line 1 with wrapping should leave scrolloff above it.
+        let mut d = doc("first wrapped line that is quite long\nsecond\nthird\nfourth\nfifth\n");
+        d.wrap_width = 10;
+        d.move_to(Position::new(1, 0));
+        scroll_viewport(&mut d, 10, 8, SCROLL_OFF);
+        let cursor = d.clamped_cursor();
+        let seg = segment_of(&d, cursor.row, cursor.col, 10);
+        let offset = visual_offset(&d, 10, d.scroll_top, d.scroll_subline, cursor.row, seg);
+        assert!(offset < 8);
+    }
+
+    #[test]
+    fn unwrapped_scroll_matches_logical_lines() {
+        let mut d = doc(&(0..100).map(|i| format!("line {i}\n")).collect::<String>());
+        d.wrap_width = 0;
+        d.move_to(Position::new(90, 0));
+        scroll_viewport(&mut d, 40, 10, SCROLL_OFF);
+        assert!(d.scroll_top <= 90 && 90 < d.scroll_top + 10);
+        assert_eq!(d.scroll_subline, 0);
     }
 }

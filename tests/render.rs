@@ -432,6 +432,103 @@ fn statusline_uses_mellow_panel_background() {
 }
 
 #[test]
+fn soft_wrap_splits_a_long_line_across_rows() {
+    let dir = temp_project("softwrap");
+    let file = dir.join("src/main.rs");
+    fs::write(&file, format!("let value = \"{}\";\n", "x".repeat(120))).unwrap();
+
+    // Count the screen rows that show part of the filler. Without wrapping the
+    // 120 characters only have one row of room; with wrapping they span several.
+    let filler_rows = |screen: &str| screen.lines().filter(|line| line.contains('x')).count();
+
+    let mut app = app_with_file(&file);
+    app.tree_visible = false;
+    let unwrapped = draw_at(&mut app, 40, 12);
+    assert_eq!(filler_rows(&unwrapped), 1, "no wrap: one visible row");
+
+    app.wrap = true;
+    let wrapped = draw_at(&mut app, 40, 12);
+    assert!(
+        filler_rows(&wrapped) >= 3,
+        "soft wrap should spread the line over several rows"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn soft_wrap_follows_the_cursor_to_the_end_of_a_long_line() {
+    let dir = temp_project("softwrapcursor");
+    let file = dir.join("src/main.rs");
+    let filler = "y".repeat(600);
+    fs::write(&file, format!("let value = \"HEAD{filler}TAIL\";\n")).unwrap();
+
+    let mut app = app_with_file(&file);
+    app.wrap = true;
+    app.tree_visible = false;
+    app.editor.active_document_mut().unwrap().move_end(false);
+    let screen = draw_at(&mut app, 40, 12);
+    assert!(
+        screen.contains("TAIL"),
+        "the viewport must scroll to keep the wrapped cursor visible"
+    );
+    assert!(
+        !screen.contains("HEAD"),
+        "the head is far above the scrolled viewport"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn soft_wrap_renders_secondary_cursors() {
+    let dir = temp_project("wrapmulti");
+    let file = dir.join("src/main.rs");
+    let filler = "x".repeat(60);
+    fs::write(&file, format!("let a = needle; {filler} let b = needle;\n")).unwrap();
+
+    let mut app = app_with_file(&file);
+    app.tree_visible = false;
+    app.wrap = true;
+    app.editor
+        .active_document_mut()
+        .unwrap()
+        .move_to(koda::editor::Position::new(0, 8));
+    app.execute_command(ids::SELECT_ALL_OCCURRENCES);
+    assert!(app.editor.active_document().unwrap().has_multiple_cursors());
+
+    let backend = TestBackend::new(40, 14);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| koda::ui::render(frame, &mut app))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let has_secondary = (0..buffer.area.height).any(|y| {
+        (0..buffer.area.width).any(|x| {
+            buffer
+                .cell((x, y))
+                .is_some_and(|cell| cell.bg == theme::MULTI_CURSOR)
+        })
+    });
+    assert!(
+        has_secondary,
+        "a wrapped line must still render secondary carets"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn toggle_soft_wrap_command_flips_the_flag() {
+    let dir = temp_project("wrapcmd");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+    assert!(!app.wrap, "soft wrap is off by default");
+    app.execute_command(ids::TOGGLE_WRAP);
+    assert!(app.wrap);
+    app.execute_command(ids::TOGGLE_WRAP);
+    assert!(!app.wrap);
+    cleanup(&dir);
+}
+
+#[test]
 fn multi_cursor_carets_are_visible() {
     let dir = temp_project("multicursor");
     let file = dir.join("src/main.rs");

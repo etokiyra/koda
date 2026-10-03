@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Soft wrap
+
+- Added **soft wrap** for long lines (`Alt+Z`, or **Toggle Soft Wrap** in the
+  command palette). Wrapping is purely visual: no characters are inserted and
+  logical positions, selections, diagnostics, multiple cursors and undo/redo are
+  unchanged. The character ↔ display-column mapping and the wrap boundaries live
+  in `editor/layout.rs`, shared by the renderer and the editor so they can never
+  disagree about where a line breaks.
+- Up/Down move by visual row and remember the display column, so travelling
+  through wrapped and unwrapped lines keeps a stable column. The viewport scrolls
+  in visual rows with the same scrolloff, and jumping to a distant position
+  recenters on the cursor's line so the work stays bounded to the visible rows.
+- Continuation rows keep the gutter blank so one logical line still reads as one
+  line number. Inline diagnostic notes appear on a line's last visual row, and
+  the completion/hover popups stay anchored to the wrapped cursor.
+- Horizontal scrolling is disabled while wrapping and restored when it is turned
+  off; wrapping adapts to terminal resizing on the next frame.
+
 ### PHP support
 
 - Added **PHP** as a built-in, offline language. A focused scanner highlights

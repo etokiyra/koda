@@ -175,7 +175,15 @@ command palette already reports which are available. Filling them in is additive
 - [x] Regular-expression search in the find bar (`Alt+R`), powered by a small
       built-in engine.
 - [x] Undo grouping for consecutive typing.
-- [ ] Soft wrap.
+- [x] **Soft wrap.** Long lines wrap to the editor width instead of scrolling
+      sideways (`Alt+Z`, or **Toggle Soft Wrap** in the palette). Wrapping is a
+      display-only transform: character positions, selections, diagnostics,
+      multiple cursors and undo are untouched. Up/Down move by visual row and
+      remember the display column, the viewport scrolls in visual rows with the
+      same scrolloff, continuation rows keep a blank gutter, and inline notes
+      and the completion popup stay anchored to the wrapped cursor. The
+      character ↔ display-column and wrap-boundary maths live in
+      `editor/layout.rs` and are shared by the renderer and the editor.
 - [x] Persist cursor position, open tabs and expanded directories per project.
 - [x] A kill-ring with **Alt+Y** yank-pop; the newest kill still drives the
       system clipboard. Named registers remain to come.

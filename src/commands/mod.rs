@@ -76,6 +76,7 @@ pub mod ids {
     pub const FOCUS_TREE: &str = "view.focusTree";
     pub const TOGGLE_HIDDEN: &str = "view.toggleHidden";
     pub const TOGGLE_INLINE_DIAGNOSTICS: &str = "view.toggleInlineDiagnostics";
+    pub const TOGGLE_WRAP: &str = "view.toggleWrap";
     pub const REFRESH: &str = "view.refresh";
     pub const SPLIT: &str = "view.split";
     pub const FOCUS_PANE: &str = "view.focusPane";
@@ -408,6 +409,8 @@ impl CommandRegistry {
                 Some("Alt+I"),
             )
             .describes("Show or hide diagnostic messages at the end of each line"),
+            Command::new(TOGGLE_WRAP, "Toggle Soft Wrap", "View", Some("Alt+Z"))
+                .describes("Wrap long lines to the width of the editor"),
             Command::new(REFRESH, "Refresh File Tree", "View", Some("F5"))
                 .describes("Re-read the project tree and git status"),
             Command::new(SPLIT, "Split Editor", "View", Some("Alt+V"))

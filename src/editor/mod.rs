@@ -6,12 +6,14 @@
 pub mod buffer;
 pub mod document;
 pub mod history;
+pub mod layout;
 pub mod position;
 
 use std::path::Path;
 
 pub use buffer::{Buffer, LineEnding};
 pub use document::Document;
+pub use layout::{LineLayout, segment_index, wrap_segments};
 pub use position::{Cursor, Position, Selection};
 
 /// The set of open documents and the active tab.

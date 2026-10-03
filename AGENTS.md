@@ -40,6 +40,7 @@ src/
 │   ├── buffer.rs         # rope-backed text buffer
 │   ├── document.rs       # buffer + cursor + selection + undo + highlight cache
 │   ├── history.rs        # undo/redo edits
+│   ├── layout.rs         # tab expansion + soft-wrap segments
 │   ├── position.rs       # Position / Selection / Cursor
 │   └── mod.rs            # Editor (open documents / tabs)
 ├── filesystem/mod.rs     # fs helpers (sorted reads, file walking)
@@ -260,6 +261,16 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   skip-over works everywhere. Navigation deliberately collapses to the primary;
   every other single-point edit clears the extras so a stale cursor can never
   survive an unrelated operation.
+- **Soft wrap is a display-only transform with one source of truth.** A position
+  is always a character position; wrapping only adds a derived *visual row*.
+  `editor/layout.rs` owns both the character ↔ display-column mapping (tabs
+  expand there) and the wrap boundaries, and the renderer and the editor's
+  Up/Down movement both call it, so they cannot disagree. The viewport is
+  `scroll_top` (a logical row) plus `scroll_subline` (which visual row of it is
+  on screen); the cursor's logical line is always kept at or above the top, which
+  bounds scrolling work to the visible rows instead of scanning the document.
+  Wrapping never edits the buffer, so undo/redo, diagnostics, LSP positions and
+  multiple cursors are unaffected; turning it off restores horizontal scrolling.
 - **Scenes are drawn on a canvas.** `ui/art.rs` composes each welcome scene by
   placing glyphs at coordinates on a small `Canvas`, then turning runs of equal
   style into spans. This keeps the art symmetric and lets one element animate

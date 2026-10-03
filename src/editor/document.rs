@@ -6,6 +6,7 @@ use std::time::SystemTime;
 
 use crate::editor::buffer::{Buffer, LineEnding};
 use crate::editor::history::{Coalesce, Edit, EditOp, History};
+use crate::editor::layout::LineLayout;
 use crate::editor::position::{Cursor, Position, Selection};
 use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::id::LanguageId;
@@ -38,6 +39,11 @@ pub struct Document {
     pub scroll_top: usize,
     /// First visible column.
     pub scroll_left: usize,
+    /// Which visual row of `scroll_top` is at the top when soft wrap is on.
+    pub scroll_subline: usize,
+    /// The text width soft wrap uses, in display columns. `0` disables wrapping
+    /// and restores horizontal scrolling. Updated by the renderer.
+    pub wrap_width: usize,
     history: History,
     highlight_states: Vec<HighlightState>,
     highlight_computed: usize,
@@ -71,6 +77,8 @@ impl Document {
             preferred_col: None,
             scroll_top: 0,
             scroll_left: 0,
+            scroll_subline: 0,
+            wrap_width: 0,
             history: History::default(),
             highlight_states: vec![HighlightState::default()],
             highlight_computed: 1,
@@ -1574,6 +1582,10 @@ impl Document {
     }
 
     pub fn move_up(&mut self, shift: bool) {
+        if self.wrap_width > 0 {
+            self.move_visual(-1, shift);
+            return;
+        }
         if self.cursor.row == 0 {
             return;
         }
@@ -1584,6 +1596,10 @@ impl Document {
     }
 
     pub fn move_down(&mut self, shift: bool) {
+        if self.wrap_width > 0 {
+            self.move_visual(1, shift);
+            return;
+        }
         if self.cursor.row + 1 >= self.buffer.len_lines() {
             return;
         }
@@ -1591,6 +1607,76 @@ impl Document {
         let row = self.cursor.row + 1;
         let col = target_col.min(self.buffer.line_char_len(row));
         self.set_cursor_inner(Position::new(row, col), shift, false);
+    }
+
+    /// The display column of `(row, col)`.
+    pub fn display_col_of(&self, row: usize, col: usize) -> usize {
+        self.line_layout(row).display_col(col)
+    }
+
+    /// The visual rows of a logical line at the current wrap width.
+    pub fn row_segments(&self, row: usize, width: usize) -> Vec<(usize, usize)> {
+        crate::editor::layout::wrap_segments(&self.line_layout(row), width)
+    }
+
+    /// A display layout for one logical line.
+    pub fn line_layout(&self, row: usize) -> LineLayout {
+        LineLayout::new(&self.buffer.line_text(row), self.indent_width.max(1))
+    }
+
+    /// The number of visual rows a logical line occupies at `width`.
+    pub fn row_visual_count(&self, row: usize, width: usize) -> usize {
+        self.row_segments(row, width).len()
+    }
+
+    /// Move the cursor up or down by one **visual** row when soft wrap is on.
+    ///
+    /// The display column is remembered across movements (like `preferred_col`
+    /// for unwrapped lines), so moving through short and wrapped rows keeps the
+    /// cursor in a stable column.
+    fn move_visual(&mut self, direction: isize, shift: bool) {
+        let width = self.wrap_width;
+        let row = self.cursor.row;
+        let layout = self.line_layout(row);
+        let display = layout.display_col(self.cursor.col);
+        let segments = crate::editor::layout::wrap_segments(&layout, width);
+        let seg = crate::editor::layout::segment_index(&segments, display);
+        let preferred = *self.preferred_col.get_or_insert(display);
+
+        let (target_row, target_seg) = if direction < 0 {
+            if seg > 0 {
+                (row, Some(seg - 1))
+            } else if row > 0 {
+                (row - 1, None)
+            } else {
+                return;
+            }
+        } else if seg + 1 < segments.len() {
+            (row, Some(seg + 1))
+        } else if row + 1 < self.buffer.len_lines() {
+            (row + 1, Some(0))
+        } else {
+            return;
+        };
+
+        let target_layout = self.line_layout(target_row);
+        let target_segments = crate::editor::layout::wrap_segments(&target_layout, width);
+        let seg_index = match target_seg {
+            Some(index) => index.min(target_segments.len().saturating_sub(1)),
+            // `None` means the last visual row of the previous logical line.
+            None => target_segments.len().saturating_sub(1),
+        };
+        let (segment_start, segment_end) = target_segments[seg_index];
+        // Keep the caret inside this visual row: for every row but the last, the
+        // end column is the start of the next row.
+        let upper = if seg_index + 1 == target_segments.len() {
+            segment_end
+        } else {
+            segment_end.saturating_sub(1).max(segment_start)
+        };
+        let target_display = preferred.clamp(segment_start, upper);
+        let col = target_layout.char_col(target_display);
+        self.set_cursor_inner(Position::new(target_row, col), shift, false);
     }
 
     pub fn move_home(&mut self, shift: bool) {
@@ -2337,6 +2423,53 @@ mod tests {
         assert_eq!(d.cursor, Position::new(0, 3));
         d.move_word_right(false);
         assert_eq!(d.cursor, Position::new(0, 9));
+    }
+
+    #[test]
+    fn wrapped_vertical_movement_steps_through_visual_rows() {
+        let mut d = doc("abcdefghij klmnopqrst uvwxyz\nshort\n");
+        d.wrap_width = 10;
+        d.move_to(Position::new(0, 0));
+
+        // Down moves within the same logical line, visual row by visual row.
+        d.move_down(false);
+        assert_eq!(d.cursor.row, 0, "still on the wrapped line");
+        assert!(d.cursor.col > 0, "moved to a later visual row");
+        let second = d.cursor.col;
+
+        d.move_down(false);
+        assert_eq!(d.cursor.row, 0);
+        assert!(d.cursor.col > second);
+
+        // One more step leaves the wrapped line for the next logical line.
+        d.move_down(false);
+        assert_eq!(d.cursor.row, 1);
+    }
+
+    #[test]
+    fn wrapped_movement_keeps_the_display_column() {
+        // The two logical lines wrap to different widths; the display column
+        // (not the character column) should be preserved across the step.
+        let mut d = doc("aaaaaaaaaa bbbb\nccccc ddddd eeeee\n");
+        d.wrap_width = 11;
+        d.move_to(Position::new(0, 7)); // display column 7
+        d.move_down(false); // next visual row of line 0
+        assert_eq!(d.cursor.row, 0);
+        d.move_down(false); // line 1, first visual row
+        assert_eq!(d.cursor.row, 1);
+        assert_eq!(d.display_col_of(1, d.cursor.col), 7);
+    }
+
+    #[test]
+    fn wrapping_does_not_change_the_text_or_undo() {
+        let mut d = doc("one long line that will wrap\n");
+        d.wrap_width = 8;
+        assert!(d.row_segments(0, 8).len() > 1);
+        d.move_end(false);
+        d.insert_text("!");
+        assert_eq!(d.buffer.text(), "one long line that will wrap!\n");
+        d.undo();
+        assert_eq!(d.buffer.text(), "one long line that will wrap\n");
     }
 
     #[test]
