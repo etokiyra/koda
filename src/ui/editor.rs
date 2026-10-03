@@ -12,7 +12,7 @@ use ratatui::widgets::Paragraph;
 
 use crate::app::overlay::Search;
 use crate::editor::{Document, Position};
-use crate::language::diagnostics::Severity;
+use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::provider::{LanguageProvider, TokenKind};
 use crate::ui::{art, theme};
 
@@ -27,6 +27,7 @@ pub fn render(
     provider: &dyn LanguageProvider,
     search: &Search,
     focused: bool,
+    inline_diagnostics: bool,
 ) -> Option<(u16, u16)> {
     if area.width == 0 || area.height == 0 {
         return None;
@@ -83,7 +84,15 @@ pub fn render(
     let brackets = doc.matching_brackets(provider);
     for row in doc.scroll_top..(doc.scroll_top + view_height).min(total_lines) {
         lines.push(render_line(
-            doc, provider, search, row, gutter, text_width, area.width, brackets,
+            doc,
+            provider,
+            search,
+            row,
+            gutter,
+            text_width,
+            area.width,
+            brackets,
+            inline_diagnostics,
         ));
     }
 
@@ -132,6 +141,7 @@ fn render_line(
     text_width: usize,
     line_width: u16,
     brackets: Option<(Position, Position)>,
+    inline_diagnostics: bool,
 ) -> Line<'static> {
     let text = doc.buffer.line_text(row);
     let char_count = text.chars().count();
@@ -281,9 +291,35 @@ fn render_line(
         spans.push(Span::styled(run, style));
     }
 
+    // An inline note for the most severe diagnostic on this line. Shown only
+    // when the line is not horizontally scrolled and there is room for it, so
+    // it never pushes code off the edge.
+    let mut note_width = 0usize;
+    if inline_diagnostics && doc.scroll_left == 0 {
+        let on_line: Vec<&Diagnostic> = doc
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.start.line <= row && diagnostic.end.line >= row)
+            .collect();
+        if let Some(diagnostic) = on_line.iter().copied().max_by_key(|d| d.severity) {
+            let used = gutter as usize + (end - start);
+            let available = (line_width as usize).saturating_sub(used);
+            if let Some((note, severity)) = inline_note(diagnostic, on_line.len(), available) {
+                note_width = note.chars().count();
+                spans.push(Span::styled(
+                    note,
+                    with_bg(
+                        severity_style(severity).add_modifier(Modifier::ITALIC),
+                        base_bg,
+                    ),
+                ));
+            }
+        }
+    }
+
     // Paint the cursorline band across the full width.
     if let Some(bg) = base_bg {
-        let used = gutter as usize + (end - start);
+        let used = gutter as usize + (end - start) + note_width;
         let pad = (line_width as usize).saturating_sub(used);
         if pad > 0 {
             spans.push(Span::styled(" ".repeat(pad), Style::default().bg(bg)));
@@ -291,6 +327,40 @@ fn render_line(
     }
 
     Line::from(spans)
+}
+
+/// Format an inline diagnostic note that fits within `available` columns.
+///
+/// Returns the text to render and the severity to colour it with, or `None`
+/// when the line is too narrow to say anything useful.
+fn inline_note(
+    diagnostic: &Diagnostic,
+    count: usize,
+    available: usize,
+) -> Option<(String, Severity)> {
+    const PREFIX: &str = "  ·  ";
+    let extra = if count > 1 {
+        format!(" (+{})", count - 1)
+    } else {
+        String::new()
+    };
+    let fixed = PREFIX.chars().count() + extra.chars().count();
+    if available <= fixed + 4 {
+        return None;
+    }
+    let budget = available - fixed;
+    let message = diagnostic.message.replace('\n', " ");
+    let message = truncate(&message, budget);
+    Some((format!("{PREFIX}{message}{extra}"), diagnostic.severity))
+}
+
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 fn with_bg(style: Style, bg: Option<Color>) -> Style {
@@ -362,5 +432,40 @@ impl LineLayout {
 
     fn display_col(&self, original: usize) -> usize {
         self.map.get(original).copied().unwrap_or(self.len)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::language::diagnostics::TextPos;
+
+    fn diagnostic(message: &str, severity: Severity) -> Diagnostic {
+        Diagnostic::new(TextPos::new(0, 0), TextPos::new(0, 1), severity, message)
+    }
+
+    #[test]
+    fn inline_note_fits_or_declines() {
+        let diagnostic = diagnostic("unused variable `x`", Severity::Warning);
+        let (note, severity) = inline_note(&diagnostic, 1, 40).expect("note");
+        assert!(note.contains("unused variable"));
+        assert_eq!(severity, Severity::Warning);
+        // A line too narrow to say anything useful produces no note.
+        assert!(inline_note(&diagnostic, 1, 8).is_none());
+    }
+
+    #[test]
+    fn inline_note_reports_additional_diagnostics() {
+        let diagnostic = diagnostic("boom", Severity::Error);
+        let (note, _) = inline_note(&diagnostic, 3, 40).unwrap();
+        assert!(note.ends_with("(+2)"), "note was {note}");
+    }
+
+    #[test]
+    fn inline_note_truncates_and_stays_within_budget() {
+        let diagnostic = diagnostic(&"x".repeat(100), Severity::Error);
+        let (note, _) = inline_note(&diagnostic, 1, 30).unwrap();
+        assert!(note.chars().count() <= 30);
+        assert!(note.contains('…'));
     }
 }

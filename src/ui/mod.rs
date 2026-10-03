@@ -110,7 +110,15 @@ fn render_editor_area(frame: &mut Frame, area: Rect, app: &mut App) {
 
     if let Some(doc) = app.editor.documents.get_mut(index) {
         let provider = app.language.provider(language);
-        app.cursor_screen = editor::render(frame, chunks[1], doc, provider, &app.search, focused);
+        app.cursor_screen = editor::render(
+            frame,
+            chunks[1],
+            doc,
+            provider,
+            &app.search,
+            focused,
+            app.inline_diagnostics,
+        );
     }
 
     app.viewport_height = chunks[1].height.saturating_sub(2) as usize;

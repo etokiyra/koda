@@ -142,6 +142,9 @@ command palette already reports which are available. Filling them in is additive
 
 - [x] Keyboard-shortcuts overlay (`F1`), generated from the command registry.
 - [x] Editor scroll margin (scrolloff) and a gentle welcome-mascot animation.
+- [x] Inline diagnostic messages: an optional, severity-coloured note at the end
+      of the affected line, folded into the existing diagnostics UI and
+      toggleable from the palette.
 - [ ] Split editor.
 - [ ] A subtle, optional theme system (works with no config by default).
 - [ ] File iconography that respects monochrome terminals.

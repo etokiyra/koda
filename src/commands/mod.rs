@@ -51,6 +51,7 @@ pub mod ids {
     pub const TOGGLE_TREE: &str = "view.toggleTree";
     pub const FOCUS_TREE: &str = "view.focusTree";
     pub const TOGGLE_HIDDEN: &str = "view.toggleHidden";
+    pub const TOGGLE_INLINE_DIAGNOSTICS: &str = "view.toggleInlineDiagnostics";
     pub const FILTER_TREE: &str = "view.filterTree";
     pub const NEXT_TAB: &str = "view.nextTab";
     pub const PREV_TAB: &str = "view.previousTab";
@@ -268,6 +269,13 @@ impl CommandRegistry {
             .describes("Move keyboard focus between the tree and the editor"),
             Command::new(TOGGLE_HIDDEN, "Toggle Hidden Files", "View", None)
                 .describes("Show or hide dotfiles and ignored directories"),
+            Command::new(
+                TOGGLE_INLINE_DIAGNOSTICS,
+                "Toggle Inline Diagnostics",
+                "View",
+                None,
+            )
+            .describes("Show or hide diagnostic messages at the end of each line"),
             Command::new(FILTER_TREE, "Filter File Tree", "View", Some("/"))
                 .describes("Fuzzy-filter the project files from the sidebar"),
             Command::new(NEXT_TAB, "Next Tab", "View", Some("Ctrl+Tab"))

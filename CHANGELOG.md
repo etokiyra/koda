@@ -172,6 +172,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Polish & motion
 
+- Diagnostic messages can now appear inline at the end of the affected line
+  (an error-lens style note), coloured by severity, truncated to fit and
+  suppressed on narrow or horizontally scrolled lines. **Toggle Inline
+  Diagnostics** in the command palette turns them on or off.
+
 - The editor keeps a small scroll margin (scrolloff), so the cursor never sits
   glued to the top or bottom edge and there is always context in view.
 - Background work shows a live spinning sparkle in the statusline

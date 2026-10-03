@@ -69,6 +69,30 @@ fn renders_project_tree_and_rust_file() {
 }
 
 #[test]
+fn renders_inline_diagnostics() {
+    let dir = temp_project("inline-diag");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    {
+        let doc = app.editor.active_document_mut().unwrap();
+        doc.set_lsp_diagnostics(vec![Diagnostic::new(
+            TextPos::new(1, 4),
+            TextPos::new(1, 9),
+            Severity::Warning,
+            "unused variable",
+        )]);
+    }
+
+    let screen = draw(&mut app);
+    assert!(
+        screen.contains("unused variable"),
+        "inline diagnostic missing:\n{screen}"
+    );
+
+    cleanup(&dir);
+}
+
+#[test]
 fn renders_welcome_when_no_file_open() {
     let dir = temp_project("welcome");
     let mut app = App::new(Some(&dir)).unwrap();

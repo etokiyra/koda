@@ -95,6 +95,8 @@ pub struct App {
     /// Screen position of the editor cursor, updated during rendering.
     pub cursor_screen: Option<(u16, u16)>,
     pub tree_visible: bool,
+    /// Whether diagnostic messages are shown at the end of their line.
+    pub inline_diagnostics: bool,
     pub focus: Focus,
     pub status: Status,
     /// Height of the editor viewport, updated during rendering.
@@ -176,6 +178,7 @@ impl App {
             hover: None,
             cursor_screen: None,
             tree_visible: true,
+            inline_diagnostics: true,
             focus: Focus::Editor,
             status: Status::default(),
             viewport_height: 20,
@@ -990,6 +993,7 @@ impl App {
             ids::TOGGLE_TREE => self.toggle_tree(),
             ids::FOCUS_TREE => self.focus_tree(),
             ids::TOGGLE_HIDDEN => self.toggle_hidden(),
+            ids::TOGGLE_INLINE_DIAGNOSTICS => self.toggle_inline_diagnostics(),
             ids::FILTER_TREE => self.open_tree_filter(),
             ids::NEXT_TAB => self.editor.next_tab(),
             ids::PREV_TAB => self.editor.previous_tab(),
@@ -1399,6 +1403,17 @@ impl App {
             "hidden"
         };
         self.set_status(format!("Dotfiles {state}"));
+    }
+
+    /// Toggle the inline diagnostic messages at the end of each line.
+    fn toggle_inline_diagnostics(&mut self) {
+        self.inline_diagnostics = !self.inline_diagnostics;
+        let state = if self.inline_diagnostics {
+            "shown"
+        } else {
+            "hidden"
+        };
+        self.set_status(format!("Inline diagnostics {state}"));
     }
 
     fn open_tree_filter(&mut self) {
