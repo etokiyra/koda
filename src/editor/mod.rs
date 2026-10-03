@@ -101,6 +101,11 @@ impl Editor {
             return;
         }
         self.documents.remove(index);
+        // Closing a tab before the active one shifts it down; closing the
+        // active tab naturally keeps the index on the following document.
+        if index < self.active {
+            self.active -= 1;
+        }
         if self.active >= self.documents.len() {
             self.active = self.documents.len().saturating_sub(1);
         }
@@ -122,5 +127,49 @@ impl Editor {
             Some(doc) => doc.save(),
             None => Ok(false),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn editor_with(names: &[&str]) -> Editor {
+        let mut editor = Editor::new();
+        for name in names {
+            editor.push(Document::new(Buffer::from_text(name, None)));
+        }
+        editor
+    }
+
+    #[test]
+    fn closing_an_earlier_tab_keeps_the_active_document() {
+        // Regression: closing a tab before the active one left `active` pointing
+        // at the wrong document because it was never shifted down.
+        let mut editor = editor_with(&["a", "b", "c"]);
+        editor.set_active(2);
+        editor.close(0);
+        assert_eq!(editor.active_index(), 1);
+        assert_eq!(
+            editor.active_document().unwrap().buffer.text(),
+            "c",
+            "the active document should still be `c`"
+        );
+    }
+
+    #[test]
+    fn closing_the_active_tab_focuses_the_following_one() {
+        let mut editor = editor_with(&["a", "b", "c"]);
+        editor.set_active(1);
+        editor.close(1);
+        assert_eq!(editor.active_document().unwrap().buffer.text(), "c");
+    }
+
+    #[test]
+    fn closing_the_last_tab_falls_back_to_the_previous() {
+        let mut editor = editor_with(&["a", "b"]);
+        editor.set_active(1);
+        editor.close(1);
+        assert_eq!(editor.active_document().unwrap().buffer.text(), "a");
     }
 }

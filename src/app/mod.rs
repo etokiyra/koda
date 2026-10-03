@@ -2120,9 +2120,9 @@ impl App {
         let rows = match self
             .editor
             .active_document()
-            .and_then(|d| d.selection_range())
+            .and_then(|d| d.selected_rows())
         {
-            Some((start, end)) => (start.row..=end.row).collect::<Vec<_>>(),
+            Some((start, end)) => (start..=end).collect::<Vec<_>>(),
             None => match self.editor.active_document() {
                 Some(doc) => vec![doc.cursor.row],
                 None => return,

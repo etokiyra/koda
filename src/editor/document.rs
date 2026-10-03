@@ -42,6 +42,10 @@ pub struct Document {
     disk_mtime: Option<SystemTime>,
     /// The indentation unit detected for this file, in spaces.
     indent_width: usize,
+    /// The history id of the top edit at the last save (or load). Comparing
+    /// against it lets undo/redo restore the clean state, so undoing every edit
+    /// no longer leaves a file marked modified.
+    saved_id: Option<u64>,
 }
 
 impl Document {
@@ -63,6 +67,7 @@ impl Document {
             diagnostics_from_lsp: false,
             disk_mtime: None,
             indent_width,
+            saved_id: None,
         }
     }
 
@@ -93,7 +98,22 @@ impl Document {
     }
 
     pub fn mark_clean(&mut self) {
+        self.mark_saved();
+    }
+
+    /// Make the current history position the clean/save point.
+    fn mark_saved(&mut self) {
+        // A later edit must not coalesce into the edit that was saved, or the
+        // top id (and therefore the clean state) would be unchanged.
+        self.history.break_coalesce();
+        self.saved_id = self.history.top_id();
         self.buffer.mark_clean();
+    }
+
+    /// Recompute dirty state after moving through history. An undo/redo that
+    /// returns to the last save point makes the document clean again.
+    fn refresh_dirty(&mut self) {
+        self.buffer.dirty = self.history.top_id() != self.saved_id;
     }
 
     // ----------------------------------------------------------------------
@@ -127,7 +147,7 @@ impl Document {
 
         self.buffer.replace_contents(&text);
         self.history.clear();
-        self.buffer.mark_clean();
+        self.mark_saved();
         self.indent_width = detect_indent_width(&text);
         self.selection = None;
         self.preferred_col = None;
@@ -143,6 +163,7 @@ impl Document {
     pub fn save(&mut self) -> std::io::Result<bool> {
         let saved = self.buffer.save()?;
         if saved {
+            self.mark_saved();
             self.record_disk_mtime();
         }
         Ok(saved)
@@ -152,6 +173,7 @@ impl Document {
     pub fn save_as(&mut self, path: &Path) -> std::io::Result<bool> {
         let saved = self.buffer.save_as(path)?;
         if saved {
+            self.mark_saved();
             self.record_disk_mtime();
         }
         Ok(saved)
@@ -294,6 +316,7 @@ impl Document {
         }
         let cursor_after = a.advanced_by(&inserted);
         self.history.push(Edit {
+            id: 0,
             start: start_char,
             removed,
             inserted,
@@ -460,16 +483,18 @@ impl Document {
 
     /// Indent the selected lines, or insert one indentation step at the cursor.
     pub fn indent(&mut self) {
-        match self.selection_range() {
-            Some((start, end)) => self.reindent_lines(start.row, end.row, true),
+        match self.selected_rows() {
+            Some((start, end)) => self.reindent_lines(start, end, true),
             None => self.insert_tab(),
         }
     }
 
     /// Outdent the selected lines, or one step on the current line.
     pub fn outdent(&mut self) {
-        let (start, end) = self.selection_range().unwrap_or((self.cursor, self.cursor));
-        self.reindent_lines(start.row, end.row, false);
+        let (start, end) = self
+            .selected_rows()
+            .unwrap_or((self.cursor.row, self.cursor.row));
+        self.reindent_lines(start, end, false);
     }
 
     fn insert_tab(&mut self) {
@@ -535,8 +560,8 @@ impl Document {
 
     fn move_lines(&mut self, direction: i32) {
         let last = self.buffer.len_lines().saturating_sub(1);
-        let (start_row, end_row) = match self.selection_range() {
-            Some((start, end)) => (start.row.min(last), end.row.min(last)),
+        let (start_row, end_row) = match self.selected_rows() {
+            Some((start, end)) => (start.min(last), end.min(last)),
             None => {
                 let row = self.cursor.row.min(last);
                 (row, row)
@@ -611,10 +636,9 @@ impl Document {
 
     /// Delete the current line, or every line the selection touches.
     pub fn delete_line(&mut self) {
-        let (first, last) = match self.selection_range() {
-            Some((start, end)) => (start.row, end.row),
-            None => (self.cursor.row, self.cursor.row),
-        };
+        let (first, last) = self
+            .selected_rows()
+            .unwrap_or((self.cursor.row, self.cursor.row));
         let start = Position::new(first, 0);
         let end = if last + 1 < self.buffer.len_lines() {
             Position::new(last + 1, 0)
@@ -643,7 +667,7 @@ impl Document {
             self.selection = None;
             self.preferred_col = None;
             self.invalidate_highlight(self.cursor.row);
-            self.buffer.mark_dirty();
+            self.refresh_dirty();
             self.diagnostics.clear();
             self.diagnostics_dirty = true;
         }
@@ -663,7 +687,7 @@ impl Document {
             self.selection = None;
             self.preferred_col = None;
             self.invalidate_highlight(self.cursor.row);
-            self.buffer.mark_dirty();
+            self.refresh_dirty();
             self.diagnostics.clear();
             self.diagnostics_dirty = true;
         }
@@ -697,6 +721,22 @@ impl Document {
         } else {
             Some((start, end))
         }
+    }
+
+    /// The inclusive row range a selection actually touches.
+    ///
+    /// A selection that ends at column 0 of a later row has zero selected
+    /// columns on that row (the UI draws no highlight there), so the row is
+    /// excluded. This keeps indent, outdent, delete-line, move-line and
+    /// toggle-comment from acting on a line the user did not select.
+    pub fn selected_rows(&self) -> Option<(usize, usize)> {
+        let (start, end) = self.selection_range()?;
+        let last = if end.col == 0 && end.row > start.row {
+            end.row - 1
+        } else {
+            end.row
+        };
+        Some((start.row, last))
     }
 
     pub fn has_selection(&self) -> bool {
@@ -1570,6 +1610,58 @@ mod tests {
         assert_eq!(d.buffer.text(), "ab");
         d.undo();
         assert_eq!(d.buffer.text(), "abcd");
+    }
+
+    #[test]
+    fn coalesced_backspace_undo_restores_the_cursor() {
+        // Regression: merging backspaces overwrote `cursor_before`, so undo
+        // left the cursor one character short of where the run began.
+        let mut d = doc("abcd");
+        d.move_end(false);
+        d.backspace();
+        d.backspace();
+        d.undo();
+        assert_eq!(d.cursor, Position::new(0, 4));
+        d.redo();
+        assert_eq!(d.cursor, Position::new(0, 2));
+    }
+
+    #[test]
+    fn undoing_to_the_save_point_marks_the_document_clean() {
+        let mut d = doc("hello");
+        d.mark_saved();
+        assert!(!d.is_dirty());
+
+        d.insert_text("!");
+        assert!(d.is_dirty());
+        d.undo();
+        assert!(
+            !d.is_dirty(),
+            "undoing the only edit returns to the save point"
+        );
+
+        d.redo();
+        assert!(d.is_dirty(), "redoing past the save point is dirty again");
+    }
+
+    #[test]
+    fn indent_skips_a_trailing_line_selected_at_column_zero() {
+        // Regression: Shift+Down leaves the cursor at column 0 of the row after
+        // the highlighted lines; that row used to be indented too.
+        let mut d = doc("a\nb\nc");
+        d.selection = Some(Selection::new(Position::new(0, 0)));
+        d.cursor = Position::new(2, 0);
+        d.indent();
+        assert_eq!(d.buffer.text(), "    a\n    b\nc");
+    }
+
+    #[test]
+    fn delete_line_skips_a_trailing_line_selected_at_column_zero() {
+        let mut d = doc("a\nb\nc");
+        d.selection = Some(Selection::new(Position::new(0, 0)));
+        d.cursor = Position::new(2, 0);
+        d.delete_line();
+        assert_eq!(d.buffer.text(), "c");
     }
 
     #[test]

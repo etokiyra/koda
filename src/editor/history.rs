@@ -22,6 +22,9 @@ pub enum Coalesce {
 /// A single reversible change.
 #[derive(Clone, Debug)]
 pub struct Edit {
+    /// A process-unique identity, used to compare against the save point even
+    /// after edits have been undone and re-applied.
+    pub id: u64,
     /// Character offset where the change began.
     pub start: usize,
     /// Text removed by the change (re-inserted on undo).
@@ -40,6 +43,7 @@ pub struct History {
     undo: Vec<Edit>,
     redo: Vec<Edit>,
     limit: usize,
+    next_id: u64,
 }
 
 impl Default for History {
@@ -54,11 +58,12 @@ impl History {
             undo: Vec::new(),
             redo: Vec::new(),
             limit: limit.max(1),
+            next_id: 1,
         }
     }
 
     /// Record a new edit, merging it with the previous one when appropriate.
-    pub fn push(&mut self, edit: Edit) {
+    pub fn push(&mut self, mut edit: Edit) {
         self.redo.clear();
         if let Some(kind) = edit.coalesce
             && let Some(last) = self.undo.last_mut()
@@ -67,6 +72,8 @@ impl History {
         {
             return;
         }
+        edit.id = self.next_id;
+        self.next_id += 1;
         self.undo.push(edit);
         if self.undo.len() > self.limit {
             self.undo.remove(0);
@@ -111,6 +118,23 @@ impl History {
         !self.redo.is_empty()
     }
 
+    /// Number of undoable edits.
+    pub fn undo_len(&self) -> usize {
+        self.undo.len()
+    }
+
+    /// Number of redoable edits.
+    pub fn redo_len(&self) -> usize {
+        self.redo.len()
+    }
+
+    /// The identity of the top undo edit, or `None` when history is at the
+    /// initial state. Used to test whether the document is back at its save
+    /// point.
+    pub fn top_id(&self) -> Option<u64> {
+        self.undo.last().map(|edit| edit.id)
+    }
+
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
@@ -139,7 +163,10 @@ fn merge(last: &mut Edit, edit: &Edit, kind: Coalesce) -> bool {
             }
             last.removed = format!("{}{}", edit.removed, last.removed);
             last.start = edit.start;
-            last.cursor_before = edit.cursor_before;
+            // `cursor_before` must stay at the *first* deletion's right edge,
+            // while `cursor_after` follows the most recent deletion's left edge,
+            // so both undo and redo land where the user left off.
+            last.cursor_after = edit.cursor_after;
             true
         }
         Coalesce::DeleteForward => {
