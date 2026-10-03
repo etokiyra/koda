@@ -170,6 +170,31 @@ fn markers_present(dir: &Path) -> Vec<String> {
         .collect()
 }
 
+/// The marker file names of the nearest enclosing project for `path`.
+///
+/// Walks up from `path`'s directory and returns the first directory that
+/// declares a known project marker. This lets a file inside a monorepo
+/// subproject (`crates/a/Cargo.toml`) get the same corroborating context it
+/// would in a single-project checkout. Falls back to `fallback` (usually the
+/// workspace root's markers) when nothing is found, so behaviour is unchanged
+/// for ordinary workspaces.
+pub fn nearest_markers(path: &Path, fallback: &[String]) -> Vec<String> {
+    let start = if path.is_dir() {
+        Some(path)
+    } else {
+        path.parent()
+    };
+    if let Some(start) = start {
+        for ancestor in start.ancestors() {
+            let markers = markers_present(ancestor);
+            if !markers.is_empty() {
+                return markers;
+            }
+        }
+    }
+    fallback.to_vec()
+}
+
 fn kind_for_marker(marker: &str) -> Option<ProjectKind> {
     KNOWN_MARKERS
         .iter()
@@ -196,6 +221,30 @@ mod tests {
         assert_eq!(
             project.root.canonicalize().unwrap(),
             dir.canonicalize().unwrap()
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn nearest_markers_finds_nested_subprojects() {
+        let dir = std::env::temp_dir().join(format!("koda-mono-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let sub = dir.join("crates/a/src");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(dir.join("crates/a/Cargo.toml"), "[package]").unwrap();
+        let file = sub.join("lib.rs");
+        fs::write(&file, "pub fn a() {}\n").unwrap();
+
+        assert_eq!(nearest_markers(&file, &[]), vec!["Cargo.toml".to_string()]);
+
+        // Falls back when no ancestor declares a marker.
+        let plain = dir.join("notes/readme.txt");
+        fs::create_dir_all(dir.join("notes")).unwrap();
+        fs::write(&plain, "hi").unwrap();
+        assert_eq!(
+            nearest_markers(&plain, &["go.mod".to_string()]),
+            vec!["go.mod".to_string()]
         );
 
         fs::remove_dir_all(&dir).ok();

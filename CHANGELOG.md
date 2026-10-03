@@ -58,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Language support
 
+- Language detection now uses the file's **nearest** project markers rather
+  than only the workspace root's. A `.rs` file inside `crates/a/` of a monorepo
+  is corroborated by `crates/a/Cargo.toml` even when the workspace root declares
+  no project, so confidence is accurate away from the root.
 - Added **Python** support, entirely through Koda's built-in intelligence so it
   works offline with nothing to install: syntax highlighting (triple-quoted
   strings, decorators, f-string text), structural diagnostics, symbols

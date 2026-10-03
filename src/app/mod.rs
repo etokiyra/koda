@@ -1848,12 +1848,15 @@ impl App {
 
     /// Ask the background worker to detect the active file's language.
     fn request_detection_for_active(&mut self) {
-        let markers = self.workspace.marker_names();
+        let fallback = self.workspace.marker_names();
         if let Some(path) = self
             .editor
             .active_document()
             .and_then(|doc| doc.buffer.path.clone())
         {
+            // Use the file's nearest project markers so a monorepo subproject
+            // contributes its own context.
+            let markers = crate::project::nearest_markers(&path, &fallback);
             self.background.detect(path, markers);
         }
     }

@@ -132,7 +132,11 @@ command palette already reports which are available. Filling them in is additive
 ## Then — project intelligence
 
 - [ ] Workspace model: `Workspace → Project → Language environment → Files`.
-- [ ] Detect multiple projects/languages inside one workspace.
+- [x] Per-file project context: detection uses the file's **nearest** project
+      markers, so a monorepo subproject is recognised even when the workspace
+      root declares nothing.
+- [ ] A workspace model that surfaces multiple projects and their language
+      environments as one navigable structure.
 - [ ] A dedicated language detection subsystem with pluggable signals and
       user-confirmation when confidence is low.
 - [x] Non-code language support (Markdown, JSON, TOML, YAML) for config files.
