@@ -5626,7 +5626,11 @@ mod tests {
                 .and_then(|extension| extension.to_str())
                 .is_some_and(|extension| app.language.language_for_extension(extension).is_some());
         if expected_known {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            // Detection runs on the background worker behind any queued git and
+            // tool probes. Under a fully loaded test machine (many worker
+            // threads and subprocess probes) it can take several seconds, so the
+            // deadline is generous rather than tight.
+            let deadline = Instant::now() + Duration::from_secs(15);
             while app
                 .editor
                 .active_document()
