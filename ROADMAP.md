@@ -107,7 +107,7 @@ command palette already reports which are available. Filling them in is additive
 - [ ] Incremental search options (case sensitivity, whole word, regex).
 - [x] Undo grouping for consecutive typing.
 - [ ] Soft wrap and a configurable tab width.
-- [ ] Persist cursor position, open tabs and expanded directories per project.
+- [x] Persist cursor position, open tabs and expanded directories per project.
 - [ ] A kill-ring/registers model for copy/paste.
 
 ---

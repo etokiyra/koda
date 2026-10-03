@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Session
+
+- Koda remembers the open files, cursor positions and expanded directories for
+  each project and restores them on the next launch. State lives in the user's
+  state directory (`$XDG_STATE_HOME/koda` or `~/.local/state/koda`), keyed by the
+  project root — never inside the project — and is written on quit. Opening a
+  file directly (`koda src/main.rs`) still bypasses the saved session.
+
 ### Language servers
 
 - Added an asynchronous language-server client. When a supported server is

@@ -75,6 +75,24 @@ impl FileTree {
         self.rebuild();
     }
 
+    /// The directories currently expanded.
+    pub fn expanded_paths(&self) -> Vec<PathBuf> {
+        self.expanded.iter().cloned().collect()
+    }
+
+    /// Replace the expanded set and rebuild the visible tree. The root is
+    /// always expanded; paths outside the project are ignored.
+    pub fn set_expanded(&mut self, paths: &[PathBuf]) {
+        self.expanded.clear();
+        self.expanded.insert(self.root.clone());
+        for path in paths {
+            if path.starts_with(&self.root) && path.is_dir() {
+                self.expanded.insert(path.clone());
+            }
+        }
+        self.refresh();
+    }
+
     pub fn select_up(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;

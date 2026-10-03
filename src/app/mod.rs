@@ -26,6 +26,7 @@ use crate::language::symbols::is_ident_char as is_word_char;
 use crate::language::tools::{Tool, ToolPurpose, ToolRegistry};
 use crate::language::{Capability, LanguageId, LanguageService, WorkspaceSymbol};
 use crate::project::Workspace;
+use crate::session::{self, Session};
 use crate::terminal;
 use crate::ui;
 use overlay::{
@@ -136,6 +137,7 @@ impl App {
         let mut terminal = terminal::init()?;
         let result = app.run(&mut terminal);
         terminal::restore();
+        app.save_session();
         result
     }
 
@@ -184,6 +186,10 @@ impl App {
             && path.is_file()
         {
             app.open_path(path.to_path_buf());
+        } else if let Some(path) = session::session_path(app.workspace.root())
+            && let Some(session) = Session::load_from(&path)
+        {
+            app.restore_session(session);
         }
         app.request_git_refresh();
         // Probe for external tools on the worker so startup never waits on it.
@@ -1114,6 +1120,71 @@ impl App {
         }
     }
 
+    // ----------------------------------------------------------------------
+    // Session persistence
+    // ----------------------------------------------------------------------
+
+    /// Snapshot the session worth restoring for the active project.
+    fn capture_session(&self) -> Session {
+        let mut files = Vec::new();
+        let mut cursors = Vec::new();
+        for doc in &self.editor.documents {
+            if let Some(path) = &doc.buffer.path {
+                files.push(path.clone());
+                cursors.push((doc.cursor.row, doc.cursor.col));
+            }
+        }
+        let active = self
+            .editor
+            .active_document()
+            .and_then(|doc| doc.buffer.path.clone())
+            .and_then(|path| files.iter().position(|file| *file == path))
+            .unwrap_or(0);
+        Session {
+            files,
+            active,
+            cursors,
+            expanded: self.workspace.tree.expanded_paths(),
+            show_hidden: self.workspace.tree.show_hidden,
+        }
+    }
+
+    /// Restore a saved session into the current workspace.
+    fn restore_session(&mut self, session: Session) {
+        if session.show_hidden && !self.workspace.tree.show_hidden {
+            self.workspace.tree.toggle_hidden();
+        }
+        self.workspace.tree.set_expanded(&session.expanded);
+
+        for (index, path) in session.files.iter().enumerate() {
+            if !path.is_file() {
+                continue;
+            }
+            self.open_path(path.clone());
+            if let Some(&(row, col)) = session.cursors.get(index)
+                && let Some(doc) = self.editor.active_document_mut()
+            {
+                doc.move_to(Position::new(row, col));
+            }
+        }
+
+        if !self.editor.is_empty() {
+            let active = session.active.min(self.editor.len().saturating_sub(1));
+            self.editor.set_active(active);
+            self.request_detection_for_active();
+            self.set_status(format!("Restored {} file(s)", self.editor.len()));
+        }
+    }
+
+    /// Persist the session for the active project. Errors are non-fatal.
+    pub fn save_session(&self) {
+        let Some(path) = session::session_path(self.workspace.root()) else {
+            return;
+        };
+        let _ = self.capture_session().save_to(&path);
+    }
+
+    /// Save the active document, if it has a path.
     fn save(&mut self) {
         let has_path = self
             .editor
@@ -2951,6 +3022,35 @@ cat >/dev/null
         assert_eq!(
             app.editor.active_document().unwrap().diagnostics()[0].message,
             "boom"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn captures_and_restores_open_files() {
+        let dir = temp_project("session-restore");
+        let a = dir.join("src/main.rs");
+        let b = dir.join("src/lib.rs");
+        fs::write(&b, "pub fn lib() {\n    let x = 1;\n}\n").unwrap();
+
+        let mut app = App::new(Some(&a)).unwrap();
+        app.open_path(b.clone());
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .move_to(Position::new(1, 4));
+
+        let session = app.capture_session();
+        assert_eq!(session.files.len(), 2);
+        assert_eq!(session.active, 1);
+
+        let mut fresh = App::new(Some(&dir)).unwrap();
+        fresh.restore_session(session);
+        assert_eq!(fresh.editor.len(), 2);
+        assert_eq!(fresh.editor.active_index(), 1);
+        assert_eq!(
+            fresh.editor.active_document().unwrap().clamped_cursor(),
+            Position::new(1, 4)
         );
         fs::remove_dir_all(&dir).ok();
     }
