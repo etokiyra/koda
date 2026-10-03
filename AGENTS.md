@@ -224,6 +224,11 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   one document index per pane and `editor.active` follows the focused pane, so
   every existing editing path keeps working unchanged. Panes share the tab
   strip, and closing a pane's file collapses the split.
+- **One language server per language.** The app tracks servers in a map keyed by
+  `LanguageId`; each has its own handshake, restart budget and failure state.
+  Feature requests resolve against the active document's language, and a
+  language's server failing never disturbs another. Workspace-wide requests
+  prefer the active language's server, then any ready one.
 
 ---
 

@@ -6,6 +6,7 @@
 pub mod overlay;
 
 use std::cmp::Reverse;
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -94,6 +95,25 @@ pub enum LspStatus {
     Ready,
     /// A server could not be started or exited.
     Failed(String),
+}
+
+/// One language's language-server job.
+///
+/// Koda keeps a server per language rather than one per session, so a workspace
+/// that mixes languages — or a split pane showing two — gets tooling for each
+/// instead of only the first language it happened to detect.
+#[derive(Default)]
+struct LspJob {
+    /// The running server, once a scheduled start has fired.
+    server: Option<Server>,
+    /// A scheduled start that has not fired yet.
+    start_at: Option<Instant>,
+    /// When the current handshake started, for the timeout.
+    started_at: Option<Instant>,
+    /// Automatic restarts attempted since the server last connected.
+    restarts: u32,
+    /// The most recent failure, for the status summary.
+    failed: Option<String>,
 }
 
 /// A short-lived status message.
@@ -193,9 +213,10 @@ pub struct App {
     pub completion: Option<CompletionState>,
     /// When a paused keystroke should offer automatic completion.
     completion_due: Option<PendingCompletion>,
-    /// The id of the newest language-server completion request, so an older
-    /// response can be discarded when the user has typed on.
-    completion_request: Option<i64>,
+    /// The id of the newest language-server completion request (with its
+    /// language), so an older response can be discarded when the user has typed
+    /// on.
+    completion_request: Option<(LanguageId, i64)>,
     /// Hover popup, when open.
     pub hover: Option<HoverState>,
     /// Screen position of the editor cursor, updated during rendering.
@@ -247,16 +268,8 @@ pub struct App {
     anim_last: Instant,
     /// External tools Koda has probed for, once discovery completes.
     pub tools: Option<ToolRegistry>,
-    /// The running language server, if any.
-    lsp: Option<Server>,
-    /// The language the running (or attempted) server serves.
-    lsp_language: Option<LanguageId>,
-    /// When set, a language server should start once this delay elapses.
-    lsp_start_at: Option<(Instant, LanguageId)>,
-    /// When the current handshake started, for the timeout.
-    lsp_started_at: Option<Instant>,
-    /// Automatic restarts attempted since the server last connected.
-    lsp_restarts: u32,
+    /// One language server per language.
+    lsp: HashMap<LanguageId, LspJob>,
     /// The symbol awaiting a new name, from the rename prompt.
     pending_rename: Option<(PathBuf, usize, usize)>,
     /// The path awaiting a new name, from the file-rename prompt.
@@ -272,8 +285,6 @@ pub struct App {
     pending_stage_refresh: bool,
     /// Code actions from the most recent server response.
     pending_code_actions: Vec<convert::CodeAction>,
-    /// Connection state, shown in the statusline.
-    pub lsp_status: LspStatus,
     /// When open files were last checked for on-disk changes.
     last_disk_check: Instant,
     /// Languages for which Koda has already offered to install a missing
@@ -350,11 +361,7 @@ impl App {
             anim_phase: 0,
             anim_last: Instant::now(),
             tools: None,
-            lsp: None,
-            lsp_language: None,
-            lsp_start_at: None,
-            lsp_started_at: None,
-            lsp_restarts: 0,
+            lsp: HashMap::new(),
             pending_rename: None,
             pending_rename_file: None,
             pending_copy_file: None,
@@ -362,7 +369,6 @@ impl App {
             pending_commit: false,
             pending_stage_refresh: false,
             pending_code_actions: Vec::new(),
-            lsp_status: LspStatus::Offline,
             last_disk_check: Instant::now(),
             setup_offered: std::collections::HashSet::new(),
         };
@@ -549,7 +555,7 @@ impl App {
             Some("committing")
         } else if self.pending_project {
             Some("creating project")
-        } else if self.lsp_status == LspStatus::Starting {
+        } else if self.lsp_status() == LspStatus::Starting {
             Some("connecting")
         } else {
             None
@@ -1413,10 +1419,18 @@ impl App {
 
     /// Ask the language server for completions at the cursor.
     fn request_lsp_completion(&mut self) {
-        if let Some((path, row, col)) = self.lsp_target()
-            && let Some(server) = self.lsp.as_mut()
+        let Some(language) = self.lsp_language() else {
+            return;
+        };
+        let Some((path, row, col)) = self.lsp_target() else {
+            return;
+        };
+        if let Some(server) = self
+            .lsp
+            .get_mut(&language)
+            .and_then(|job| job.server.as_mut())
         {
-            self.completion_request = server.completion(&path, row, col);
+            self.completion_request = server.completion(&path, row, col).map(|id| (language, id));
         }
     }
 
@@ -1491,7 +1505,7 @@ impl App {
 
         // Ask the language server for a richer answer when one is attached.
         if let Some((path, row, col)) = self.lsp_target() {
-            if let Some(server) = self.lsp.as_mut() {
+            if let Some(server) = self.active_server_mut() {
                 server.hover(&path, row, col);
             }
             return;
@@ -1674,7 +1688,7 @@ impl App {
                     return;
                 }
                 if let Some((path, row, col)) = self.pending_rename.take()
-                    && let Some(server) = self.lsp.as_mut()
+                    && let Some(server) = self.active_server_mut()
                 {
                     server.rename(&path, row, col, &input);
                 }
@@ -2298,12 +2312,7 @@ impl App {
         self.pending_project_search = None;
         self.pending_rename = None;
         self.pending_code_actions.clear();
-        self.lsp = None;
-        self.lsp_language = None;
-        self.lsp_start_at = None;
-        self.lsp_started_at = None;
-        self.lsp_restarts = 0;
-        self.lsp_status = LspStatus::Offline;
+        self.lsp.clear();
         self.welcome_target = None;
         self.welcome_selected = 0;
     }
@@ -3158,9 +3167,13 @@ impl App {
     /// still be found across the project without a language server.
     fn open_workspace_symbols_with(&mut self, query: Option<String>) {
         self.pending_workspace_symbols_query = query.clone();
-        if self.lsp.as_ref().is_some_and(|server| server.is_ready()) {
+        if let Some(language) = self.ready_server_language() {
             self.ws_lsp_pending = true;
-            if let Some(server) = self.lsp.as_mut() {
+            if let Some(server) = self
+                .lsp
+                .get_mut(&language)
+                .and_then(|job| job.server.as_mut())
+            {
                 server.workspace_symbols(query.as_deref().unwrap_or(""));
             }
         }
@@ -3354,11 +3367,11 @@ impl App {
 
         // If a language server owns this document, stream the change to it and
         // let it publish fresh diagnostics.
-        let owned_by_lsp = self.lsp.as_ref().is_some_and(|server| {
-            server.is_ready()
-                && path
-                    .as_deref()
-                    .is_some_and(|path| server.has_open_document(path))
+        let owned_by_lsp = path.as_deref().is_some_and(|path| {
+            self.lsp
+                .get(&language)
+                .and_then(|job| job.server.as_ref())
+                .is_some_and(|server| server.is_ready() && server.has_open_document(path))
         });
         if owned_by_lsp {
             let text = self
@@ -3366,7 +3379,12 @@ impl App {
                 .active_document()
                 .map(|doc| doc.buffer.text())
                 .unwrap_or_default();
-            if let (Some(server), Some(path)) = (self.lsp.as_mut(), path.as_deref()) {
+            if let Some(server) = self
+                .lsp
+                .get_mut(&language)
+                .and_then(|job| job.server.as_mut())
+                && let Some(path) = path.as_deref()
+            {
                 server.did_change(path, &text);
             }
             return;
@@ -3396,10 +3414,35 @@ impl App {
     // Language server
     // ----------------------------------------------------------------------
 
+    /// Aggregate connection state across every language server, for the
+    /// statusline.
+    pub fn lsp_status(&self) -> LspStatus {
+        let mut starting = false;
+        let mut failed = None;
+        for job in self.lsp.values() {
+            if let Some(server) = &job.server {
+                if server.is_ready() {
+                    return LspStatus::Ready;
+                }
+                starting = true;
+            }
+            if let Some(message) = &job.failed {
+                failed = Some(message.clone());
+            }
+        }
+        if starting {
+            LspStatus::Starting
+        } else if let Some(message) = failed {
+            LspStatus::Failed(message)
+        } else {
+            LspStatus::Offline
+        }
+    }
+
     /// Start a language server for `language` when one is installed, after a
     /// short delay so opening a file never waits on server startup.
     fn maybe_start_lsp(&mut self, language: LanguageId) {
-        if self.lsp.is_some() || self.lsp_language.is_some() || self.lsp_start_at.is_some() {
+        if self.lsp.contains_key(&language) {
             return;
         }
         let Some(tools) = &self.tools else {
@@ -3411,76 +3454,103 @@ impl App {
         if !tools.available(tool) {
             return;
         }
-        self.lsp_start_at = Some((Instant::now() + LSP_START_DELAY, language));
+        self.lsp.insert(
+            language,
+            LspJob {
+                start_at: Some(Instant::now() + LSP_START_DELAY),
+                ..LspJob::default()
+            },
+        );
     }
 
-    /// Start the scheduled language server once its delay has elapsed.
+    /// Start any language server whose delay has elapsed.
     fn poll_lsp_start(&mut self) {
-        let Some((at, language)) = self.lsp_start_at else {
-            return;
-        };
-        if Instant::now() < at {
-            return;
+        let now = Instant::now();
+        let due: Vec<LanguageId> = self
+            .lsp
+            .iter()
+            .filter(|(_, job)| job.server.is_none() && job.start_at.is_some_and(|at| now >= at))
+            .map(|(language, _)| *language)
+            .collect();
+        for language in due {
+            if let Some(job) = self.lsp.get_mut(&language) {
+                job.start_at = None;
+            }
+            let Some((program, args)) = self.lsp_launch(language) else {
+                continue;
+            };
+            self.start_lsp(language, &program, args);
         }
-        self.lsp_start_at = None;
-        let Some(tool) = Tool::for_language(language, ToolPurpose::LanguageServer) else {
-            return;
-        };
+    }
+
+    /// The program and arguments for `language`'s server, when it is installed.
+    fn lsp_launch(&self, language: LanguageId) -> Option<(String, &'static [&'static str])> {
+        let tools = self.tools.as_ref()?;
+        let tool = Tool::for_language(language, ToolPurpose::LanguageServer)?;
+        if !tools.available(tool) {
+            return None;
+        }
         // Prefer the executable Koda discovered, which may live in a user bin
         // directory outside the process PATH.
-        let program = self
-            .tools
-            .as_ref()
-            .and_then(|tools| tools.program_path(tool))
+        let program = tools
+            .program_path(tool)
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| tool.program().to_string());
-        self.start_lsp(language, &program, tool.server_args());
+        Some((program, tool.server_args()))
     }
 
     /// Start a language server, recording our attempt either way.
     fn start_lsp(&mut self, language: LanguageId, program: &str, args: &[&str]) {
-        self.lsp_language = Some(language);
-        self.lsp_started_at = Some(Instant::now());
         let root = self.workspace.root().to_path_buf();
         match Server::start(language, program, args, &root) {
             Ok(server) => {
-                self.lsp = Some(server);
-                self.lsp_status = LspStatus::Starting;
+                let job = self.lsp.entry(language).or_default();
+                job.server = Some(server);
+                job.start_at = None;
+                job.started_at = Some(Instant::now());
+                job.failed = None;
             }
             Err(err) => {
-                self.lsp_language = None;
-                self.lsp_started_at = None;
-                self.lsp_status = LspStatus::Failed(err.to_string());
+                let job = self.lsp.entry(language).or_default();
+                job.server = None;
+                job.start_at = None;
+                job.started_at = None;
+                job.failed = Some(err.to_string());
                 self.set_error(format!("Could not start {program}: {err}"));
                 self.schedule_lsp_restart(language);
             }
         }
     }
 
-    /// Give up on a handshake that has taken too long, falling back cleanly.
+    /// Give up on any handshake that has taken too long, falling back cleanly.
     ///
     /// A server that never answers `initialize` would otherwise leave Koda
     /// "connecting" forever; this turns that hang into the same graceful
     /// fallback as a crash.
     fn poll_lsp_health(&mut self) -> bool {
-        if self.lsp_status != LspStatus::Starting {
-            return false;
-        }
-        let Some(started) = self.lsp_started_at else {
-            return false;
-        };
-        if started.elapsed() < LSP_HANDSHAKE_TIMEOUT {
-            return false;
-        }
-        let language = self.lsp_language.take();
-        self.lsp = None;
-        self.lsp_started_at = None;
-        self.lsp_status = LspStatus::Failed("initialize timed out".to_string());
-        for doc in &mut self.editor.documents {
-            doc.use_builtin_diagnostics();
-        }
-        self.diagnostics_dirty_at = Some(Instant::now());
-        if let Some(language) = language {
+        let now = Instant::now();
+        let timed_out: Vec<LanguageId> = self
+            .lsp
+            .iter()
+            .filter(|(_, job)| {
+                job.server.as_ref().is_some_and(|server| !server.is_ready())
+                    && job
+                        .started_at
+                        .is_some_and(|started| now.duration_since(started) >= LSP_HANDSHAKE_TIMEOUT)
+            })
+            .map(|(language, _)| *language)
+            .collect();
+        let mut changed = false;
+        for language in timed_out {
+            if let Some(job) = self.lsp.get_mut(&language) {
+                job.server = None;
+                job.started_at = None;
+                job.failed = Some("initialize timed out".to_string());
+            }
+            for doc in &mut self.editor.documents {
+                doc.use_builtin_diagnostics();
+            }
+            self.diagnostics_dirty_at = Some(Instant::now());
             let message = format!(
                 "{} did not respond; using built-in intelligence",
                 language.name()
@@ -3488,28 +3558,35 @@ impl App {
             self.set_error(message.clone());
             self.push_toast(ToastKind::Error, message);
             self.schedule_lsp_restart(language);
+            changed = true;
         }
-        true
+        changed
     }
 
     /// Schedule a bounded automatic restart for `language`, if a server tool is
     /// installed and the retry budget is not exhausted.
     fn schedule_lsp_restart(&mut self, language: LanguageId) {
-        if self.lsp_restarts >= MAX_LSP_RESTARTS || self.lsp_start_at.is_some() {
-            return;
-        }
-        let Some(tools) = &self.tools else {
-            return;
+        let label = {
+            let Some(tools) = &self.tools else {
+                return;
+            };
+            let Some(tool) = Tool::for_language(language, ToolPurpose::LanguageServer) else {
+                return;
+            };
+            if !tools.available(tool) {
+                return;
+            }
+            let Some(job) = self.lsp.get_mut(&language) else {
+                return;
+            };
+            if job.restarts >= MAX_LSP_RESTARTS || job.start_at.is_some() {
+                return;
+            }
+            job.restarts += 1;
+            job.start_at = Some(Instant::now() + LSP_RESTART_DELAY);
+            tool.label()
         };
-        let Some(tool) = Tool::for_language(language, ToolPurpose::LanguageServer) else {
-            return;
-        };
-        if !tools.available(tool) {
-            return;
-        }
-        self.lsp_restarts += 1;
-        self.lsp_start_at = Some((Instant::now() + LSP_RESTART_DELAY, language));
-        self.set_status(format!("Restarting {}…", tool.label()));
+        self.set_status(format!("Restarting {label}…"));
     }
 
     /// Restart the language server for the active document on demand.
@@ -3535,80 +3612,94 @@ impl App {
             return;
         }
 
-        // Drop the current connection and start a fresh one immediately.
-        self.lsp = None;
-        self.lsp_language = None;
-        self.lsp_start_at = None;
-        self.lsp_started_at = None;
-        self.lsp_restarts = 0;
-        self.lsp_status = LspStatus::Offline;
+        // Drop this language's connection and schedule a fresh one now. The
+        // restart budget resets because the user asked explicitly.
+        self.lsp.remove(&language);
         for doc in &mut self.editor.documents {
             doc.use_builtin_diagnostics();
         }
-        self.lsp_start_at = Some((Instant::now(), language));
+        self.lsp.insert(
+            language,
+            LspJob {
+                start_at: Some(Instant::now()),
+                ..LspJob::default()
+            },
+        );
         self.set_status(format!("Restarting {}…", tool.label()));
     }
 
-    /// Drain language-server events. Returns `true` when something changed.
+    /// Drain every language server's events. Returns `true` when something
+    /// changed.
     fn poll_lsp(&mut self) -> bool {
-        let events = match self.lsp.as_mut() {
-            Some(server) => server.poll(),
-            None => return false,
-        };
-        if events.is_empty() {
-            return false;
-        }
-        for event in events {
-            match event {
-                ServerEvent::Ready => self.lsp_ready(),
-                ServerEvent::Diagnostics { path, diagnostics } => {
-                    self.apply_lsp_diagnostics(&path, diagnostics);
-                }
-                ServerEvent::Response { kind, id, result } => {
-                    self.handle_lsp_response(kind, id, result);
-                }
-                ServerEvent::ApplyEdit { id, params } => {
-                    let edit = params.get("edit").cloned().unwrap_or(Value::Null);
-                    let files = convert::workspace_edit(&edit);
-                    let applied = self.apply_workspace_edit(files);
-                    if let Some(server) = self.lsp.as_mut() {
-                        server.apply_edit_response(&id, applied > 0);
+        let languages: Vec<LanguageId> = self.lsp.keys().copied().collect();
+        let mut changed = false;
+        for language in languages {
+            let events = match self
+                .lsp
+                .get_mut(&language)
+                .and_then(|job| job.server.as_mut())
+            {
+                Some(server) => server.poll(),
+                None => continue,
+            };
+            for event in events {
+                changed = true;
+                match event {
+                    ServerEvent::Ready => self.lsp_ready(language),
+                    ServerEvent::Diagnostics { path, diagnostics } => {
+                        self.apply_lsp_diagnostics(&path, diagnostics);
                     }
-                    if applied > 0 {
-                        self.set_status(format!("Applied {applied} edit(s)"));
+                    ServerEvent::Response { kind, id, result } => {
+                        self.handle_lsp_response(language, kind, id, result);
                     }
-                }
-                ServerEvent::Failed(message) => {
-                    let language = self.lsp_language.take();
-                    self.lsp = None;
-                    self.lsp_started_at = None;
-                    self.lsp_status = LspStatus::Failed(message.clone());
-                    // Fall back to the built-in providers for every document.
-                    for doc in &mut self.editor.documents {
-                        doc.use_builtin_diagnostics();
+                    ServerEvent::ApplyEdit { id, params } => {
+                        let edit = params.get("edit").cloned().unwrap_or(Value::Null);
+                        let files = convert::workspace_edit(&edit);
+                        let applied = self.apply_workspace_edit(files);
+                        if let Some(server) = self
+                            .lsp
+                            .get_mut(&language)
+                            .and_then(|job| job.server.as_mut())
+                        {
+                            server.apply_edit_response(&id, applied > 0);
+                        }
+                        if applied > 0 {
+                            self.set_status(format!("Applied {applied} edit(s)"));
+                        }
                     }
-                    self.diagnostics_dirty_at = Some(Instant::now());
-                    let text =
-                        format!("Language server stopped — {message}; using built-in intelligence");
-                    self.set_error(text.clone());
-                    self.push_toast(ToastKind::Error, text);
-                    if let Some(language) = language {
-                        self.schedule_lsp_restart(language);
-                    }
+                    ServerEvent::Failed(message) => self.lsp_failed(language, message),
                 }
             }
         }
-        true
+        changed
+    }
+
+    /// A server exited or failed to start: fall back for its language.
+    fn lsp_failed(&mut self, language: LanguageId, message: String) {
+        if let Some(job) = self.lsp.get_mut(&language) {
+            job.server = None;
+            job.started_at = None;
+            job.failed = Some(message.clone());
+        }
+        // Fall back to the built-in providers for every document.
+        for doc in &mut self.editor.documents {
+            doc.use_builtin_diagnostics();
+        }
+        self.diagnostics_dirty_at = Some(Instant::now());
+        let text = format!("Language server stopped — {message}; using built-in intelligence");
+        self.set_error(text.clone());
+        self.push_toast(ToastKind::Error, text);
+        self.schedule_lsp_restart(language);
     }
 
     /// The handshake finished: open every matching document on the server.
-    fn lsp_ready(&mut self) {
-        self.lsp_status = LspStatus::Ready;
-        // A healthy connection earns a fresh restart budget for later crashes.
-        self.lsp_restarts = 0;
-        let Some(language) = self.lsp_language else {
-            return;
-        };
+    fn lsp_ready(&mut self, language: LanguageId) {
+        if let Some(job) = self.lsp.get_mut(&language) {
+            // A healthy connection earns a fresh restart budget for later.
+            job.restarts = 0;
+            job.started_at = None;
+            job.failed = None;
+        }
         let documents: Vec<(PathBuf, String)> = self
             .editor
             .documents
@@ -3621,7 +3712,11 @@ impl App {
                     .map(|path| (path, doc.buffer.text()))
             })
             .collect();
-        if let Some(server) = self.lsp.as_mut() {
+        if let Some(server) = self
+            .lsp
+            .get_mut(&language)
+            .and_then(|job| job.server.as_mut())
+        {
             for (path, text) in documents {
                 server.did_open(&path, &text);
             }
@@ -3639,13 +3734,44 @@ impl App {
         }
     }
 
+    /// The language of the active document, when a ready server serves it.
+    fn lsp_language(&self) -> Option<LanguageId> {
+        let doc = self.editor.active_document()?;
+        let language = doc.buffer.language;
+        let server = self.lsp.get(&language)?.server.as_ref()?;
+        server.is_ready().then_some(language)
+    }
+
+    /// A mutable handle to the ready server for the active document.
+    fn active_server_mut(&mut self) -> Option<&mut Server> {
+        let language = self.lsp_language()?;
+        self.lsp.get_mut(&language)?.server.as_mut()
+    }
+
+    /// The active language's ready server, or any ready server, for
+    /// workspace-wide requests.
+    fn ready_server_language(&self) -> Option<LanguageId> {
+        let preferred = self.editor.active_document().map(|doc| doc.buffer.language);
+        preferred
+            .filter(|language| {
+                self.lsp
+                    .get(language)
+                    .and_then(|job| job.server.as_ref())
+                    .is_some_and(|server| server.is_ready())
+            })
+            .or_else(|| {
+                self.lsp
+                    .iter()
+                    .find(|(_, job)| job.server.as_ref().is_some_and(|server| server.is_ready()))
+                    .map(|(language, _)| *language)
+            })
+    }
+
     /// The active document's `(path, line, col)` when a ready server owns it.
     fn lsp_target(&self) -> Option<(PathBuf, usize, usize)> {
-        let server = self.lsp.as_ref()?;
-        if !server.is_ready() {
-            return None;
-        }
+        let language = self.lsp_language()?;
         let doc = self.editor.active_document()?;
+        let server = self.lsp.get(&language)?.server.as_ref()?;
         let path = doc.buffer.path.clone()?;
         if !server.has_open_document(&path) {
             return None;
@@ -3654,8 +3780,14 @@ impl App {
         Some((path, cursor.row, cursor.col))
     }
 
-    /// Apply a language-server feature response.
-    fn handle_lsp_response(&mut self, kind: RequestKind, id: i64, result: Result<Value, String>) {
+    /// Apply a language-server feature response for `language`.
+    fn handle_lsp_response(
+        &mut self,
+        language: LanguageId,
+        kind: RequestKind,
+        id: i64,
+        result: Result<Value, String>,
+    ) {
         let value = match result {
             Ok(value) => value,
             Err(message) => {
@@ -3673,7 +3805,7 @@ impl App {
             RequestKind::Completion => {
                 // Ignore a response that a newer request has superseded: the
                 // user typed on, so these candidates no longer match the cursor.
-                if self.completion_request != Some(id) {
+                if self.completion_request != Some((language, id)) {
                     return;
                 }
                 self.completion_request = None;
@@ -3788,7 +3920,7 @@ impl App {
             .and_then(|doc| doc.selection_range())
             .map(|(start, end)| ((start.row, start.col), (end.row, end.col)))
             .unwrap_or(((row, col), (row, col)));
-        if let Some(server) = self.lsp.as_mut() {
+        if let Some(server) = self.active_server_mut() {
             server.code_action(&path, range.0, range.1);
         }
         self.set_status("Finding code actions…");
@@ -3808,7 +3940,7 @@ impl App {
                 self.set_status("Nothing to apply");
             }
         } else if let Some(command) = action.command {
-            if let Some(server) = self.lsp.as_mut() {
+            if let Some(server) = self.active_server_mut() {
                 server.execute_command(&command.command, command.arguments);
             }
             self.set_status("Running action…");
@@ -4001,7 +4133,7 @@ impl App {
     /// Jump to the definition of the word under the cursor.
     fn goto_definition(&mut self) {
         if let Some((path, row, col)) = self.lsp_target() {
-            if let Some(server) = self.lsp.as_mut() {
+            if let Some(server) = self.active_server_mut() {
                 server.definition(&path, row, col);
             }
             self.set_status("Resolving definition…");
@@ -4049,7 +4181,7 @@ impl App {
     /// List every occurrence of the word under the cursor.
     fn find_references(&mut self) {
         if let Some((path, row, col)) = self.lsp_target() {
-            if let Some(server) = self.lsp.as_mut() {
+            if let Some(server) = self.active_server_mut() {
                 server.references(&path, row, col);
             }
             self.set_status("Finding references…");
@@ -4525,12 +4657,7 @@ impl App {
     /// embedded (tests, previews). The user always chooses; dismissing it keeps
     /// Koda's built-in intelligence, and **Language Setup…** stays available.
     fn maybe_offer_tool_setup(&mut self) -> bool {
-        if !self.overlay.is_none()
-            || self.pending_install.is_some()
-            || self.lsp.is_some()
-            || self.lsp_language.is_some()
-            || self.lsp_start_at.is_some()
-        {
+        if !self.overlay.is_none() || self.pending_install.is_some() || !self.lsp.is_empty() {
             return false;
         }
         let Some(tools) = self.tools.as_ref() else {
@@ -5928,8 +6055,9 @@ mod tests {
         assert!(app.completion.is_some());
 
         // A newer request is outstanding; the older response must be ignored.
-        app.completion_request = Some(2);
+        app.completion_request = Some((LanguageId::Rust, 2));
         app.handle_lsp_response(
+            LanguageId::Rust,
             RequestKind::Completion,
             1,
             Ok(serde_json::json!([{ "label": "stale_member" }])),
@@ -5945,6 +6073,7 @@ mod tests {
         );
 
         app.handle_lsp_response(
+            LanguageId::Rust,
             RequestKind::Completion,
             2,
             Ok(serde_json::json!([{ "label": "fresh_member" }])),
@@ -6464,19 +6593,37 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
+    #[cfg(unix)]
     #[test]
     fn lsp_handshake_timeout_falls_back_to_builtin() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        // A server that accepts input and never answers `initialize`.
+        const MOCK: &str = "#!/bin/sh\ncat >/dev/null\n";
         let dir = temp_project("lsp-timeout");
         let file = dir.join("src/main.rs");
+        let script = dir.join("mock-lsp.sh");
+        {
+            let mut handle = fs::File::create(&script).unwrap();
+            handle.write_all(MOCK.as_bytes()).unwrap();
+        }
+        let mut perms = fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).unwrap();
+
         let mut app = app_with_file(&file);
-        app.lsp_status = LspStatus::Starting;
-        app.lsp_language = Some(LanguageId::Rust);
-        app.lsp_started_at = Some(Instant::now() - Duration::from_secs(60));
+        app.start_lsp(LanguageId::Rust, script.to_str().unwrap(), &[]);
+        // Pretend the handshake has been pending for too long.
+        if let Some(job) = app.lsp.get_mut(&LanguageId::Rust) {
+            job.started_at = Some(Instant::now() - Duration::from_secs(60));
+        }
 
         assert!(app.poll_lsp_health());
-        assert!(matches!(app.lsp_status, LspStatus::Failed(_)));
-        assert!(app.lsp.is_none());
-        assert!(app.lsp_started_at.is_none());
+        assert!(matches!(app.lsp_status(), LspStatus::Failed(_)));
+        let job = app.lsp.get(&LanguageId::Rust).unwrap();
+        assert!(job.server.is_none());
+        assert!(job.started_at.is_none());
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -6485,11 +6632,19 @@ mod tests {
         let dir = temp_project("restart-budget");
         let file = dir.join("src/main.rs");
         let mut app = app_with_file(&file);
-        app.lsp_start_at = None;
-        app.lsp_restarts = MAX_LSP_RESTARTS;
+        app.lsp.insert(
+            LanguageId::Rust,
+            LspJob {
+                restarts: MAX_LSP_RESTARTS,
+                ..LspJob::default()
+            },
+        );
 
         app.schedule_lsp_restart(LanguageId::Rust);
-        assert!(app.lsp_start_at.is_none(), "the budget is exhausted");
+        assert!(
+            app.lsp.get(&LanguageId::Rust).unwrap().start_at.is_none(),
+            "the budget is exhausted"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -6501,8 +6656,7 @@ mod tests {
         let mut app = app_with_file(&file);
 
         app.execute_command(ids::RESTART_SERVER);
-        assert!(app.lsp.is_none());
-        assert!(app.lsp_start_at.is_none());
+        assert!(app.lsp.is_empty());
         assert!(
             app.status_message()
                 .unwrap_or("")
@@ -6567,11 +6721,75 @@ cat >/dev/null
         }
 
         assert!(applied, "expected language-server diagnostics");
-        assert_eq!(app.lsp_status, LspStatus::Ready);
+        assert_eq!(app.lsp_status(), LspStatus::Ready);
         assert_eq!(
             app.editor.active_document().unwrap().diagnostics()[0].message,
             "boom"
         );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_second_language_server_starts_alongside_the_first() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        // A minimal server that answers `initialize` and stays alive.
+        const MOCK: &str = r#"#!/bin/sh
+while read -r header; do
+  header=$(printf '%s' "$header" | tr -d '\r')
+  case "$header" in
+    Content-Length:*) len=${header#Content-Length: } ;;
+    *) continue ;;
+  esac
+  read -r blank
+  body=$(dd bs=1 count="$len" 2>/dev/null)
+  id=$(printf '%s' "$body" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  method=$(printf '%s' "$body" | sed -n 's/.*"method":"\([^"]*\)".*/\1/p')
+  [ -z "$id" ] && continue
+  case "$method" in
+    initialize) result='{"capabilities":{}}' ;;
+    *) result='null' ;;
+  esac
+  resp=$(printf '{"jsonrpc":"2.0","id":%s,"result":%s}' "$id" "$result")
+  printf 'Content-Length: %s\r\n\r\n%s' "${#resp}" "$resp"
+done
+"#;
+
+        let dir = temp_project("lsp-multi");
+        let file = dir.join("src/main.rs");
+        let script = dir.join("mock-lsp.sh");
+        {
+            let mut handle = fs::File::create(&script).unwrap();
+            handle.write_all(MOCK.as_bytes()).unwrap();
+        }
+        let mut perms = fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).unwrap();
+
+        let mut app = app_with_file(&file);
+        app.start_lsp(LanguageId::Rust, script.to_str().unwrap(), &[]);
+        app.start_lsp(LanguageId::Python, script.to_str().unwrap(), &[]);
+        assert_eq!(app.lsp.len(), 2, "each language gets its own server");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let ready = |app: &App| {
+            [LanguageId::Rust, LanguageId::Python]
+                .iter()
+                .all(|language| {
+                    app.lsp
+                        .get(language)
+                        .and_then(|job| job.server.as_ref())
+                        .is_some_and(|server| server.is_ready())
+                })
+        };
+        while !ready(&app) && Instant::now() < deadline {
+            app.poll_lsp();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(ready(&app), "both servers should complete the handshake");
+        assert_eq!(app.lsp_status(), LspStatus::Ready);
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -6653,7 +6871,8 @@ done
         assert!(
             wait(&mut app, &|app| app
                 .lsp
-                .as_ref()
+                .get(&LanguageId::Rust)
+                .and_then(|job| job.server.as_ref())
                 .is_some_and(|server| server.is_ready())),
             "server should become ready"
         );

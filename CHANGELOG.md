@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Language servers
 
+- **One server per language.** Koda now keeps a language server for each
+  language in the workspace instead of only the first one it detected, so a
+  project that mixes Rust and Python (or a split pane showing two languages)
+  gets tooling for both. Each server has its own handshake, restart budget and
+  failure state; the statusline shows a connection when any server is ready,
+  and workspace-wide requests prefer the active document's server. Servers are
+  started independently and a failure in one never disturbs another.
 - Added an asynchronous language-server client. When a supported server is
   installed (`rust-analyzer` for Rust, `gopls` for Go) Koda starts it for the
   workspace, runs the LSP handshake, keeps documents in sync and shows the

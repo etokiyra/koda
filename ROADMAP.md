@@ -114,6 +114,10 @@ The highest-value work. These turn Koda from an editor into an IDE.
       workspace edit across files.
 - [x] **Code actions** over LSP: `Ctrl+.` lists quick fixes and refactors and
       applies edits or commands, including `workspace/applyEdit`.
+- [x] **One server per language.** Each language in the workspace keeps its own
+      server with an independent handshake, restart budget and failure state, so
+      mixed-language projects (and split panes) get tooling for every language,
+      not just the first detected.
 
 The abstraction is already in place: providers declare `Capability`s, and the
 command palette already reports which are available. Filling them in is additive.

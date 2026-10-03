@@ -92,7 +92,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     // A connected language server earns a quiet chip.
-    if app.lsp_status == LspStatus::Ready {
+    if app.lsp_status() == LspStatus::Ready {
         spans.push(Span::styled("  ", on_panel));
         spans.push(Span::styled(
             format!("{} lsp", art::SPARK),
