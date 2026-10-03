@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-214%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-216%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -158,8 +158,8 @@ The editor is the heart of Koda, and it is built for real projects.
   create/rename/delete, git branch and per-file status, a changed-files list
   (`Ctrl+Shift+G`) and a **Commit Changes…** flow.
 - Grouped undo, auto-pairing, smart newline, selection-aware indent/outdent,
-  line move/duplicate, matching-bracket highlighting and a kill-ring with
-  `Alt+Y` yank-pop.
+  line move/duplicate, delete-line, go-to-matching-bracket, matching-bracket
+  highlighting and a kill-ring with `Alt+Y` yank-pop.
 - Quick open (`Ctrl+P`), inline fuzzy file filtering in the sidebar (`/`),
   find/replace with case, whole-word and regex options, project-wide text
   search (`Ctrl+Shift+F`), go-to-line, and **Revert File** to discard local
@@ -261,6 +261,8 @@ establishes the language context automatically.
 | `Tab` / `Shift+Tab` | Indent / outdent selection |
 | `Alt+↑` / `Alt+↓` | Move line up / down |
 | `Ctrl+Shift+D` | Duplicate line |
+| `Ctrl+Shift+K` | Delete line |
+| `Ctrl+M` | Go to matching bracket |
 | `/` (in the tree) | Filter project files |
 | `.` (in the tree) | Toggle hidden files |
 

@@ -112,6 +112,8 @@ command palette already reports which are available. Filling them in is additive
 ## Then — deepen the editing experience
 
 - [x] Bracket matching and auto-closing pairs.
+- [x] Go to matching bracket (`Ctrl+M`).
+- [x] Delete line (`Ctrl+Shift+K`).
 - [x] Selection-aware indentation, line move/duplicate, and grouped undo.
 - [x] Inline fuzzy file filtering in the sidebar.
 - [ ] Multiple cursors.

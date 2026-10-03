@@ -38,6 +38,8 @@ pub mod ids {
     pub const MOVE_LINE_UP: &str = "edit.moveLineUp";
     pub const MOVE_LINE_DOWN: &str = "edit.moveLineDown";
     pub const DUPLICATE_LINE: &str = "edit.duplicateLine";
+    pub const DELETE_LINE: &str = "edit.deleteLine";
+    pub const MATCHING_BRACKET: &str = "edit.matchingBracket";
 
     pub const FORMAT: &str = "language.format";
     pub const HOVER: &str = "language.hover";
@@ -216,6 +218,17 @@ impl CommandRegistry {
                 Some("Ctrl+Shift+D"),
             )
             .describes("Duplicate the current line")
+            .needs_doc(),
+            Command::new(DELETE_LINE, "Delete Line", "Edit", Some("Ctrl+Shift+K"))
+                .describes("Delete the current line or selection")
+                .needs_doc(),
+            Command::new(
+                MATCHING_BRACKET,
+                "Go to Matching Bracket",
+                "Edit",
+                Some("Ctrl+M"),
+            )
+            .describes("Jump to the bracket matching the one under the cursor")
             .needs_doc(),
             Command::new(FORMAT, "Format Document", "Language", Some("Ctrl+Shift+I"))
                 .describes("Format the active file with its language formatter")

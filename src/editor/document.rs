@@ -597,6 +597,26 @@ impl Document {
         self.history.break_coalesce();
     }
 
+    /// Delete the current line, or every line the selection touches.
+    pub fn delete_line(&mut self) {
+        let (first, last) = match self.selection_range() {
+            Some((start, end)) => (start.row, end.row),
+            None => (self.cursor.row, self.cursor.row),
+        };
+        let start = Position::new(first, 0);
+        let end = if last + 1 < self.buffer.len_lines() {
+            Position::new(last + 1, 0)
+        } else {
+            let final_row = self.buffer.len_lines().saturating_sub(1);
+            Position::new(final_row, self.buffer.line_char_len(final_row))
+        };
+        self.replace_range(start, end, "");
+        self.cursor = self.buffer.clamp_position(start);
+        self.selection = None;
+        self.preferred_col = None;
+        self.history.break_coalesce();
+    }
+
     pub fn undo(&mut self) {
         if let Some(edit) = self.history.undo() {
             let start = edit.start;
@@ -1083,6 +1103,16 @@ impl Document {
             }
         }
     }
+
+    /// Move the cursor to the bracket matching the one under (or just before)
+    /// it, if the provider finds a pair.
+    pub fn goto_matching_bracket(&mut self, provider: &dyn LanguageProvider) {
+        if let Some((_, partner)) = self.matching_brackets(provider) {
+            self.cursor = self.buffer.clamp_position(partner);
+            self.selection = None;
+            self.preferred_col = None;
+        }
+    }
 }
 
 fn is_bracket(c: char) -> bool {
@@ -1275,6 +1305,30 @@ mod tests {
         let mut d = doc("fn main() {\n");
         d.move_to(Position::new(0, 11));
         assert_eq!(d.matching_brackets(provider), None);
+    }
+
+    #[test]
+    fn goto_matching_bracket_jumps_to_the_partner() {
+        let service = crate::language::LanguageService::builtin();
+        let provider = service.provider(LanguageId::Rust);
+        let mut d = doc("fn main() {}\n");
+
+        d.move_to(Position::new(0, 7)); // on `(`
+        d.goto_matching_bracket(provider);
+        assert_eq!(d.cursor, Position::new(0, 8));
+
+        d.move_to(Position::new(0, 10)); // on `{`
+        d.goto_matching_bracket(provider);
+        assert_eq!(d.cursor, Position::new(0, 11));
+    }
+
+    #[test]
+    fn delete_line_removes_the_current_line() {
+        let mut d = doc("one\ntwo\nthree\n");
+        d.move_to(Position::new(1, 1));
+        d.delete_line();
+        assert_eq!(d.buffer.text(), "one\nthree\n");
+        assert_eq!(d.cursor, Position::new(1, 0));
     }
 
     #[test]

@@ -242,6 +242,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Editing & UX
 
+- Added **Delete Line** (`Ctrl+Shift+K`), which removes every line the cursor
+  or selection touches, and **Go to Matching Bracket** (`Ctrl+M`), which jumps
+  between a bracket and its partner using the same nesting-aware scan that
+  drives matching-bracket highlighting.
 - **Replace All** (`Alt+Enter` in the replace bar, or the palette) replaces
   every match in a single undoable edit, honouring the case, whole-word and
   regex options. One `Ctrl+Z` restores the file.

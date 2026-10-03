@@ -569,6 +569,8 @@ impl App {
                         'x' => self.cut(),
                         'v' => self.paste(),
                         'd' if shift => self.with_doc(|d| d.duplicate_line()),
+                        'k' if shift => self.with_doc(|d| d.delete_line()),
+                        'm' => self.goto_matching_bracket(),
                         '/' => self.toggle_comment(),
                         '.' => self.code_actions(),
                         _ => {}
@@ -1081,6 +1083,8 @@ impl App {
             ids::MOVE_LINE_UP => self.with_doc(|d| d.move_line_up()),
             ids::MOVE_LINE_DOWN => self.with_doc(|d| d.move_line_down()),
             ids::DUPLICATE_LINE => self.with_doc(|d| d.duplicate_line()),
+            ids::DELETE_LINE => self.with_doc(|d| d.delete_line()),
+            ids::MATCHING_BRACKET => self.goto_matching_bracket(),
             ids::TOGGLE_TREE => self.toggle_tree(),
             ids::FOCUS_TREE => self.focus_tree(),
             ids::TOGGLE_HIDDEN => self.toggle_hidden(),
@@ -1390,6 +1394,17 @@ impl App {
             self.kill_ring.len() - next,
             self.kill_ring.len()
         ));
+    }
+
+    /// Move the cursor to the bracket matching the one under it.
+    fn goto_matching_bracket(&mut self) {
+        let Some(language) = self.editor.active_document().map(|doc| doc.buffer.language) else {
+            return;
+        };
+        let provider = self.language.provider(language);
+        if let Some(doc) = self.editor.active_document_mut() {
+            doc.goto_matching_bracket(provider);
+        }
     }
 
     fn toggle_comment(&mut self) {
