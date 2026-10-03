@@ -14,10 +14,11 @@ pub mod convert;
 pub mod jsonrpc;
 
 use std::collections::HashMap;
-use std::io::{self, BufReader};
+use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use serde_json::{Value, json};
@@ -26,6 +27,31 @@ use crate::language::diagnostics::{Diagnostic, Severity, TextPos};
 use crate::language::id::LanguageId;
 
 use jsonrpc::Message;
+
+/// How a server counts the `character` offset in a `{line, character}` position.
+///
+/// LSP defaults to UTF-16 code units; Koda works in Unicode scalar values. Koda
+/// asks for UTF-8 (which matches its own counting) and only the servers that do
+/// not offer it fall back to UTF-16.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PositionEncoding {
+    Utf8,
+    #[default]
+    Utf16,
+    Utf32,
+}
+
+/// The server features Koda knows how to use, from its `initialize` result.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ServerCapabilities {
+    completion: bool,
+    hover: bool,
+    definition: bool,
+    references: bool,
+    rename: bool,
+    code_action: bool,
+    workspace_symbol: bool,
+}
 
 /// The LSP `languageId` string for a language.
 pub fn lsp_language_id(language: LanguageId) -> &'static str {
@@ -92,6 +118,12 @@ pub struct Server {
     versions: HashMap<PathBuf, i64>,
     pending: HashMap<i64, RequestKind>,
     language: LanguageId,
+    /// The encoding the server uses for `character` offsets.
+    encoding: PositionEncoding,
+    /// The features the server advertised.
+    capabilities: ServerCapabilities,
+    /// The last few stderr lines, for a more useful failure message.
+    stderr: Arc<Mutex<String>>,
 }
 
 impl Server {
@@ -107,7 +139,7 @@ impl Server {
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()?;
 
         let stdin = child
@@ -118,6 +150,7 @@ impl Server {
             .stdout
             .take()
             .ok_or_else(|| io::Error::other("no stdout"))?;
+        let stderr_pipe = child.stderr.take();
 
         let (tx, rx) = mpsc::channel::<Message>();
         thread::Builder::new()
@@ -134,6 +167,33 @@ impl Server {
                 }
             })?;
 
+        // Keep the last few stderr lines so a crash can explain itself, without
+        // letting server noise reach the terminal.
+        let stderr = Arc::new(Mutex::new(String::new()));
+        if let Some(pipe) = stderr_pipe {
+            let buffer = Arc::clone(&stderr);
+            let _ = thread::Builder::new()
+                .name("koda-lsp-stderr".to_string())
+                .spawn(move || {
+                    let reader = BufReader::new(pipe);
+                    for line in reader.lines().map_while(Result::ok) {
+                        let mut buffer = match buffer.lock() {
+                            Ok(buffer) => buffer,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
+                        if !buffer.is_empty() {
+                            buffer.push('\n');
+                        }
+                        buffer.push_str(&line);
+                        // Bound what we keep: only the tail matters.
+                        if buffer.len() > 2048 {
+                            let drain = buffer.len() - 2048;
+                            buffer.drain(..drain);
+                        }
+                    }
+                });
+        }
+
         let mut server = Server {
             child,
             stdin,
@@ -145,6 +205,9 @@ impl Server {
             versions: HashMap::new(),
             pending: HashMap::new(),
             language,
+            encoding: PositionEncoding::default(),
+            capabilities: ServerCapabilities::default(),
+            stderr,
         };
 
         let id = server.request(
@@ -153,7 +216,9 @@ impl Server {
                 "processId": null,
                 "clientInfo": { "name": "koda" },
                 "rootUri": path_to_uri(root),
+                "rootPath": root.to_string_lossy(),
                 "capabilities": {
+                    "general": { "positionEncodings": ["utf-8", "utf-16"] },
                     "textDocument": {
                         "synchronization": { "dynamicRegistration": false, "didSave": false },
                         "publishDiagnostics": { "relatedInformation": false },
@@ -175,6 +240,46 @@ impl Server {
 
     pub fn is_ready(&self) -> bool {
         self.ready
+    }
+
+    /// The encoding the server uses for character offsets.
+    pub fn position_encoding(&self) -> PositionEncoding {
+        self.encoding
+    }
+
+    /// Whether the server advertised support for `kind`.
+    pub fn supports(&self, kind: RequestKind) -> bool {
+        match kind {
+            RequestKind::Completion => self.capabilities.completion,
+            RequestKind::Hover => self.capabilities.hover,
+            RequestKind::Definition => self.capabilities.definition,
+            RequestKind::References => self.capabilities.references,
+            RequestKind::Rename => self.capabilities.rename,
+            RequestKind::CodeActions => self.capabilities.code_action,
+            RequestKind::WorkspaceSymbols => self.capabilities.workspace_symbol,
+        }
+    }
+
+    /// Read the negotiated position encoding and the advertised capabilities.
+    fn absorb_initialize(&mut self, result: &Value) {
+        let (encoding, capabilities) = parse_initialize(result);
+        self.encoding = encoding;
+        self.capabilities = capabilities;
+    }
+
+    /// Append the server's recent stderr, when there is any, to a failure
+    /// message so a crash can explain itself.
+    fn explain(&self, message: String) -> String {
+        let stderr = match self.stderr.lock() {
+            Ok(buffer) => buffer,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let detail = stderr.trim();
+        if detail.is_empty() {
+            message
+        } else {
+            format!("{message}: {detail}")
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -324,8 +429,11 @@ impl Server {
                     if Some(id_number) == self.init_id {
                         self.init_id = None;
                         match error {
-                            Some(error) => events.push(ServerEvent::Failed(error.message)),
+                            Some(error) => {
+                                events.push(ServerEvent::Failed(self.explain(error.message)))
+                            }
                             None if result.is_some() => {
+                                self.absorb_initialize(result.as_ref().unwrap_or(&Value::Null));
                                 self.ready = true;
                                 let _ = self.notify("initialized", json!({}));
                                 events.push(ServerEvent::Ready);
@@ -363,7 +471,9 @@ impl Server {
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
-                    events.push(ServerEvent::Failed("language server exited".to_string()));
+                    events.push(ServerEvent::Failed(
+                        self.explain("language server exited".to_string()),
+                    ));
                     break;
                 }
             }
@@ -431,6 +541,36 @@ impl Drop for Server {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+/// Parse the `initialize` result into the encoding and capabilities Koda uses.
+fn parse_initialize(result: &Value) -> (PositionEncoding, ServerCapabilities) {
+    let encoding = match result
+        .pointer("/capabilities/positionEncoding")
+        .and_then(Value::as_str)
+    {
+        Some("utf-8") => PositionEncoding::Utf8,
+        Some("utf-32") => PositionEncoding::Utf32,
+        _ => PositionEncoding::Utf16,
+    };
+    let capabilities = result.get("capabilities").unwrap_or(&Value::Null);
+    let advertised = |name: &str| {
+        capabilities
+            .get(name)
+            .is_some_and(|value| !value.is_null() && value != &Value::Bool(false))
+    };
+    (
+        encoding,
+        ServerCapabilities {
+            completion: advertised("completionProvider"),
+            hover: advertised("hoverProvider"),
+            definition: advertised("definitionProvider"),
+            references: advertised("referencesProvider"),
+            rename: advertised("renameProvider"),
+            code_action: advertised("codeActionProvider"),
+            workspace_symbol: advertised("workspaceSymbolProvider"),
+        },
+    )
 }
 
 fn parse_publish_diagnostics(params: &Value) -> Option<ServerEvent> {
@@ -527,6 +667,29 @@ mod tests {
         let uri = path_to_uri(&path);
         assert_eq!(uri, "file:///tmp/koda%20lsp/main.rs");
         assert_eq!(uri_to_path(&uri).as_deref(), Some(path.as_path()));
+    }
+
+    #[test]
+    fn reads_capabilities_and_position_encoding() {
+        let (encoding, caps) = parse_initialize(&json!({
+            "capabilities": {
+                "positionEncoding": "utf-8",
+                "completionProvider": {},
+                "hoverProvider": true,
+                "renameProvider": { "prepareProvider": false }
+            }
+        }));
+        assert_eq!(encoding, PositionEncoding::Utf8);
+        assert!(caps.completion);
+        assert!(caps.hover);
+        assert!(caps.rename);
+        assert!(!caps.definition);
+        assert!(!caps.workspace_symbol);
+
+        // No declaration means the protocol default, UTF-16.
+        let (encoding, caps) = parse_initialize(&json!({ "capabilities": {} }));
+        assert_eq!(encoding, PositionEncoding::Utf16);
+        assert!(!caps.completion);
     }
 
     #[test]

@@ -1389,7 +1389,7 @@ impl App {
 
         let prefix = self.completion_prefix();
         let state = CompletionState::new(pool, prefix.clone());
-        let lsp_available = self.lsp_target().is_some();
+        let lsp_available = self.lsp_supports(RequestKind::Completion);
 
         if state.items.is_empty() {
             if manual {
@@ -1422,7 +1422,7 @@ impl App {
         let Some(language) = self.lsp_language() else {
             return;
         };
-        let Some((path, row, col)) = self.lsp_target() else {
+        let Some((path, row, col)) = self.lsp_target_for(RequestKind::Completion) else {
             return;
         };
         if let Some(server) = self
@@ -1504,7 +1504,7 @@ impl App {
         });
 
         // Ask the language server for a richer answer when one is attached.
-        if let Some((path, row, col)) = self.lsp_target() {
+        if let Some((path, row, col)) = self.lsp_target_for(RequestKind::Hover) {
             if let Some(server) = self.active_server_mut() {
                 server.hover(&path, row, col);
             }
@@ -3167,7 +3167,7 @@ impl App {
     /// still be found across the project without a language server.
     fn open_workspace_symbols_with(&mut self, query: Option<String>) {
         self.pending_workspace_symbols_query = query.clone();
-        if let Some(language) = self.ready_server_language() {
+        if let Some(language) = self.ready_server_for(RequestKind::WorkspaceSymbols) {
             self.ws_lsp_pending = true;
             if let Some(server) = self
                 .lsp
@@ -3748,23 +3748,36 @@ impl App {
         self.lsp.get_mut(&language)?.server.as_mut()
     }
 
-    /// The active language's ready server, or any ready server, for
-    /// workspace-wide requests.
-    fn ready_server_language(&self) -> Option<LanguageId> {
+    /// Whether the active document's ready server advertises `kind`.
+    fn lsp_supports(&self, kind: RequestKind) -> bool {
+        self.lsp_language()
+            .and_then(|language| self.lsp.get(&language))
+            .and_then(|job| job.server.as_ref())
+            .is_some_and(|server| server.supports(kind))
+    }
+
+    /// The active document's target when a ready server that supports `kind`
+    /// owns it. Falls back to `None` so built-in intelligence takes over.
+    fn lsp_target_for(&self, kind: RequestKind) -> Option<(PathBuf, usize, usize)> {
+        if !self.lsp_supports(kind) {
+            return None;
+        }
+        self.lsp_target()
+    }
+
+    /// The active language's ready server that supports `kind`, or any ready
+    /// server that does, for workspace-wide requests.
+    fn ready_server_for(&self, kind: RequestKind) -> Option<LanguageId> {
+        let supports = |language: &LanguageId| {
+            self.lsp
+                .get(language)
+                .and_then(|job| job.server.as_ref())
+                .is_some_and(|server| server.is_ready() && server.supports(kind))
+        };
         let preferred = self.editor.active_document().map(|doc| doc.buffer.language);
         preferred
-            .filter(|language| {
-                self.lsp
-                    .get(language)
-                    .and_then(|job| job.server.as_ref())
-                    .is_some_and(|server| server.is_ready())
-            })
-            .or_else(|| {
-                self.lsp
-                    .iter()
-                    .find(|(_, job)| job.server.as_ref().is_some_and(|server| server.is_ready()))
-                    .map(|(language, _)| *language)
-            })
+            .filter(supports)
+            .or_else(|| self.lsp.keys().copied().find(supports))
     }
 
     /// The active document's `(path, line, col)` when a ready server owns it.
@@ -3910,7 +3923,7 @@ impl App {
 
     /// Ask the server for code actions over the cursor or selection.
     fn code_actions(&mut self) {
-        let Some((path, row, col)) = self.lsp_target() else {
+        let Some((path, row, col)) = self.lsp_target_for(RequestKind::CodeActions) else {
             self.set_status("Code actions need a language server (see Language Setup…)");
             return;
         };
@@ -3951,7 +3964,7 @@ impl App {
 
     /// Prompt for a new name and ask the server to rename the symbol.
     fn rename_symbol(&mut self) {
-        let Some((path, row, col)) = self.lsp_target() else {
+        let Some((path, row, col)) = self.lsp_target_for(RequestKind::Rename) else {
             self.set_status("Rename needs a language server (see Language Setup…)");
             return;
         };
@@ -4132,7 +4145,7 @@ impl App {
 
     /// Jump to the definition of the word under the cursor.
     fn goto_definition(&mut self) {
-        if let Some((path, row, col)) = self.lsp_target() {
+        if let Some((path, row, col)) = self.lsp_target_for(RequestKind::Definition) {
             if let Some(server) = self.active_server_mut() {
                 server.definition(&path, row, col);
             }
@@ -4180,7 +4193,7 @@ impl App {
 
     /// List every occurrence of the word under the cursor.
     fn find_references(&mut self) {
-        if let Some((path, row, col)) = self.lsp_target() {
+        if let Some((path, row, col)) = self.lsp_target_for(RequestKind::References) {
             if let Some(server) = self.active_server_mut() {
                 server.references(&path, row, col);
             }
@@ -4607,10 +4620,10 @@ impl App {
                 (false, Some("no diagnostics".to_string()))
             }
             ids::FORMAT => self.format_availability(document),
-            ids::RENAME if self.lsp_target().is_none() => {
+            ids::RENAME if !self.lsp_supports(RequestKind::Rename) => {
                 (false, Some("needs a language server".to_string()))
             }
-            ids::CODE_ACTIONS if self.lsp_target().is_none() => {
+            ids::CODE_ACTIONS if !self.lsp_supports(RequestKind::CodeActions) => {
                 (false, Some("needs a language server".to_string()))
             }
             _ => (true, None),
@@ -6814,7 +6827,7 @@ while read -r header; do
   method=$(printf '%s' "$body" | sed -n 's/.*"method":"\([^"]*\)".*/\1/p')
   [ -z "$id" ] && continue
   case "$method" in
-    initialize) result='{"capabilities":{}}' ;;
+    initialize) result='{"capabilities":{"completionProvider":true,"hoverProvider":true,"definitionProvider":true,"referencesProvider":true,"renameProvider":true,"codeActionProvider":true,"workspaceSymbolProvider":true}}' ;;
     textDocument/hover) result='{"contents":{"kind":"plaintext","value":"LSP HOVER TEXT"}}' ;;
     textDocument/completion) result='{"items":[{"label":"koda_lsp_item","kind":3}]}' ;;
     textDocument/definition) result="[{\"uri\":\"file://$target\",\"range\":{\"start\":{\"line\":2,\"character\":0},\"end\":{\"line\":2,\"character\":5}}}]" ;;

@@ -135,7 +135,9 @@ channel, so provenance and integrity stay with the package manager:
 
 Servers start lazily, recover automatically if they exit, and fall back to the
 built-in providers whenever one is unavailable, so editing never depends on
-them.
+them. Koda asks each server for `utf-8` character offsets when it offers them,
+so positions stay accurate in non-ASCII files, and only uses features the server
+advertises — built-in intelligence fills any gap.
 
 Every install targets a directory you can write to — `rustup` under
 `~/.cargo`, `go install` under `~/go`, a Python virtualenv and npm prefix Koda

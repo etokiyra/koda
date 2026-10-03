@@ -118,6 +118,9 @@ The highest-value work. These turn Koda from an editor into an IDE.
       server with an independent handshake, restart budget and failure state, so
       mixed-language projects (and split panes) get tooling for every language,
       not just the first detected.
+- [x] **Protocol hygiene.** Koda negotiates `utf-8` positions where the server
+      offers them, only requests features the server advertises (falling back to
+      its built-in providers otherwise), and reports a crashing server's stderr.
 
 The abstraction is already in place: providers declare `Capability`s, and the
 command palette already reports which are available. Filling them in is additive.

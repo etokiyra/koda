@@ -167,6 +167,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failure state; the statusline shows a connection when any server is ready,
   and workspace-wide requests prefer the active document's server. Servers are
   started independently and a failure in one never disturbs another.
+- **Protocol hygiene.** Koda asks a server for `utf-8` character offsets and
+  uses them when offered, so positions stay correct in files that contain
+  non-ASCII text. It only sends a feature request when the server advertised
+  that capability (`completionProvider`, `hoverProvider`, …), so built-in
+  intelligence takes over cleanly instead of showing a spurious error. A server
+  that crashes now reports its last stderr lines alongside the failure.
 - Added an asynchronous language-server client. When a supported server is
   installed (`rust-analyzer` for Rust, `gopls` for Go) Koda starts it for the
   workspace, runs the LSP handshake, keeps documents in sync and shows the
