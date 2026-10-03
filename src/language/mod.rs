@@ -16,6 +16,7 @@ pub mod format;
 pub mod go;
 pub mod hover;
 pub mod id;
+pub mod lsp;
 pub mod provider;
 pub mod rust;
 pub mod symbols;
