@@ -92,6 +92,8 @@ The highest-value work. These turn Koda from an editor into an IDE.
       (`rustfmt`, `gofmt`) on a snapshot through the background worker and
       replaces the buffer as one undoable edit. Reuses system tools, detects
       whether they are installed, and can install them from **Language Setup…**.
+      When a language server offers `textDocument/formatting` it is preferred,
+      so Java and C# format through their server.
 - [x] **Rename and code actions.**
 - [x] **Tool provisioning and lifecycle.** Discovery is implemented, and
       **Language Setup…** can install a missing tool through its official

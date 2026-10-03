@@ -52,6 +52,7 @@ struct ServerCapabilities {
     code_action: bool,
     workspace_symbol: bool,
     signature_help: bool,
+    document_formatting: bool,
 }
 
 /// The LSP `languageId` string for a language.
@@ -98,6 +99,7 @@ pub enum RequestKind {
     CodeActions,
     WorkspaceSymbols,
     SignatureHelp,
+    Formatting,
 }
 
 /// Something the app consumes from a running server.
@@ -270,7 +272,8 @@ impl Server {
                                 "parameterInformation": { "labelOffsetSupport": true }
                             },
                             "contextSupport": true
-                        }
+                        },
+                        "formatting": { "dynamicRegistration": false }
                     },
                     "workspace": { "configuration": true, "symbol": {} }
                 },
@@ -301,6 +304,7 @@ impl Server {
             RequestKind::CodeActions => self.capabilities.code_action,
             RequestKind::WorkspaceSymbols => self.capabilities.workspace_symbol,
             RequestKind::SignatureHelp => self.capabilities.signature_help,
+            RequestKind::Formatting => self.capabilities.document_formatting,
         }
     }
 
@@ -375,6 +379,17 @@ impl Server {
     /// Whether the server has this document open.
     pub fn has_open_document(&self, path: &Path) -> bool {
         self.versions.contains_key(path)
+    }
+
+    /// Ask the server to format a document, returning the request id so a
+    /// caller can discard a superseded response.
+    pub fn formatting(&mut self, path: &Path, tab_size: usize, insert_spaces: bool) -> Option<i64> {
+        let params = json!({
+            "textDocument": { "uri": path_to_uri(path) },
+            "options": { "tabSize": tab_size, "insertSpaces": insert_spaces }
+        });
+        self.send_request(RequestKind::Formatting, "textDocument/formatting", params)
+            .ok()
     }
 
     /// Ask the server for signature help, returning the request id so a caller
@@ -630,6 +645,7 @@ fn parse_initialize(result: &Value) -> (PositionEncoding, ServerCapabilities) {
             code_action: advertised("codeActionProvider"),
             workspace_symbol: advertised("workspaceSymbolProvider"),
             signature_help: advertised("signatureHelpProvider"),
+            document_formatting: advertised("documentFormattingProvider"),
         },
     )
 }

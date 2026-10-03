@@ -228,6 +228,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability, refreshes as the arguments change, and is dismissed by leaving
   the call or pressing any non-typing key. A superseded response is discarded by
   request id.
+- **Formatting over LSP.** When a server advertises `documentFormattingProvider`
+  (Eclipse JDT, OmniSharp, `typescript-language-server`, …) **Format Document**
+  sends `textDocument/formatting` and applies the returned edits as one undoable
+  change, using the file's detected indentation width. The built-in
+  `rustfmt`/`gofmt` path remains for languages without a server.
 - Added an asynchronous language-server client. When a supported server is
   installed (`rust-analyzer` for Rust, `gopls` for Go) Koda starts it for the
   workspace, runs the LSP handshake, keeps documents in sync and shows the

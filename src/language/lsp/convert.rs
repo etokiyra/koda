@@ -324,6 +324,11 @@ fn location(item: &Value) -> Option<Location> {
     })
 }
 
+/// Parse the edits from a `textDocument/formatting` result.
+pub fn formatting_edits(value: &Value) -> Vec<TextEdit> {
+    parse_edits(value).unwrap_or_default()
+}
+
 /// One overload from a `textDocument/signatureHelp` response.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Signature {
@@ -412,6 +417,18 @@ fn parameter_label(parameter: &Value, label: &str) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn parses_formatting_edits() {
+        let value = json!([
+            { "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 3 } }, "newText": "let" }
+        ]);
+        let edits = formatting_edits(&value);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].start, (0, 0));
+        assert_eq!(edits[0].new_text, "let");
+        assert!(formatting_edits(&json!(null)).is_empty());
+    }
 
     #[test]
     fn parses_signature_help_with_offset_parameters() {

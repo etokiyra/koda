@@ -264,6 +264,8 @@ pub struct App {
     format_seq: u64,
     /// The format request awaiting a result, if any.
     pending_format: Option<(PathBuf, u64)>,
+    /// A language-server formatting request awaiting a result.
+    pending_lsp_format: Option<(PathBuf, LanguageId, i64)>,
     /// Monotonic id for workspace symbol scans.
     workspace_symbols_seq: u64,
     /// The workspace symbol scan awaiting a result, if any.
@@ -373,6 +375,7 @@ impl App {
             diagnostics_dirty_at: None,
             format_seq: 0,
             pending_format: None,
+            pending_lsp_format: None,
             workspace_symbols_seq: 0,
             pending_workspace_symbols: None,
             pending_workspace_symbols_query: None,
@@ -566,7 +569,7 @@ impl App {
 
     /// A short label for background work in progress, if any.
     pub fn busy(&self) -> Option<&'static str> {
-        if self.pending_format.is_some() {
+        if self.pending_format.is_some() || self.pending_lsp_format.is_some() {
             Some("formatting")
         } else if self.pending_workspace_symbols.is_some() {
             Some("searching symbols")
@@ -3457,6 +3460,32 @@ impl App {
             self.set_error("Save the file before formatting");
             return;
         };
+
+        // Prefer the language server's formatter when it advertises one; the
+        // built-in formatter tools remain the fallback.
+        if self.lsp_supports(RequestKind::Formatting)
+            && let Some(language) = self.lsp_language()
+        {
+            let tab_size = self
+                .editor
+                .active_document()
+                .map(|doc| doc.indent_width())
+                .unwrap_or(4);
+            if let Some(server) = self
+                .lsp
+                .get_mut(&language)
+                .and_then(|job| job.server.as_mut())
+            {
+                self.pending_lsp_format = server
+                    .formatting(&path, tab_size, true)
+                    .map(|id| (path.clone(), language, id));
+                if self.pending_lsp_format.is_some() {
+                    self.set_status("Formatting…");
+                    return;
+                }
+            }
+        }
+
         if !self
             .language
             .provider(language)
@@ -4150,6 +4179,32 @@ impl App {
                     help,
                     anchor: self.cursor_screen,
                 });
+            }
+            RequestKind::Formatting => {
+                // Compare before taking, so a stale response does not cancel
+                // the newer request that is still in flight.
+                let current = self
+                    .pending_lsp_format
+                    .as_ref()
+                    .map(|(_, pending_language, pending_id)| (*pending_language, *pending_id));
+                if current != Some((language, id)) {
+                    return;
+                }
+                let Some((path, _, _)) = self.pending_lsp_format.take() else {
+                    return;
+                };
+                let edits = convert::formatting_edits(&value);
+                if edits.is_empty() {
+                    self.set_status("No formatting changes");
+                    return;
+                }
+                let applied = self.apply_workspace_edit(vec![convert::FileEdit { path, edits }]);
+                if applied > 0 {
+                    self.after_edit();
+                    self.set_status("Formatted");
+                } else {
+                    self.set_status("Nothing to format");
+                }
             }
         }
     }
@@ -4865,6 +4920,10 @@ impl App {
 
     /// Whether formatting can run, and why not when it cannot.
     fn format_availability(&self, document: Option<&Document>) -> (bool, Option<String>) {
+        // A language server may format even when the provider has no formatter.
+        if self.lsp_supports(RequestKind::Formatting) {
+            return (true, None);
+        }
         let language = document
             .map(|doc| doc.buffer.language)
             .unwrap_or(LanguageId::Unknown);
@@ -6317,6 +6376,45 @@ mod tests {
             app.signature.is_none(),
             "a stale signature response is dropped"
         );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn lsp_formatting_response_rewrites_the_buffer() {
+        let dir = temp_project("lsp-format");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main(){}\n").unwrap();
+        let mut app = app_with_file(&file);
+
+        app.pending_lsp_format = Some((file.clone(), LanguageId::Rust, 3));
+        app.handle_lsp_response(
+            LanguageId::Rust,
+            RequestKind::Formatting,
+            3,
+            Ok(serde_json::json!([
+                { "range": { "start": { "line": 0, "character": 9 },
+                             "end": { "line": 0, "character": 9 } },
+                  "newText": " " }
+            ])),
+        );
+
+        assert!(app.pending_lsp_format.is_none());
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.line_text(0),
+            "fn main() {}"
+        );
+
+        // A superseded formatting response is ignored.
+        app.pending_lsp_format = Some((file.clone(), LanguageId::Rust, 5));
+        let before = app.editor.active_document().unwrap().buffer.text();
+        app.handle_lsp_response(
+            LanguageId::Rust,
+            RequestKind::Formatting,
+            4,
+            Ok(serde_json::json!([])),
+        );
+        assert_eq!(app.editor.active_document().unwrap().buffer.text(), before);
+        assert!(app.pending_lsp_format.is_some());
         fs::remove_dir_all(&dir).ok();
     }
 

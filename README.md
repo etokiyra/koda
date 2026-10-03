@@ -103,7 +103,8 @@ keep you productive **offline**.
   instant, offline fallback).
 - **Rename** — `F2`, applying a workspace edit across every affected file.
 - **Code actions** — `Ctrl+.` for quick fixes and refactors.
-- **Formatting** — `Ctrl+Shift+I` through the language's own tool (`rustfmt`,
+- **Formatting** — `Ctrl+Shift+I` through the language server when it offers one
+  (Java, C#, TypeScript/JavaScript, …) or the language's own tool (`rustfmt`,
   `gofmt`), never blocking the UI.
 
 ### Zero-configuration language support
