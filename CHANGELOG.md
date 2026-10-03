@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   elements highlight their tag names, attributes and attribute strings. Generics
   (`Array<Foo>`) and comparisons (`a < b`) remain operators. Regression tests
   cover each ambiguous case.
+- **CSS depth.** Custom properties (`--brand`) and common functions (`calc`,
+  `var`, gradients, transforms, filters, …) are highlighted distinctly, alongside
+  the existing selector, property, at-rule and colour support.
 - **Formatting across more languages.** The shared formatter pipeline now
   covers Prettier for web, HTML, CSS, JSON, YAML and Markdown; `clang-format`
   for C/C++; `shfmt` for Shell; and `perltidy` for Perl, in addition to

@@ -104,6 +104,41 @@ const AT_RULES: &[&str] = &[
     "@layer",
 ];
 
+/// CSS functions worth colouring distinctly, including custom-property lookups.
+const FUNCTIONS: &[&str] = &[
+    "var",
+    "calc",
+    "min",
+    "max",
+    "clamp",
+    "rgb",
+    "rgba",
+    "hsl",
+    "hsla",
+    "url",
+    "linear-gradient",
+    "radial-gradient",
+    "conic-gradient",
+    "cubic-bezier",
+    "translate",
+    "translateX",
+    "translateY",
+    "scale",
+    "rotate",
+    "skew",
+    "matrix",
+    "blur",
+    "brightness",
+    "contrast",
+    "drop-shadow",
+    "saturate",
+    "grayscale",
+    "opacity",
+    "attr",
+    "counter",
+    "env",
+];
+
 pub struct CssProvider;
 
 impl LanguageProvider for CssProvider {
@@ -295,9 +330,13 @@ impl LanguageProvider for CssProvider {
                 // block a name before `:` is a property.
                 let kind = if brace.is_some_and(|b| i < b) {
                     TokenKind::Type
+                } else if word.starts_with("--") {
+                    // A custom property, e.g. `--brand-color`.
+                    TokenKind::Type
                 } else if word.eq_ignore_ascii_case("important") {
                     TokenKind::Keyword
-                } else if next_nonspace(&chars, j) == Some(':')
+                } else if FUNCTIONS.contains(&word.as_str())
+                    || next_nonspace(&chars, j) == Some(':')
                     || PROPERTIES.contains(&word.as_str())
                 {
                     TokenKind::Function
@@ -409,5 +448,23 @@ mod tests {
         assert!(names.contains(&".a".to_string()));
         assert!(names.contains(&".b".to_string()));
         assert!(names.contains(&"#id".to_string()));
+    }
+
+    #[test]
+    fn highlights_custom_properties_and_functions() {
+        let kind_at = |spans: &[HighlightSpan], col: usize| {
+            spans
+                .iter()
+                .find(|span| span.range.contains(&col))
+                .map(|span| span.kind)
+        };
+        let line = ":root { --brand: #ff0; } .a { width: calc(100% - var(--brand)); }";
+        let (spans, _) = CssProvider.highlight(line, HighlightState::default());
+        let brand = line.find("--brand").unwrap();
+        assert_eq!(kind_at(&spans, brand), Some(TokenKind::Type)); // custom property
+        let calc = line.find("calc").unwrap();
+        assert_eq!(kind_at(&spans, calc), Some(TokenKind::Function));
+        let var = line.find("var").unwrap();
+        assert_eq!(kind_at(&spans, var), Some(TokenKind::Function));
     }
 }
