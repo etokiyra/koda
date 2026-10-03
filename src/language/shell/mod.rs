@@ -8,11 +8,14 @@
 use crate::language::completion::{Completion, CompletionKind};
 use crate::language::data::{push_merged, scan_quoted, scan_single_quoted};
 use crate::language::detection::LanguageDescriptor;
+use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
 use crate::language::provider::{
     Capability, HighlightSpan, HighlightState, LanguageProvider, TokenKind,
 };
 use crate::language::symbols::{Symbol, SymbolKind};
+
+use std::path::Path;
 
 const KEYWORDS: &[&str] = &[
     "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac",
@@ -65,7 +68,16 @@ impl LanguageProvider for ShellProvider {
             Capability::GotoReference,
             Capability::Completion,
             Capability::Hover,
+            Capability::Formatting,
         ]
+    }
+
+    fn format(&self, _path: &Path, text: &str) -> FormatOutcome {
+        crate::language::format::shfmt(text)
+    }
+
+    fn formatter(&self) -> Option<&'static str> {
+        Some("shfmt")
     }
 
     fn symbols(&self, text: &str) -> Vec<Symbol> {

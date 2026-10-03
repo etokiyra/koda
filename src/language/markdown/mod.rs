@@ -7,11 +7,14 @@
 
 use crate::language::data::push_merged;
 use crate::language::detection::LanguageDescriptor;
+use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
 use crate::language::provider::{
     Capability, HighlightSpan, HighlightState, LanguageProvider, TokenKind,
 };
 use crate::language::symbols::{Symbol, SymbolKind};
+
+use std::path::Path;
 
 pub struct MarkdownProvider;
 
@@ -36,7 +39,19 @@ impl LanguageProvider for MarkdownProvider {
     }
 
     fn capabilities(&self) -> &'static [Capability] {
-        &[Capability::SyntaxHighlighting, Capability::DocumentSymbols]
+        &[
+            Capability::SyntaxHighlighting,
+            Capability::DocumentSymbols,
+            Capability::Formatting,
+        ]
+    }
+
+    fn format(&self, path: &Path, text: &str) -> FormatOutcome {
+        crate::language::format::prettier(path, text)
+    }
+
+    fn formatter(&self) -> Option<&'static str> {
+        Some("prettier")
     }
 
     fn symbols(&self, text: &str) -> Vec<Symbol> {

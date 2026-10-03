@@ -10,11 +10,14 @@ use crate::language::completion::{Completion, CompletionKind};
 use crate::language::data::{push_merged, scan_number, scan_quoted, scan_single_quoted};
 use crate::language::detection::LanguageDescriptor;
 use crate::language::diagnostics::Diagnostic;
+use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
 use crate::language::provider::{
     Capability, HighlightSpan, HighlightState, LanguageProvider, TokenKind,
 };
 use crate::language::symbols::{Symbol, SymbolKind};
+
+use std::path::Path;
 
 /// Words that YAML treats as booleans or null.
 const LITERALS: &[&str] = &["true", "false", "yes", "no", "on", "off", "null"];
@@ -47,7 +50,16 @@ impl LanguageProvider for YamlProvider {
             Capability::Diagnostics,
             Capability::DocumentSymbols,
             Capability::Completion,
+            Capability::Formatting,
         ]
+    }
+
+    fn format(&self, path: &Path, text: &str) -> FormatOutcome {
+        crate::language::format::prettier(path, text)
+    }
+
+    fn formatter(&self) -> Option<&'static str> {
+        Some("prettier")
     }
 
     fn diagnostics(&self, text: &str) -> Vec<Diagnostic> {

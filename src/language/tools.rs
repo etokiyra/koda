@@ -83,6 +83,10 @@ pub enum Tool {
     CssLs,
     Rustfmt,
     Gofmt,
+    Prettier,
+    ClangFormat,
+    Shfmt,
+    PerlTidy,
 }
 
 /// What a tool is for.
@@ -117,6 +121,10 @@ impl Tool {
         Tool::CssLs,
         Tool::Rustfmt,
         Tool::Gofmt,
+        Tool::Prettier,
+        Tool::ClangFormat,
+        Tool::Shfmt,
+        Tool::PerlTidy,
     ];
 
     pub fn program(self) -> &'static str {
@@ -143,6 +151,10 @@ impl Tool {
             Tool::CssLs => "vscode-css-language-server",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
+            Tool::Prettier => "prettier",
+            Tool::ClangFormat => "clang-format",
+            Tool::Shfmt => "shfmt",
+            Tool::PerlTidy => "perltidy",
         }
     }
 
@@ -170,6 +182,10 @@ impl Tool {
             Tool::CssLs => "vscode-css-language-server",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
+            Tool::Prettier => "prettier",
+            Tool::ClangFormat => "clang-format",
+            Tool::Shfmt => "shfmt",
+            Tool::PerlTidy => "perltidy",
         }
     }
 
@@ -195,6 +211,10 @@ impl Tool {
             Tool::SwiftLs => LanguageId::Swift,
             Tool::HtmlLs => LanguageId::Html,
             Tool::CssLs => LanguageId::Css,
+            Tool::Prettier => LanguageId::JavaScript,
+            Tool::ClangFormat => LanguageId::C,
+            Tool::Shfmt => LanguageId::Shell,
+            Tool::PerlTidy => LanguageId::Perl,
         }
     }
 
@@ -204,6 +224,18 @@ impl Tool {
         self.language() == language
             || (self == Tool::TypeScriptLs && language == LanguageId::JavaScript)
             || (self == Tool::Clangd && language == LanguageId::Cpp)
+            || (self == Tool::ClangFormat && language == LanguageId::Cpp)
+            || (self == Tool::Prettier
+                && matches!(
+                    language,
+                    LanguageId::TypeScript
+                        | LanguageId::JavaScript
+                        | LanguageId::Html
+                        | LanguageId::Css
+                        | LanguageId::Json
+                        | LanguageId::Yaml
+                        | LanguageId::Markdown
+                ))
     }
 
     pub fn purpose(self) -> ToolPurpose {
@@ -228,7 +260,12 @@ impl Tool {
             | Tool::SwiftLs
             | Tool::HtmlLs
             | Tool::CssLs => ToolPurpose::LanguageServer,
-            Tool::Rustfmt | Tool::Gofmt => ToolPurpose::Formatter,
+            Tool::Rustfmt
+            | Tool::Gofmt
+            | Tool::Prettier
+            | Tool::ClangFormat
+            | Tool::Shfmt
+            | Tool::PerlTidy => ToolPurpose::Formatter,
         }
     }
 
@@ -253,7 +290,11 @@ impl Tool {
             | Tool::ElixirLs
             | Tool::SwiftLs
             | Tool::HtmlLs
-            | Tool::CssLs => &["--version"],
+            | Tool::CssLs
+            | Tool::Prettier
+            | Tool::ClangFormat
+            | Tool::Shfmt
+            | Tool::PerlTidy => &["--version"],
             Tool::Gopls => &["version"],
             // `jdtls` and `OmniSharp` have no `--version`; `--help` proves they
             // launch (and, for OmniSharp, that the .NET runtime is present).
@@ -330,6 +371,10 @@ impl Tool {
             Tool::HtmlLs | Tool::CssLs => "install with npm — Koda provisions Node.js if missing",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
+            Tool::Prettier => "install with npm — Koda provisions Node.js if missing",
+            Tool::ClangFormat => "it ships with the Clang/LLVM toolchain",
+            Tool::Shfmt => "install it with `go install mvdan.cc/sh/v3/cmd/shfmt@latest`",
+            Tool::PerlTidy => "install it with `cpan Perl::Tidy`",
         }
     }
 
@@ -382,6 +427,10 @@ impl Tool {
                 Some(("npm", &["install", "-g", "vscode-langservers-extracted"]))
             }
             Tool::Gofmt => None,
+            Tool::Prettier => Some(("npm", &["install", "-g", "prettier"])),
+            Tool::Shfmt => Some(("go", &["install", "mvdan.cc/sh/v3/cmd/shfmt@latest"])),
+            // `clang-format` and `perltidy` ship with their language toolchains.
+            Tool::ClangFormat | Tool::PerlTidy => None,
         }
     }
 
@@ -413,6 +462,10 @@ impl Tool {
             Tool::DartAnalyzer => &["dart"],
             Tool::ElixirLs => &["elixir"],
             Tool::SwiftLs => &["swift"],
+            // Formatters.
+            Tool::Prettier => &[],
+            Tool::Shfmt => &["go"],
+            Tool::ClangFormat | Tool::PerlTidy => &[],
         }
     }
 
@@ -476,6 +529,13 @@ impl Tool {
             Tool::HtmlLs | Tool::CssLs => npm_attempts(&["vscode-langservers-extracted"]),
             // `gofmt` ships with the Go toolchain; there is nothing to install.
             Tool::Gofmt => Vec::new(),
+            Tool::Prettier => npm_attempts(&["prettier"]),
+            Tool::Shfmt => vec![InstallAttempt::one(
+                "go install",
+                InstallCommand::new("go", &["install", "mvdan.cc/sh/v3/cmd/shfmt@latest"]),
+            )],
+            // `clang-format` and `perltidy` ship with their toolchains.
+            Tool::ClangFormat | Tool::PerlTidy => Vec::new(),
         }
     }
 }
@@ -1983,6 +2043,7 @@ mod tests {
                     | LanguageId::Python
                     | LanguageId::Shell
                     | LanguageId::TypeScript
+                    | LanguageId::JavaScript
                     | LanguageId::C
                     | LanguageId::Java
                     | LanguageId::CSharp
@@ -2143,6 +2204,37 @@ mod tests {
             .map(|(_, value)| value.clone())
             .expect("Kotlin launch sets JAVA_HOME");
         assert_eq!(Some(PathBuf::from(java_home)), kotlin_jdk_dir());
+    }
+
+    #[test]
+    fn formatters_map_to_languages_and_install_safely() {
+        for (language, tool) in [
+            (LanguageId::JavaScript, Tool::Prettier),
+            (LanguageId::TypeScript, Tool::Prettier),
+            (LanguageId::Html, Tool::Prettier),
+            (LanguageId::Css, Tool::Prettier),
+            (LanguageId::Json, Tool::Prettier),
+            (LanguageId::Yaml, Tool::Prettier),
+            (LanguageId::Markdown, Tool::Prettier),
+            (LanguageId::C, Tool::ClangFormat),
+            (LanguageId::Cpp, Tool::ClangFormat),
+            (LanguageId::Shell, Tool::Shfmt),
+            (LanguageId::Perl, Tool::PerlTidy),
+        ] {
+            assert_eq!(
+                Tool::for_language(language, ToolPurpose::Formatter),
+                Some(tool),
+                "formatter for {language:?}"
+            );
+        }
+        assert_eq!(
+            Tool::Prettier.install_command(),
+            Some(("npm", &["install", "-g", "prettier"][..]))
+        );
+        assert_eq!(
+            Tool::Shfmt.install_command(),
+            Some(("go", &["install", "mvdan.cc/sh/v3/cmd/shfmt@latest"][..]))
+        );
     }
 
     #[test]

@@ -85,6 +85,7 @@ impl LanguageProvider for HtmlProvider {
             Capability::DocumentSymbols,
             Capability::Completion,
             Capability::Hover,
+            Capability::Formatting,
         ]
     }
 
@@ -109,8 +110,12 @@ impl LanguageProvider for HtmlProvider {
         completions
     }
 
-    fn format(&self, _path: &Path, _text: &str) -> FormatOutcome {
-        FormatOutcome::Unsupported
+    fn format(&self, path: &Path, text: &str) -> FormatOutcome {
+        crate::language::format::prettier(path, text)
+    }
+
+    fn formatter(&self) -> Option<&'static str> {
+        Some("prettier")
     }
 
     fn hover(&self, text: &str, line: usize, col: usize) -> Option<crate::language::hover::Hover> {

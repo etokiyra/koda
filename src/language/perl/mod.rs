@@ -10,11 +10,14 @@
 use crate::language::completion::{Completion, CompletionKind};
 use crate::language::data::{push_merged, scan_quoted, scan_single_quoted};
 use crate::language::detection::LanguageDescriptor;
+use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
 use crate::language::provider::{
     Capability, HighlightSpan, HighlightState, LanguageProvider, TokenKind,
 };
 use crate::language::symbols::{Location, Symbol, SymbolKind, word_at};
+
+use std::path::Path;
 
 const KEYWORDS: &[&str] = &[
     "and", "chomp", "chop", "continue", "do", "else", "elsif", "eq", "for", "foreach", "ge",
@@ -102,7 +105,16 @@ impl LanguageProvider for PerlProvider {
             Capability::GotoReference,
             Capability::Completion,
             Capability::Hover,
+            Capability::Formatting,
         ]
+    }
+
+    fn format(&self, _path: &Path, text: &str) -> FormatOutcome {
+        crate::language::format::perltidy(text)
+    }
+
+    fn formatter(&self) -> Option<&'static str> {
+        Some("perltidy")
     }
 
     fn diagnostics(&self, text: &str) -> Vec<crate::language::diagnostics::Diagnostic> {

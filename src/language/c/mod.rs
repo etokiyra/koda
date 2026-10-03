@@ -236,6 +236,7 @@ impl LanguageProvider for CProvider {
             Capability::GotoReference,
             Capability::Completion,
             Capability::Hover,
+            Capability::Formatting,
         ]
     }
 
@@ -294,8 +295,12 @@ impl LanguageProvider for CProvider {
         completions
     }
 
-    fn format(&self, _path: &Path, _text: &str) -> FormatOutcome {
-        FormatOutcome::Unsupported
+    fn format(&self, path: &Path, text: &str) -> FormatOutcome {
+        crate::language::format::clang_format(path, text)
+    }
+
+    fn formatter(&self) -> Option<&'static str> {
+        Some("clang-format")
     }
 
     fn hover(&self, text: &str, line: usize, col: usize) -> Option<crate::language::hover::Hover> {

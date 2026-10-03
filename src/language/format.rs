@@ -65,18 +65,82 @@ pub fn gofmt(text: &str) -> FormatOutcome {
     )
 }
 
+/// Format a web/prose file with Prettier, letting it infer the parser from the
+/// path. Prettier reads stdin and writes stdout, so unsaved edits are included.
+pub fn prettier(path: &Path, text: &str) -> FormatOutcome {
+    let filepath = path.to_string_lossy().into_owned();
+    run(
+        "prettier",
+        &["--stdin-filepath", &filepath],
+        text,
+        "prettier",
+        "install it with `npm install -g prettier` — Koda manages Node.js",
+    )
+}
+
+/// Format C/C++ with `clang-format`, which ships with the Clang/LLVM toolchain.
+pub fn clang_format(path: &Path, text: &str) -> FormatOutcome {
+    let filename = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "source".to_string());
+    let assume = format!("--assume-filename={filename}");
+    run(
+        "clang-format",
+        &[&assume],
+        text,
+        "clang-format",
+        "it ships with the Clang/LLVM toolchain",
+    )
+}
+
+/// Format a shell script with `shfmt`.
+pub fn shfmt(text: &str) -> FormatOutcome {
+    run(
+        "shfmt",
+        &[],
+        text,
+        "shfmt",
+        "install it with `go install mvdan.cc/sh/v3/cmd/shfmt@latest`",
+    )
+}
+
+/// Format Perl with `perltidy`.
+pub fn perltidy(text: &str) -> FormatOutcome {
+    run(
+        "perltidy",
+        &[],
+        text,
+        "perltidy",
+        "install it with `cpan Perl::Tidy`",
+    )
+}
+
 fn run(program: &str, args: &[&str], text: &str, tool: &str, hint: &str) -> FormatOutcome {
     // Prefer a located executable: the process PATH may be minimal when Koda is
     // launched from a GUI or a non-login shell.
     let program_path = crate::language::tools::locate(program)
         .unwrap_or_else(|| std::path::PathBuf::from(program));
-    let mut child = match Command::new(&program_path)
+    let mut command = Command::new(&program_path);
+    command
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+    // npm-installed formatters (Prettier) are `#!/usr/bin/env node` scripts, so
+    // a Koda-managed Node.js must be on PATH when the user has none.
+    if let Some(node) = crate::language::tools::node_dir() {
+        let bin = if cfg!(windows) {
+            node
+        } else {
+            node.join("bin")
+        };
+        let existing = std::env::var_os("PATH")
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        command.env("PATH", format!("{}:{existing}", bin.to_string_lossy()));
+    }
+    let mut child = match command.spawn() {
         Ok(child) => child,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return FormatOutcome::ToolMissing {

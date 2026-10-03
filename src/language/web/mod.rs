@@ -225,6 +225,7 @@ impl LanguageProvider for WebProvider {
             Capability::GotoReference,
             Capability::Completion,
             Capability::Hover,
+            Capability::Formatting,
         ]
     }
 
@@ -283,8 +284,12 @@ impl LanguageProvider for WebProvider {
         completions
     }
 
-    fn format(&self, _path: &Path, _text: &str) -> FormatOutcome {
-        FormatOutcome::Unsupported
+    fn format(&self, path: &Path, text: &str) -> FormatOutcome {
+        crate::language::format::prettier(path, text)
+    }
+
+    fn formatter(&self) -> Option<&'static str> {
+        Some("prettier")
     }
 
     fn hover(&self, text: &str, line: usize, col: usize) -> Option<crate::language::hover::Hover> {
@@ -347,8 +352,17 @@ impl LanguageProvider for WebProvider {
                 continue;
             }
 
-            // A regex literal is not distinguished from division; leave `/` as an
-            // operator so paths and math read correctly.
+            // A `/` in expression position starts a regex literal; otherwise it
+            // stays a division operator. This is the usual lookback heuristic.
+            if c == '/'
+                && regex_can_start(&chars, i)
+                && let Some(end) = scan_regex(&chars, i)
+            {
+                push_merged(&mut spans, HighlightSpan::new(i, end, TokenKind::String));
+                i = end;
+                continue;
+            }
+
             if c == '\'' || c == '"' {
                 let end = scan_quoted(&chars, i, c);
                 push_merged(&mut spans, HighlightSpan::new(i, end, TokenKind::String));
@@ -405,6 +419,16 @@ impl LanguageProvider for WebProvider {
                 }
                 i = j;
                 continue;
+            }
+
+            // A `<` in expression position opens a JSX element; a comparison or
+            // generic angle bracket stays an operator.
+            if c == '<' && jsx_can_start(&chars, i) {
+                let end = highlight_jsx(&chars, i, &mut spans);
+                if end > i {
+                    i = end;
+                    continue;
+                }
             }
 
             if is_operator(c) {
@@ -481,6 +505,226 @@ fn scan_template(chars: &[char], start: usize) -> usize {
             '`' => return i + 1,
             _ => i += 1,
         }
+    }
+    chars.len()
+}
+
+/// The word ending immediately before `end` (skipping whitespace), if any.
+fn word_before(chars: &[char], end: usize) -> String {
+    let mut j = end;
+    while j > 0 && chars[j - 1].is_whitespace() {
+        j -= 1;
+    }
+    let mut k = j;
+    while k > 0 && is_ident_continue(chars[k - 1]) {
+        k -= 1;
+    }
+    chars[k..j].iter().collect()
+}
+
+/// Whether a `/` at `i` begins a regex literal rather than a division.
+///
+/// A regex may follow an expression-start operator or a keyword that takes an
+/// expression; after a value (identifier, number, `)`, `]`) it is division.
+fn regex_can_start(chars: &[char], i: usize) -> bool {
+    let mut j = i;
+    while j > 0 && chars[j - 1].is_whitespace() {
+        j -= 1;
+    }
+    if j == 0 {
+        return true;
+    }
+    let prev = chars[j - 1];
+    if matches!(
+        prev,
+        '(' | ','
+            | '='
+            | ':'
+            | '['
+            | '!'
+            | '&'
+            | '|'
+            | '?'
+            | '{'
+            | '}'
+            | ';'
+            | '+'
+            | '-'
+            | '*'
+            | '%'
+            | '<'
+            | '>'
+            | '~'
+            | '^'
+    ) {
+        return true;
+    }
+    if is_ident_continue(prev) {
+        return matches!(
+            word_before(chars, j).as_str(),
+            "return"
+                | "typeof"
+                | "instanceof"
+                | "in"
+                | "of"
+                | "new"
+                | "delete"
+                | "void"
+                | "case"
+                | "do"
+                | "else"
+                | "yield"
+                | "await"
+                | "default"
+        );
+    }
+    false
+}
+
+/// The end of a regex literal starting at `/`, honouring escapes and classes.
+fn scan_regex(chars: &[char], start: usize) -> Option<usize> {
+    let mut i = start + 1;
+    let mut in_class = false;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' => i += 2,
+            '[' => {
+                in_class = true;
+                i += 1;
+            }
+            ']' => {
+                in_class = false;
+                i += 1;
+            }
+            '/' if !in_class => {
+                let mut j = i + 1;
+                while j < chars.len() && chars[j].is_ascii_alphabetic() {
+                    j += 1;
+                }
+                return Some(j);
+            }
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// Whether a `<` at `i` opens a JSX element rather than a comparison/generic.
+fn jsx_can_start(chars: &[char], i: usize) -> bool {
+    let Some(next) = chars.get(i + 1) else {
+        return false;
+    };
+    // A closing tag `</…>` can follow text content, so it is accepted wherever
+    // it appears (`< /` is not valid JavaScript).
+    if *next == '/' {
+        return chars
+            .get(i + 2)
+            .is_some_and(|c| c.is_alphabetic() || *c == '_' || *c == '$' || *c == '>');
+    }
+    if !(next.is_alphabetic() || *next == '_' || *next == '$' || *next == '>') {
+        return false;
+    }
+    let mut j = i;
+    while j > 0 && chars[j - 1].is_whitespace() {
+        j -= 1;
+    }
+    if j == 0 {
+        return true;
+    }
+    let prev = chars[j - 1];
+    if matches!(
+        prev,
+        '(' | ',' | '=' | '>' | ':' | '[' | '!' | '&' | '|' | '?' | '{' | '}' | ';' | '+'
+    ) {
+        return true;
+    }
+    if is_ident_continue(prev) {
+        return matches!(
+            word_before(chars, j).as_str(),
+            "return" | "default" | "else" | "yield" | "await" | "case" | "in" | "of"
+        );
+    }
+    false
+}
+
+/// Highlight a JSX tag starting at `<`, returning the index past it.
+fn highlight_jsx(chars: &[char], start: usize, spans: &mut Vec<HighlightSpan>) -> usize {
+    let len = chars.len();
+    let mut i = start + 1;
+    let closing = chars.get(i) == Some(&'/');
+    if closing {
+        i += 1;
+    }
+    // A fragment `<>` or closing fragment `</>`.
+    if chars.get(i) == Some(&'>') {
+        push_merged(spans, HighlightSpan::new(start, i + 1, TokenKind::Operator));
+        return i + 1;
+    }
+    let name_start = i;
+    while i < len && (is_ident_continue(chars[i]) || matches!(chars[i], '.' | ':' | '-')) {
+        i += 1;
+    }
+    if i == name_start {
+        return start; // Not a tag; let the caller treat `<` as an operator.
+    }
+    push_merged(spans, HighlightSpan::new(name_start, i, TokenKind::Type));
+
+    while i < len && chars[i] != '>' {
+        let c = chars[i];
+        if c.is_whitespace() || c == '/' {
+            i += 1;
+            continue;
+        }
+        if c == '{' {
+            i = scan_braces(chars, i);
+            continue;
+        }
+        if c == '"' || c == '\'' {
+            let end = scan_quoted(chars, i, c);
+            push_merged(spans, HighlightSpan::new(i, end, TokenKind::String));
+            i = end;
+            continue;
+        }
+        if c == '=' {
+            push_merged(spans, HighlightSpan::new(i, i + 1, TokenKind::Operator));
+            i += 1;
+            continue;
+        }
+        let attr_start = i;
+        while i < len
+            && !chars[i].is_whitespace()
+            && !matches!(chars[i], '=' | '>' | '/' | '"' | '\'' | '{')
+        {
+            i += 1;
+        }
+        push_merged(
+            spans,
+            HighlightSpan::new(attr_start, i, TokenKind::Attribute),
+        );
+    }
+    if i < len {
+        push_merged(spans, HighlightSpan::new(i, i + 1, TokenKind::Operator));
+        i += 1;
+    }
+    i
+}
+
+/// The index just past the `}` matching the `{` at `start`.
+fn scan_braces(chars: &[char], start: usize) -> usize {
+    let mut depth = 0usize;
+    let mut i = start;
+    while i < chars.len() {
+        match chars[i] {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
     }
     chars.len()
 }
@@ -637,5 +881,76 @@ mod tests {
         assert!(names.contains(&("Options", SymbolKind::Interface)));
         assert!(names.contains(&("Handler", SymbolKind::Type)));
         assert!(names.contains(&("PORT", SymbolKind::Constant)));
+    }
+
+    fn kind_at(spans: &[HighlightSpan], col: usize) -> Option<TokenKind> {
+        spans
+            .iter()
+            .find(|span| span.range.contains(&col))
+            .map(|span| span.kind)
+    }
+
+    #[test]
+    fn regex_literals_are_strings_but_division_is_an_operator() {
+        let provider = WebProvider::javascript();
+        let (spans, _) = provider.highlight("let re = /ab+c/gi;", HighlightState::default());
+        assert_eq!(kind_at(&spans, 9), Some(TokenKind::String)); // /ab+c/gi
+        assert_eq!(kind_at(&spans, 16), Some(TokenKind::String)); // flags included
+
+        let (spans, _) = provider.highlight("let x = a / b / c;", HighlightState::default());
+        assert_eq!(kind_at(&spans, 10), Some(TokenKind::Operator)); // first /
+        assert_eq!(kind_at(&spans, 14), Some(TokenKind::Operator)); // second /
+
+        // A regex after `return` is not division.
+        let (spans, _) = provider.highlight("return /x/.test(s)", HighlightState::default());
+        assert_eq!(kind_at(&spans, 7), Some(TokenKind::String));
+    }
+
+    #[test]
+    fn jsx_tags_and_attributes_highlight() {
+        let provider = WebProvider::typescript();
+        let (spans, _) = provider.highlight(
+            "return <div className=\"card\">Hi</div>;",
+            HighlightState::default(),
+        );
+        let div = "return <div className=\"card\">Hi</div>;";
+        let div_col = div.find("div").unwrap();
+        assert_eq!(kind_at(&spans, div_col), Some(TokenKind::Type));
+        assert_eq!(kind_at(&spans, 12), Some(TokenKind::Attribute)); // className
+        assert_eq!(kind_at(&spans, 22), Some(TokenKind::String)); // "card"
+        // The closing tag's name is highlighted too.
+        let close_col = div.rfind("div").unwrap();
+        assert_eq!(kind_at(&spans, close_col), Some(TokenKind::Type));
+    }
+
+    #[test]
+    fn generics_and_comparisons_are_not_jsx() {
+        let provider = WebProvider::typescript();
+        let (spans, _) = provider.highlight("let xs: Array<Foo> = [];", HighlightState::default());
+        assert_eq!(kind_at(&spans, 13), Some(TokenKind::Operator)); // <
+        let (spans, _) = provider.highlight("if (a < b) {}", HighlightState::default());
+        assert_eq!(kind_at(&spans, 6), Some(TokenKind::Operator)); // <
+    }
+
+    #[test]
+    fn jsx_fragments_and_self_closing_tags() {
+        let provider = WebProvider::javascript();
+        let (spans, _) = provider.highlight("return <></>;", HighlightState::default());
+        assert_eq!(kind_at(&spans, 7), Some(TokenKind::Operator)); // <
+        let (spans, _) =
+            provider.highlight("const el = <Input value={x} />;", HighlightState::default());
+        let input_col = "const el = <Input value={x} />;".find("Input").unwrap();
+        assert_eq!(kind_at(&spans, input_col), Some(TokenKind::Type));
+    }
+
+    #[test]
+    fn web_providers_offer_prettier_formatting() {
+        for provider in [WebProvider::typescript(), WebProvider::javascript()] {
+            assert!(
+                provider.capabilities().contains(&Capability::Formatting),
+                "web providers expose Formatting"
+            );
+            assert_eq!(provider.formatter(), Some("prettier"));
+        }
     }
 }
