@@ -719,6 +719,71 @@ impl Document {
         self.history.break_coalesce();
     }
 
+    /// Select the word under the cursor, or extend to the next occurrence of the
+    /// selected text. Repeated calls cycle through the document, wrapping at the
+    /// end. This is the single-cursor basis for multi-cursor editing.
+    pub fn select_next_occurrence(&mut self) {
+        let (query, from) = match self.selection_range() {
+            Some((_, end)) => {
+                let text = self.selected_text().unwrap_or_default();
+                if text.is_empty() || text.contains('\n') {
+                    return;
+                }
+                (text, end)
+            }
+            None => {
+                let cursor = self.clamped_cursor();
+                let Some((start, end)) = self.word_bounds(cursor.row, cursor.col) else {
+                    return;
+                };
+                self.selection = Some(Selection::new(start));
+                self.cursor = end;
+                self.preferred_col = None;
+                self.history.break_coalesce();
+                return;
+            }
+        };
+
+        let matches = self.find_all_with(&query, true, true);
+        if matches.is_empty() {
+            return;
+        }
+        let next = matches
+            .iter()
+            .find(|(start, _)| *start >= from)
+            .copied()
+            .unwrap_or(matches[0]);
+        self.selection = Some(Selection::new(next.0));
+        self.cursor = next.1;
+        self.preferred_col = None;
+        self.history.break_coalesce();
+    }
+
+    /// The whole-word bounds around `(row, col)`, if the cursor is on a word.
+    fn word_bounds(&self, row: usize, col: usize) -> Option<(Position, Position)> {
+        let chars: Vec<char> = self.buffer.line_text(row).chars().collect();
+        if chars.is_empty() {
+            return None;
+        }
+        let mut start = col.min(chars.len());
+        if !(start < chars.len() && is_word_char(chars[start])) {
+            // Not on a word character; fall back to the one just before it.
+            if start > 0 && is_word_char(chars[start - 1]) {
+                start -= 1;
+            } else {
+                return None;
+            }
+        }
+        let mut end = start;
+        while start > 0 && is_word_char(chars[start - 1]) {
+            start -= 1;
+        }
+        while end < chars.len() && is_word_char(chars[end]) {
+            end += 1;
+        }
+        (start < end).then(|| (Position::new(row, start), Position::new(row, end)))
+    }
+
     pub fn clear_selection(&mut self) {
         self.selection = None;
     }
@@ -1281,6 +1346,37 @@ mod tests {
         d.move_to(Position::new(1, 0));
         d.backspace();
         assert_eq!(d.buffer.text(), "abcd");
+    }
+
+    #[test]
+    fn select_next_occurrence_walks_the_document() {
+        let mut d = doc("let foo = foo + foo;");
+        d.move_to(Position::new(0, 4));
+        d.select_next_occurrence();
+        assert_eq!(d.selected_text().as_deref(), Some("foo"));
+        assert_eq!(
+            d.selection_range(),
+            Some((Position::new(0, 4), Position::new(0, 7)))
+        );
+
+        d.select_next_occurrence();
+        assert_eq!(
+            d.selection_range(),
+            Some((Position::new(0, 10), Position::new(0, 13)))
+        );
+
+        d.select_next_occurrence();
+        assert_eq!(
+            d.selection_range(),
+            Some((Position::new(0, 16), Position::new(0, 19)))
+        );
+
+        // Past the last occurrence it wraps to the first.
+        d.select_next_occurrence();
+        assert_eq!(
+            d.selection_range(),
+            Some((Position::new(0, 4), Position::new(0, 7)))
+        );
     }
 
     #[test]

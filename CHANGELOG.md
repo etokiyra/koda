@@ -388,6 +388,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Editing & UX
 
+- Added **Select Next Occurrence** (`Ctrl+D`): with no selection it selects the
+  word under the cursor, and each further press selects the next whole-word
+  occurrence in the file, wrapping around at the end. It is the single-cursor
+  basis for multi-cursor editing.
 - Inferred **indentation**. On opening a file Koda detects its indentation unit
   from the leading whitespace — two spaces in a JavaScript file, four in a Rust
   file — and uses it for auto-indent, `Tab`, and indent/outdent, so Koda matches

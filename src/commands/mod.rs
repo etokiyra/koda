@@ -27,6 +27,7 @@ pub mod ids {
     pub const UNDO: &str = "edit.undo";
     pub const REDO: &str = "edit.redo";
     pub const SELECT_ALL: &str = "edit.selectAll";
+    pub const SELECT_NEXT: &str = "edit.selectNext";
     pub const COPY: &str = "edit.copy";
     pub const CUT: &str = "edit.cut";
     pub const PASTE: &str = "edit.paste";
@@ -189,6 +190,14 @@ impl CommandRegistry {
             Command::new(SELECT_ALL, "Select All", "Edit", Some("Ctrl+A"))
                 .describes("Select the whole file")
                 .needs_doc(),
+            Command::new(
+                SELECT_NEXT,
+                "Select Next Occurrence",
+                "Edit",
+                Some("Ctrl+D"),
+            )
+            .describes("Select the word, then its next occurrence")
+            .needs_doc(),
             Command::new(COPY, "Copy", "Edit", Some("Ctrl+C"))
                 .describes("Copy the selection")
                 .needs_doc(),

@@ -188,9 +188,10 @@ The editor is the heart of Koda, and it is built for real projects.
   active tab.
 - Grouped undo, auto-pairing, smart newline, selection-aware indent/outdent,
   **detected indentation** (a two-space JavaScript file and a four-space Rust
-  file both indent the way their project does, with no config), line
-  move/duplicate, delete-line, go-to-matching-bracket, matching-bracket
-  highlighting and a kill-ring with `Alt+Y` yank-pop.
+  file both indent the way their project does, with no config), **select next
+  occurrence** (`Ctrl+D`), line move/duplicate, delete-line,
+  go-to-matching-bracket, matching-bracket highlighting and a kill-ring with
+  `Alt+Y` yank-pop.
 - Quick open (`Ctrl+P`), inline fuzzy file filtering in the sidebar (`/`),
   find/replace with case, whole-word and regex options, project-wide text
   search (`Ctrl+Shift+F`), go-to-line, and **Revert File** to discard local
@@ -350,6 +351,7 @@ Koda reports what happened rather than deleting anything.
 | `Ctrl+Shift+I` | Format the active file |
 | `Ctrl+Shift+H` | Hover: info about the symbol under the cursor |
 | `Ctrl+A` | Select all |
+| `Ctrl+D` | Select the word, then its next occurrence |
 | `Ctrl+B` | Toggle file tree |
 | `Ctrl+E` | Focus file tree / editor |
 | `Alt+V` | Split the editor into two panes |

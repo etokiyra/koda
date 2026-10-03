@@ -135,6 +135,8 @@ command palette already reports which are available. Filling them in is additive
 - [x] Delete line (`Ctrl+Shift+K`).
 - [x] Selection-aware indentation, line move/duplicate, and grouped undo.
 - [x] Inline fuzzy file filtering in the sidebar.
+- [x] Select next occurrence (`Ctrl+D`): select the word under the cursor, then
+      cycle through its whole-word occurrences.
 - [ ] Multiple cursors.
 - [x] Indentation width is inferred per file (two-space JavaScript, four-space
       Rust, …) with no configuration.
