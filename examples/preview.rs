@@ -49,12 +49,13 @@ fn main() {
             }
             app
         }
-        "scene-starry" | "scene-cozy" | "scene-rainy" | "scene-sakura" => {
+        "scene-starry" | "scene-cozy" | "scene-rainy" | "scene-sakura" | "scene-study" => {
             let mut app = App::new(Some(&root)).expect("app");
             app.welcome_scene = match mode {
                 "scene-cozy" => koda::ui::art::WelcomeScene::Cozy,
                 "scene-rainy" => koda::ui::art::WelcomeScene::Rainy,
                 "scene-sakura" => koda::ui::art::WelcomeScene::Sakura,
+                "scene-study" => koda::ui::art::WelcomeScene::Study,
                 _ => koda::ui::art::WelcomeScene::Starry,
             };
             app

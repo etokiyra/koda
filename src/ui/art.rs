@@ -149,18 +149,21 @@ pub enum WelcomeScene {
     Starry,
     /// A cozy desk with a hanging lamp and a little terminal.
     Cozy,
-    /// A rain-streaked window and a drowsy familiar.
+    /// A rain-streaked window over a lit city and a drowsy familiar.
     Rainy,
     /// Drifting blossom petals around a happy familiar.
     Sakura,
+    /// A quiet study: a shoji window, a low desk and a cup of tea.
+    Study,
 }
 
 impl WelcomeScene {
-    pub const ALL: [WelcomeScene; 4] = [
+    pub const ALL: [WelcomeScene; 5] = [
         WelcomeScene::Starry,
         WelcomeScene::Cozy,
         WelcomeScene::Rainy,
         WelcomeScene::Sakura,
+        WelcomeScene::Study,
     ];
 
     pub fn next(self) -> Self {
@@ -177,12 +180,13 @@ impl WelcomeScene {
             WelcomeScene::Cozy => "cozy desk",
             WelcomeScene::Rainy => "rainy window",
             WelcomeScene::Sakura => "sakura drift",
+            WelcomeScene::Study => "quiet study",
         }
     }
 }
 
 const SCENE_WIDTH: usize = 46;
-const SCENE_HEIGHT: usize = 8;
+const SCENE_HEIGHT: usize = 12;
 
 /// A small character grid used to compose scenes by coordinate.
 struct Canvas {
@@ -253,21 +257,27 @@ fn place_cat(canvas: &mut Canvas, x: usize, y: usize, phase: usize) {
 
 fn starry(phase: usize) -> Canvas {
     let mut canvas = Canvas::new(SCENE_WIDTH, SCENE_HEIGHT);
-    canvas.put(40, 0, MOON, theme::accent());
+    // A couple of soft clouds.
+    canvas.put(5, 0, "~.~", theme::dim());
+    canvas.put(30, 0, "~-~", theme::dim());
 
+    // The moon, low and bright.
+    canvas.put(40, 1, MOON, theme::accent());
+
+    // Scattered stars that twinkle between three intensities.
     const STARS: &[(usize, usize)] = &[
-        (3, 0),
-        (12, 1),
-        (22, 0),
-        (30, 2),
-        (37, 1),
-        (44, 0),
-        (7, 2),
-        (27, 1),
-        (34, 0),
-        (42, 3),
-        (1, 3),
-        (17, 3),
+        (3, 1),
+        (10, 2),
+        (17, 0),
+        (24, 2),
+        (28, 1),
+        (35, 4),
+        (44, 3),
+        (13, 5),
+        (38, 6),
+        (5, 6),
+        (21, 7),
+        (32, 8),
     ];
     for (index, (x, y)) in STARS.iter().enumerate() {
         let (glyph, style) = match (phase + index) % 3 {
@@ -280,98 +290,166 @@ fn starry(phase: usize) -> Canvas {
 
     // A shooting star crosses the sky now and then.
     let streak = phase % 24;
-    if streak < 4 {
-        canvas.put(2 + streak * 6, 1, "·", theme::star());
+    if streak < 5 {
+        canvas.put(2 + streak * 5, 1, "·", theme::star());
         if streak >= 1 {
-            canvas.put(3 + (streak - 1) * 6, 2, "·", theme::star());
+            canvas.put(3 + (streak - 1) * 5, 2, "·", theme::star());
         }
     }
 
-    canvas.put(6, 7, "·  ·  ·  ~~~~~~~~~~~~~~  ·  ·", theme::dim());
-    place_cat(&mut canvas, 19, 3, phase);
+    // The familiar on a grassy hillside under the stars.
+    canvas.put(6, 8, "·   ·   ·   ·   ·   ·   ·   ·   ·", theme::dim());
+    canvas.put(2, 9, "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~", theme::dim());
+    canvas.put(
+        0,
+        10,
+        "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        theme::dim(),
+    );
+    canvas.put(
+        0,
+        11,
+        "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        theme::dim(),
+    );
+    place_cat(&mut canvas, 19, 4, phase);
     canvas
 }
 
 fn cozy(phase: usize) -> Canvas {
     let mut canvas = Canvas::new(SCENE_WIDTH, SCENE_HEIGHT);
-    canvas.put(41, 0, MOON, theme::accent());
-    // A hanging lamp that blinks.
     let lamp = if phase.is_multiple_of(4) { "✦" } else { "·" };
-    canvas.put(29, 0, "╭─╮", theme::dim());
-    canvas.put(29, 1, &format!("│{lamp}│"), theme::dim());
-    canvas.put(29, 2, "╰─╯", theme::dim());
+    canvas.put(30, 0, "╭─╮", theme::dim());
+    canvas.put(30, 1, &format!("│{lamp}│"), theme::dim());
+    canvas.put(30, 2, "╰─╯", theme::dim());
+    canvas.put(42, 0, MOON, theme::accent());
 
-    place_cat(&mut canvas, 16, 1, phase);
-    canvas.put(23, 2, SPARK, theme::star());
+    // A little bookshelf.
+    canvas.put(2, 4, "▤▤▤", theme::dim());
+    canvas.put(2, 5, "▤▤▤", theme::dim());
+    canvas.put(2, 6, "▤▤▤", theme::dim());
+
+    place_cat(&mut canvas, 16, 3, phase);
+
+    // A mug with curling steam.
+    canvas.put(24, 6, "╭─╮", theme::accent());
+    canvas.put(24, 7, "│ │", theme::accent());
+    canvas.put(24, 8, "╰─╯", theme::accent());
+    let steam = if phase.is_multiple_of(3) { 4 } else { 5 };
+    canvas.put(25, steam, "~", theme::soft());
+    canvas.put(26, steam.saturating_sub(1), "~", theme::soft());
 
     // A little terminal on the desk.
-    canvas.put(6, 5, "╭──────────────────────────╮", theme::border(false));
-    canvas.put(6, 6, "│", theme::border(false));
-    canvas.put(8, 6, ">_", theme::star());
-    canvas.put(10, 6, " koda", theme::accent_bold());
-    canvas.put(32, 6, "│", theme::border(false));
-    canvas.put(6, 7, "╰──────────────────────────╯", theme::border(false));
+    canvas.put(
+        4,
+        9,
+        "╭──────────────────────────────╮",
+        theme::border(false),
+    );
+    canvas.put(4, 10, "│", theme::border(false));
+    canvas.put(6, 10, ">_", theme::star());
+    canvas.put(9, 10, "koda", theme::accent_bold());
+    canvas.put(35, 10, "│", theme::border(false));
+    canvas.put(
+        4,
+        11,
+        "╰──────────────────────────────╯",
+        theme::border(false),
+    );
     canvas
 }
 
 fn rainy(phase: usize) -> Canvas {
     let mut canvas = Canvas::new(SCENE_WIDTH, SCENE_HEIGHT);
+    // The window.
     canvas.put(
-        4,
+        3,
         0,
-        "╭──────────────────────────────────╮",
+        "╭────────────────────────────────────╮",
         theme::border(false),
     );
-    for y in 1..4 {
-        canvas.put(4, y, "│", theme::border(false));
-        canvas.put(39, y, "│", theme::border(false));
+    for y in 1..5 {
+        canvas.put(3, y, "│", theme::border(false));
+        canvas.put(42, y, "│", theme::border(false));
     }
     canvas.put(
-        4,
-        4,
-        "╰──────────────────────────────────╯",
+        3,
+        5,
+        "╰────────────────────────────────────╯",
         theme::border(false),
     );
 
-    canvas.put(20, 2, MOON, theme::accent());
-    canvas.put(12, 1, SPARK, theme::soft());
-    canvas.put(30, 1, STAR, theme::star());
+    // A skyline with lit windows.
+    const BUILDINGS: &[(usize, usize, usize)] = &[
+        (6, 2, 4),
+        (11, 1, 3),
+        (15, 3, 5),
+        (22, 1, 4),
+        (27, 2, 3),
+        (31, 1, 5),
+        (38, 3, 2),
+    ];
+    for &(x, top, width) in BUILDINGS {
+        for y in top..=4 {
+            for cell in 0..width {
+                canvas.put(x + cell, y, "█", theme::dim());
+            }
+        }
+        canvas.put(x + 1, top + 1, "░", theme::warn());
+        if width > 3 && top + 2 <= 4 {
+            canvas.put(x + width - 2, top + 2, "░", theme::warn());
+        }
+    }
 
-    // Rain falling inside the window; streaks shift with the phase.
-    const RAIN_X: &[usize] = &[8, 14, 22, 27, 33, 36];
+    // A star and the moon peeking between the towers.
+    canvas.put(37, 1, STAR, theme::star());
+    canvas.put(36, 3, MOON, theme::accent());
+
+    // Rain streaks that shift with the phase.
+    const RAIN_X: &[usize] = &[5, 9, 13, 19, 24, 29, 34, 40];
     for (index, x) in RAIN_X.iter().enumerate() {
-        let y = (phase + index * 2) % 3 + 1;
+        let y = (phase + index * 2) % 4 + 1;
         canvas.put(*x, y, "╵", theme::soft());
         if y > 1 {
             canvas.put(*x, y - 1, "╷", theme::dim());
         }
     }
 
-    place_cat(&mut canvas, 24, 5, phase);
-    canvas.put(31, 6, "z", theme::dim());
-    canvas.put(33, 6, "Z", theme::dim());
+    // The familiar, watching the rain from the window ledge.
+    place_cat(&mut canvas, 24, 7, phase);
+    canvas.put(31, 8, "z", theme::dim());
+    canvas.put(33, 8, "Z", theme::dim());
     canvas
 }
 
 fn sakura(phase: usize) -> Canvas {
     let mut canvas = Canvas::new(SCENE_WIDTH, SCENE_HEIGHT);
+    // A blossom branch across the top.
+    canvas.put(3, 0, "✿──┬──✿───┬──✿──┬──✿", theme::soft());
+    canvas.put(6, 1, "│", theme::soft());
+    canvas.put(13, 1, "│", theme::soft());
+    canvas.put(19, 1, "│", theme::soft());
+    canvas.put(9, 1, "❀", theme::accent());
+    canvas.put(16, 1, "❀", theme::accent());
+    canvas.put(22, 1, "❀", theme::accent());
 
-    // Drifting petals fall gently, wrapping around the scene.
+    place_cat(&mut canvas, 19, 4, phase);
+
+    // Petals drifting down, wrapping around the scene.
     const PETALS: &[(usize, usize, bool)] = &[
-        (3, 0, true),
-        (12, 1, false),
-        (24, 0, true),
-        (33, 2, false),
-        (41, 1, true),
-        (7, 3, false),
-        (28, 3, false),
-        (38, 4, true),
-        (10, 6, true),
-        (35, 6, true),
-        (18, 6, false),
+        (4, 2, true),
+        (12, 3, false),
+        (30, 2, true),
+        (38, 4, false),
+        (7, 5, true),
+        (16, 6, false),
+        (34, 6, true),
+        (10, 9, true),
+        (27, 9, false),
+        (41, 7, true),
     ];
     for (index, (x, y, big)) in PETALS.iter().enumerate() {
-        let drift = (phase / 2 + index) % 4;
+        let drift = (phase / 2 + index) % 5;
         let yy = (y + drift) % SCENE_HEIGHT;
         let (glyph, style) = if *big {
             ("✿", theme::accent())
@@ -381,7 +459,64 @@ fn sakura(phase: usize) -> Canvas {
         canvas.put(*x, yy, glyph, style);
     }
 
-    place_cat(&mut canvas, 19, 3, phase);
+    canvas.put(
+        0,
+        11,
+        "~~~~~~~~~~~~~   ~~~~~~~~~~~~~   ~~~~~~~~~~",
+        theme::dim(),
+    );
+    canvas
+}
+
+fn study(phase: usize) -> Canvas {
+    let mut canvas = Canvas::new(SCENE_WIDTH, SCENE_HEIGHT);
+
+    // A shoji window on the left: a frame with a regular paper grid.
+    let inner = 18;
+    canvas.put(
+        2,
+        0,
+        &format!("╔{}╗", "═".repeat(inner)),
+        theme::border(false),
+    );
+    for y in 1..4 {
+        let mut row = String::new();
+        for cell in 0..inner {
+            row.push(if cell % 4 == 0 { '┼' } else { '─' });
+        }
+        canvas.put(2, y, &format!("║{row}║"), theme::border(false));
+    }
+    canvas.put(
+        2,
+        4,
+        &format!("╚{}╝", "═".repeat(inner)),
+        theme::border(false),
+    );
+
+    // A hanging paper lantern that glows.
+    let glow = if phase.is_multiple_of(5) { "✦" } else { "·" };
+    canvas.put(34, 0, "╭─╮", theme::dim());
+    canvas.put(34, 1, &format!("│{glow}│"), theme::dim());
+    canvas.put(34, 2, "╰─╯", theme::dim());
+    canvas.put(43, 0, MOON, theme::accent());
+
+    // A low desk on the right with a cup of tea.
+    canvas.put(22, 8, "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔", theme::dim());
+    canvas.put(24, 7, "╭─╮", theme::accent());
+    canvas.put(24, 8, "╰─╯", theme::accent());
+    let steam = if phase.is_multiple_of(3) { 5 } else { 6 };
+    canvas.put(25, steam, "~", theme::soft());
+
+    // The familiar, sitting by the window.
+    place_cat(&mut canvas, 10, 6, phase);
+
+    // A tatami floor.
+    canvas.put(
+        0,
+        11,
+        "─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─",
+        theme::dim(),
+    );
     canvas
 }
 
@@ -393,6 +528,7 @@ pub fn scene(kind: WelcomeScene, phase: usize, motion: bool) -> Vec<Line<'static
         WelcomeScene::Cozy => cozy(phase),
         WelcomeScene::Rainy => rainy(phase),
         WelcomeScene::Sakura => sakura(phase),
+        WelcomeScene::Study => study(phase),
     };
     canvas.lines()
 }

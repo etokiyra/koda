@@ -230,8 +230,8 @@ Koda has a personality, but the code always comes first.
   only the statusline, popups and the current line carry a soft panel.
 - **A little familiar.** A star-cat keeps you company on the welcome screen and
   in empty states — never behind your code. It cycles through expressions, and
-  the welcome screen offers four animated scenes (a starry night, a cozy desk, a
-  rainy window, a drift of blossom).
+  the welcome screen offers five animated scenes (a starry night, a cozy desk, a
+  rainy window, a drift of blossom, a quiet study).
 - **One visual vocabulary.** `✦` stars, `☾` moons, `❯` pointers and `·`
   separators recur throughout, so the whole environment reads as one piece.
   Empty, loading and error states are all written in the same voice.

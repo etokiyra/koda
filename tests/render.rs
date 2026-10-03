@@ -218,6 +218,41 @@ fn renders_a_welcome_scene() {
 }
 
 #[test]
+fn renders_every_welcome_scene() {
+    let dir = temp_project("all-scenes");
+    for scene in koda::ui::art::WelcomeScene::ALL {
+        let mut app = App::new(Some(&dir)).unwrap();
+        app.welcome_scene = scene;
+        let screen = draw(&mut app);
+        assert!(
+            screen.contains('ω'),
+            "{scene:?} should show the familiar:\n{screen}"
+        );
+        assert!(
+            screen.contains("K O D A"),
+            "{scene:?} should show the wordmark"
+        );
+    }
+    cleanup(&dir);
+}
+
+#[test]
+fn welcome_degrades_on_a_small_terminal() {
+    let dir = temp_project("small-welcome");
+    let mut app = App::new(Some(&dir)).unwrap();
+    app.tree_visible = false;
+    app.welcome_scene = koda::ui::art::WelcomeScene::Study;
+
+    // Too short for the scene, so it falls back to the wordmark and menu.
+    let screen = draw_at(&mut app, 44, 14);
+    assert!(
+        screen.contains("K O D A"),
+        "the welcome should stay usable when small:\n{screen}"
+    );
+    cleanup(&dir);
+}
+
+#[test]
 fn frozen_motion_still_renders_the_welcome() {
     let dir = temp_project("frozen");
     let mut app = App::new(Some(&dir)).unwrap();

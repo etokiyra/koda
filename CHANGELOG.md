@@ -9,12 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Welcome screen
 
-- The welcome screen now opens on one of four **animated scenes** — *starry
-  night*, *cozy desk*, *rainy window* and *sakura drift* — each composed on a
-  small character canvas rather than hand-aligned text. Stars twinkle, rain
-  streaks fall, petals drift and the Koda familiar cycles through expressions.
-  Cycle scenes with `v` on the welcome screen or **Change Welcome Scene** in the
-  palette.
+- The welcome screen now opens on one of five **animated scenes** — *starry
+  night*, *cozy desk*, *rainy window*, *sakura drift* and *quiet study* — each
+  composed on a small character canvas rather than hand-aligned text. Stars
+  twinkle, rain falls over a lit city skyline, petals drift, a lantern glows and
+  the Koda familiar cycles through expressions. Cycle scenes with `v` on the
+  welcome screen or **Change Welcome Scene** in the palette.
 - Added **Toggle Animations** (palette): turning motion off freezes the scene on
   its first frame and stills the busy sparkle, for a calm, reduced-motion
   experience. Motion is on by default.

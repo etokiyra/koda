@@ -215,9 +215,10 @@ command palette already reports which are available. Filling them in is additive
 
 ## Then — polish
 
-- [x] Animated **welcome scenes**: *starry night*, *cozy desk*, *rainy window*
-      and *sakura drift*, composed on a character canvas, with the familiar
-      cycling expressions. `v` (or **Change Welcome Scene**) cycles them.
+- [x] Animated **welcome scenes**: *starry night*, *cozy desk*, *rainy window*,
+      *sakura drift* and *quiet study*, composed on a character canvas with
+      clouds, a city skyline, a glowing lantern and the familiar cycling
+      expressions. `v` (or **Change Welcome Scene**) cycles them.
 - [x] **Toggle Animations** for a calm, reduced-motion experience; the scene and
       busy sparkle freeze when it is off.
 - [x] Personable, contextual **empty states** across pickers and the file tree:
