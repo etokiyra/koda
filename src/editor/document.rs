@@ -959,6 +959,38 @@ impl Document {
         matches
     }
 
+    /// All occurrences of `pattern` interpreted as a regular expression.
+    ///
+    /// Returns an error for unsupported syntax so the find bar can explain it.
+    /// Zero-width matches are skipped because they are rarely useful to step
+    /// through.
+    pub fn find_all_regex(
+        &self,
+        pattern: &str,
+        case_sensitive: bool,
+    ) -> Result<Vec<(Position, Position)>, String> {
+        let regex = crate::regex::Regex::new(pattern)?;
+        let case_insensitive = !case_sensitive;
+        let mut matches = Vec::new();
+        for row in 0..self.buffer.len_lines() {
+            let line = self.buffer.line_text(row);
+            let chars: Vec<char> = line.chars().collect();
+            let mut from = 0usize;
+            while from <= chars.len() {
+                let Some((start, end)) = regex.find(&chars, from, case_insensitive) else {
+                    break;
+                };
+                if end == start {
+                    from = start + 1;
+                    continue;
+                }
+                matches.push((Position::new(row, start), Position::new(row, end)));
+                from = end;
+            }
+        }
+        Ok(matches)
+    }
+
     // ----------------------------------------------------------------------
     // Brackets
     // ----------------------------------------------------------------------
@@ -1170,6 +1202,17 @@ mod tests {
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0], (Position::new(0, 0), Position::new(0, 3)));
         assert_eq!(matches[1], (Position::new(0, 8), Position::new(0, 11)));
+    }
+
+    #[test]
+    fn find_all_regex_matches_and_reports_errors() {
+        let d = doc("let count = 42;\nlet total = 7;");
+        let matches = d.find_all_regex(r"\d+", false).unwrap();
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0], (Position::new(0, 12), Position::new(0, 14)));
+        assert_eq!(matches[1], (Position::new(1, 12), Position::new(1, 13)));
+
+        assert!(d.find_all_regex("(a|b)", false).is_err());
     }
 
     #[test]

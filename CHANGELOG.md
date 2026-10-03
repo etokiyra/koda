@@ -205,6 +205,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Search
 
+- **Regex search.** Press **Alt+R** in the find bar to interpret the query as
+  a regular expression. Koda ships a small, dependency-free engine supporting
+  literals, `.`, `*`/`+`/`?`, classes, `^`/`$` and `\d`/`\w`/`\s`; unsupported
+  syntax (groups, alternation, `{n,m}`) is reported inline rather than matching
+  the wrong thing.
+
 - Added **Search in Project…** (`Ctrl+Shift+F`): a case-insensitive text
   search across every file Koda knows about, run on the background worker and
   shown as a filterable list of matches that jumps to the chosen line. It

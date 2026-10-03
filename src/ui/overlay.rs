@@ -496,6 +496,12 @@ pub fn render_search(frame: &mut Frame, area: Rect, search: &Search) {
     if search.whole_word {
         query_spans.push(Span::styled("  |ab|", theme::accent_bold()));
     }
+    if search.regex {
+        query_spans.push(Span::styled("  .*", theme::accent_bold()));
+    }
+    if let Some(error) = &search.regex_error {
+        query_spans.push(Span::styled(format!("  {error}"), theme::error()));
+    }
     pad_line(&mut query_spans, area.width);
     lines.push(Line::from(query_spans));
 

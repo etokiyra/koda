@@ -770,6 +770,7 @@ impl App {
                 KeyCode::Char(c) => match c.to_ascii_lowercase() {
                     'c' => self.search.case_sensitive = !self.search.case_sensitive,
                     'w' => self.search.whole_word = !self.search.whole_word,
+                    'r' => self.search.regex = !self.search.regex,
                     _ => return,
                 },
                 _ => return,
@@ -2966,17 +2967,32 @@ impl App {
 
     fn refresh_search_matches(&mut self) {
         let query = self.search.query.clone();
-        let matches = if query.is_empty() {
-            Vec::new()
+        let case_sensitive = self.search.case_sensitive;
+        let whole_word = self.search.whole_word;
+        let regex = self.search.regex;
+
+        let result: Result<Vec<_>, String> = if query.is_empty() {
+            Ok(Vec::new())
+        } else if let Some(doc) = self.editor.active_document() {
+            if regex {
+                doc.find_all_regex(&query, case_sensitive)
+            } else {
+                Ok(doc.find_all_with(&query, case_sensitive, whole_word))
+            }
         } else {
-            self.editor
-                .active_document()
-                .map(|doc| {
-                    doc.find_all_with(&query, self.search.case_sensitive, self.search.whole_word)
-                })
-                .unwrap_or_default()
+            Ok(Vec::new())
         };
-        self.search.matches = matches;
+
+        self.search.matches = match result {
+            Ok(matches) => {
+                self.search.regex_error = None;
+                matches
+            }
+            Err(message) => {
+                self.search.regex_error = Some(message);
+                Vec::new()
+            }
+        };
         if self
             .search
             .current
@@ -3763,6 +3779,31 @@ mod tests {
         app.handle_search_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::ALT));
         assert!(app.search.whole_word);
         assert_eq!(app.search.matches.len(), 2);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn regex_search_matches_and_reports_errors() {
+        let dir = temp_project("search-regex");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "let count = 42;\nlet total = 7;\n").unwrap();
+        let mut app = App::new(Some(&file)).unwrap();
+
+        app.execute_command(ids::FIND);
+        app.handle_search_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::ALT));
+        assert!(app.search.regex);
+
+        app.search.query = r"\d+".to_string();
+        app.refresh_search_matches();
+        assert_eq!(app.search.matches.len(), 2);
+        assert!(app.search.regex_error.is_none());
+
+        // Unsupported syntax is reported instead of matching silently wrong.
+        app.search.query = "(a|b)".to_string();
+        app.refresh_search_matches();
+        assert!(app.search.matches.is_empty());
+        assert!(app.search.regex_error.is_some());
 
         fs::remove_dir_all(&dir).ok();
     }

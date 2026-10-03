@@ -116,7 +116,8 @@ command palette already reports which are available. Filling them in is additive
       generics) for both providers.
 - [x] Case-sensitive and whole-word search options (`Alt+C` / `Alt+W`),
       case-insensitive by default and shown in the find bar.
-- [ ] Regular-expression search.
+- [x] Regular-expression search in the find bar (`Alt+R`), powered by a small
+      built-in engine.
 - [x] Undo grouping for consecutive typing.
 - [ ] Soft wrap and a configurable tab width.
 - [x] Persist cursor position, open tabs and expanded directories per project.
@@ -164,7 +165,7 @@ command palette already reports which are available. Filling them in is additive
 - [ ] Staged/unstaged git view and basic commit flow.
 - [x] Project-wide text search (`Ctrl+Shift+F`): a `.gitignore`-aware,
       case-insensitive scan on the background worker with a filterable result
-      list. (Per-file regex search is still to come.)
+      list.
 - [ ] Notifications/toasts for long-running operations.
 
 ---

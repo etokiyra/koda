@@ -247,6 +247,10 @@ pub struct Search {
     pub case_sensitive: bool,
     /// Match whole words only.
     pub whole_word: bool,
+    /// Interpret the query as a regular expression.
+    pub regex: bool,
+    /// The last regex compilation error, shown in the bar.
+    pub regex_error: Option<String>,
     pub matches: Vec<(Position, Position)>,
     pub current: Option<usize>,
 }
@@ -261,6 +265,8 @@ impl Default for Search {
             replacement: String::new(),
             case_sensitive: false,
             whole_word: false,
+            regex: false,
+            regex_error: None,
             matches: Vec::new(),
             current: None,
         }
@@ -274,6 +280,7 @@ impl Search {
         self.field = SearchField::Query;
         self.matches.clear();
         self.current = None;
+        self.regex_error = None;
     }
 }
 

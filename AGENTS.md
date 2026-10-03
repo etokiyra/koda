@@ -60,6 +60,7 @@ src/
 │   ├── mod.rs            # Project detection + Workspace
 │   └── file_tree.rs      # lazily loaded tree
 ├── search.rs             # project-wide text search
+├── regex.rs              # a small regex engine for search
 ├── terminal/mod.rs       # init/restore, OSC 52 clipboard
 └── ui/
     ├── theme.rs          # Mellow palette + semantic roles (single source of truth)
