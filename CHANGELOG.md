@@ -41,20 +41,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Project creation
 
 - Added a guided **Create New Project** flow: choose a parent folder, name the
-  project (validated for the platform and checked for collisions) and pick
-  Rust, Go, Python or Shell. `Esc` steps back at every stage and cancels from
-  the first.
+  project (validated for the platform and checked for collisions) and pick a
+  language. `Esc` steps back at every stage and cancels from the first.
 - Scaffolding is deterministic and offline. Koda writes conventional files
   directly rather than invoking `cargo`, `go` or `pip`, so it works with no
   network access and no toolchain: `Cargo.toml` + `src/main.rs`; `go.mod` +
-  `main.go`; `pyproject.toml` + a source package; or an executable shell
-  script.
+  `main.go`; `pyproject.toml` + a source package; `package.json` +
+  `tsconfig.json` + `src/index.ts` (TypeScript) or `package.json` +
+  `src/index.js` (JavaScript); `CMakeLists.txt` + `src/main.c`/`src/main.cpp`
+  (C/C++); or an executable shell script.
 - Creation runs on the background worker with a busy indicator and a toast; on
   success the project opens, its entry file loads and language tooling starts
   automatically. If a write fails partway, the partial directory is left
   untouched and Koda reports what happened.
 - New palette commands: **Open Project…** and **Create New Project…**, and a
-  directory browser used by both.
+  directory browser used by both. Templates are available for Rust, Go, Python,
+  TypeScript, JavaScript, Shell, C and C++.
 
 ### License
 

@@ -2150,7 +2150,7 @@ impl App {
             },
             WelcomeItem {
                 label: "Create a new project…".to_string(),
-                detail: "Rust · Go · Python · Shell".to_string(),
+                detail: "Rust · Go · Python · C++".to_string(),
                 action: WelcomeAction::NewProject,
             },
         ];

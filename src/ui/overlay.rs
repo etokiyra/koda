@@ -846,6 +846,12 @@ fn render_panel_rows(frame: &mut Frame, list: Rect, rows: &[(String, String)], s
         0
     };
     let width = list.width as usize;
+    // Align the detail column to the widest label so the list reads as a table.
+    let label_width = rows
+        .iter()
+        .map(|(label, _)| label.chars().count())
+        .max()
+        .unwrap_or(0);
     let mut lines = Vec::new();
     for (index, (label, detail)) in rows.iter().enumerate().skip(start).take(visible) {
         let highlighted = index == selected;
@@ -859,12 +865,15 @@ fn render_panel_rows(frame: &mut Frame, list: Rect, rows: &[(String, String)], s
         } else {
             theme::text()
         };
-        let mut spans = vec![marker, Span::styled(label.clone(), label_style)];
+        let mut spans = vec![
+            marker,
+            Span::styled(format!("{label:<label_width$}"), label_style),
+        ];
         if !detail.is_empty() {
-            let used: usize = spans.iter().map(|span| span.content.chars().count()).sum();
-            let pad = width.saturating_sub(used + detail.chars().count() + 1);
-            spans.push(Span::raw(" ".repeat(pad)));
-            spans.push(Span::styled(detail.clone(), theme::dim()));
+            spans.push(Span::styled("  ", theme::dim()));
+            let used = 3 + label_width + 2;
+            let budget = width.saturating_sub(used + 1);
+            spans.push(Span::styled(truncate(detail, budget), theme::dim()));
         }
         let mut line = Line::from(spans).style(on_panel);
         if highlighted {

@@ -19,7 +19,11 @@ pub const CREATABLE: &[LanguageId] = &[
     LanguageId::Rust,
     LanguageId::Go,
     LanguageId::Python,
+    LanguageId::TypeScript,
+    LanguageId::JavaScript,
     LanguageId::Shell,
+    LanguageId::C,
+    LanguageId::Cpp,
 ];
 
 /// Whether Koda can generate a conventional project for `language`.
@@ -30,10 +34,14 @@ pub fn is_creatable(language: LanguageId) -> bool {
 /// A short description of what a language's template generates.
 pub fn describe(language: LanguageId) -> &'static str {
     match language {
-        LanguageId::Rust => "Cargo.toml and src/main.rs (binary crate)",
-        LanguageId::Go => "go.mod and main.go (package main)",
-        LanguageId::Python => "pyproject.toml and a src/<package> entry point",
-        LanguageId::Shell => "an executable <name>.sh script",
+        LanguageId::Rust => "Cargo.toml + src/main.rs",
+        LanguageId::Go => "go.mod + main.go",
+        LanguageId::Python => "pyproject.toml + src/<package>",
+        LanguageId::TypeScript => "package.json + tsconfig.json",
+        LanguageId::JavaScript => "package.json + src/index.js",
+        LanguageId::Shell => "an executable <name>.sh",
+        LanguageId::C => "CMakeLists.txt + src/main.c",
+        LanguageId::Cpp => "CMakeLists.txt + src/main.cpp",
         _ => "a minimal project structure",
     }
 }
@@ -125,7 +133,11 @@ pub fn create(parent: &Path, name: &str, language: LanguageId) -> CreateOutcome 
         LanguageId::Rust => rust(&root, name),
         LanguageId::Go => go(&root, name),
         LanguageId::Python => python(&root, name),
+        LanguageId::TypeScript => typescript(&root, name),
+        LanguageId::JavaScript => javascript(&root, name),
         LanguageId::Shell => shell(&root, name),
+        LanguageId::C => c(&root, name),
+        LanguageId::Cpp => cpp(&root, name),
         _ => Ok(Vec::new()),
     };
 
@@ -195,6 +207,63 @@ fn shell(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
     let script_path = write(root, &format!("{name}.sh"), &script)?;
     make_executable(&script_path);
     Ok(vec![script_path, write(root, "README.md", &readme)?])
+}
+
+fn typescript(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let package = module_name(name);
+    let manifest = format!(
+        "{{\n  \"name\": \"{package}\",\n  \"version\": \"0.1.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {{\n    \"build\": \"tsc\",\n    \"start\": \"node dist/index.js\"\n  }},\n  \"devDependencies\": {{\n    \"typescript\": \"^5.0.0\"\n  }}\n}}\n"
+    );
+    let tsconfig = "{\n  \"compilerOptions\": {\n    \"target\": \"ES2022\",\n    \"module\": \"NodeNext\",\n    \"moduleResolution\": \"NodeNext\",\n    \"outDir\": \"dist\",\n    \"rootDir\": \"src\",\n    \"strict\": true,\n    \"esModuleInterop\": true,\n    \"skipLibCheck\": true\n  },\n  \"include\": [\"src\"]\n}\n";
+    let index = format!(
+        "function main(): void {{\n  console.log(\"Hello from {name}!\");\n}}\n\nmain();\n"
+    );
+    Ok(vec![
+        write(root, "package.json", &manifest)?,
+        write(root, "tsconfig.json", tsconfig)?,
+        write(root, "src/index.ts", &index)?,
+        write(root, ".gitignore", "node_modules\ndist\n")?,
+    ])
+}
+
+fn javascript(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let package = module_name(name);
+    let manifest = format!(
+        "{{\n  \"name\": \"{package}\",\n  \"version\": \"0.1.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {{\n    \"start\": \"node src/index.js\"\n  }}\n}}\n"
+    );
+    let index =
+        format!("function main() {{\n  console.log(\"Hello from {name}!\");\n}}\n\nmain();\n");
+    Ok(vec![
+        write(root, "package.json", &manifest)?,
+        write(root, "src/index.js", &index)?,
+        write(root, ".gitignore", "node_modules\n")?,
+    ])
+}
+
+fn c(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let project = crate_name(name);
+    let cmake = format!(
+        "cmake_minimum_required(VERSION 3.16)\nproject({project} C)\n\nset(CMAKE_C_STANDARD 17)\nset(CMAKE_C_STANDARD_REQUIRED ON)\n\nadd_executable({project} src/main.c)\n"
+    );
+    let main = "#include <stdio.h>\n\nint main(void) {\n    printf(\"Hello from your new project!\\n\");\n    return 0;\n}\n";
+    Ok(vec![
+        write(root, "CMakeLists.txt", &cmake)?,
+        write(root, "src/main.c", main)?,
+        write(root, ".gitignore", "build/\n")?,
+    ])
+}
+
+fn cpp(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let project = crate_name(name);
+    let cmake = format!(
+        "cmake_minimum_required(VERSION 3.16)\nproject({project} CXX)\n\nset(CMAKE_CXX_STANDARD 20)\nset(CMAKE_CXX_STANDARD_REQUIRED ON)\n\nadd_executable({project} src/main.cpp)\n"
+    );
+    let main = "#include <iostream>\n\nint main() {\n    std::cout << \"Hello from your new project!\\n\";\n    return 0;\n}\n";
+    Ok(vec![
+        write(root, "CMakeLists.txt", &cmake)?,
+        write(root, "src/main.cpp", main)?,
+        write(root, ".gitignore", "build/\n")?,
+    ])
 }
 
 /// Best-effort `chmod +x` for shell entry points on Unix.
@@ -377,6 +446,53 @@ mod tests {
             let mode = std::fs::metadata(&script).unwrap().permissions().mode();
             assert_eq!(mode & 0o111, 0o111, "script should be executable");
         }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scaffolds_typescript_and_javascript() {
+        let dir = scratch("web-projects");
+        let parent = dir.join("parent");
+        std::fs::create_dir_all(&parent).unwrap();
+
+        let CreateOutcome::Created { root, .. } =
+            create(&parent, "My Web App", LanguageId::TypeScript)
+        else {
+            panic!("expected TypeScript success");
+        };
+        assert!(root.join("package.json").is_file());
+        assert!(root.join("tsconfig.json").is_file());
+        assert!(root.join("src/index.ts").is_file());
+        let manifest = std::fs::read_to_string(root.join("package.json")).unwrap();
+        assert!(manifest.contains("\"name\": \"my-web-app\""));
+
+        let CreateOutcome::Created { root, .. } =
+            create(&parent, "my-js-app", LanguageId::JavaScript)
+        else {
+            panic!("expected JavaScript success");
+        };
+        assert!(root.join("src/index.js").is_file());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scaffolds_c_and_cpp() {
+        let dir = scratch("c-projects");
+        let parent = dir.join("parent");
+        std::fs::create_dir_all(&parent).unwrap();
+
+        let CreateOutcome::Created { root, .. } = create(&parent, "so cool", LanguageId::C) else {
+            panic!("expected C success");
+        };
+        assert!(root.join("CMakeLists.txt").is_file());
+        assert!(root.join("src/main.c").is_file());
+        let cmake = std::fs::read_to_string(root.join("CMakeLists.txt")).unwrap();
+        assert!(cmake.contains("project(so-cool C)"));
+
+        let CreateOutcome::Created { root, .. } = create(&parent, "app", LanguageId::Cpp) else {
+            panic!("expected C++ success");
+        };
+        assert!(root.join("src/main.cpp").is_file());
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -285,7 +285,7 @@ automatically, and nothing you passed on the command line is thrown away.
 
     ❯ Open a file…                          Ctrl+O
       Open a project…                choose a folder
-      Create a new project…   Rust · Go · Python · Shell
+      Create a new project…   Rust · Go · Python · C++
       Resume “my-project”            3 file(s)
       Keyboard shortcuts                       F1
 
@@ -314,8 +314,8 @@ the home screen back.
    confirms the highlighted one, `←` goes up, `Esc` cancels.
 2. **Name it** — the name is validated for your platform and checked against
    the chosen folder so an existing project is never overwritten.
-3. **Pick a language** — Rust, Go, Python or Shell, each shown with what Koda
-   will generate. `Esc` steps back at any point.
+3. **Pick a language** — Rust, Go, Python, TypeScript, JavaScript, Shell, C or
+   C++, each shown with what Koda will generate. `Esc` steps back at any point.
 
 Koda then scaffolds the project without a network connection or a toolchain and
 opens it, ready to edit:
@@ -325,7 +325,11 @@ opens it, ready to edit:
 | **Rust** | `Cargo.toml`, `src/main.rs`, `.gitignore` |
 | **Go** | `go.mod`, `main.go` |
 | **Python** | `pyproject.toml`, `src/<package>/__init__.py` and `__main__.py` |
+| **TypeScript** | `package.json`, `tsconfig.json`, `src/index.ts`, `.gitignore` |
+| **JavaScript** | `package.json`, `src/index.js`, `.gitignore` |
 | **Shell** | an executable `<name>.sh` (plus a `README.md`) |
+| **C** | `CMakeLists.txt`, `src/main.c`, `.gitignore` |
+| **C++** | `CMakeLists.txt`, `src/main.cpp`, `.gitignore` |
 
 If generation fails partway through, the partial folder is left untouched and
 Koda reports what happened rather than deleting anything.
