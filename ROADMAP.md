@@ -33,7 +33,7 @@ then expand
 - [x] Tabs, lazy file tree, git status.
 - [x] Confidence-based language detection (multiple signals).
 - [x] `LanguageProvider` abstraction + registry.
-- [x] Rust and Go syntax highlighting.
+- [x] Syntax highlighting for Rust, Go, Python, Markdown, JSON, TOML and YAML.
 - [x] Command palette, quick open, find/replace, go-to-line.
 - [x] Terminal-native, transparency-friendly UI.
 - [x] A strong visual identity: Mellow colours, original ASCII welcome scene,
@@ -75,8 +75,7 @@ The highest-value work. These turn Koda from an editor into an IDE.
 - [x] **Formatting.** `Ctrl+Shift+I` runs the language's trusted formatter
       (`rustfmt`, `gofmt`) on a snapshot through the background worker and
       replaces the buffer as one undoable edit. Reuses system tools, detects
-      whether they are installed and says so in the palette; automatic
-      provisioning is still to come.
+      whether they are installed, and can install them from **Language Setup…**.
 - [x] **Rename and code actions.**
 - [x] **Tool provisioning and lifecycle.** Discovery is implemented, and
       **Language Setup…** can install a missing tool through its official
@@ -112,7 +111,7 @@ command palette already reports which are available. Filling them in is additive
 ## Then — deepen the editing experience
 
 - [x] Bracket matching and auto-closing pairs.
-- [x] Go to matching bracket (`Ctrl+M`).
+- [x] Go to matching bracket (`Alt+M`).
 - [x] Delete line (`Ctrl+Shift+K`).
 - [x] Selection-aware indentation, line move/duplicate, and grouped undo.
 - [x] Inline fuzzy file filtering in the sidebar.
