@@ -229,6 +229,13 @@ impl ProviderRegistry {
         registry.register(Box::new(crate::language::css::CssProvider));
         registry.register(Box::new(crate::language::lua::LuaProvider));
         registry.register(Box::new(crate::language::kotlin::KotlinProvider));
+        registry.register(Box::new(crate::language::sql::SqlProvider));
+        registry.register(Box::new(crate::language::ruby::RubyProvider));
+        registry.register(Box::new(crate::language::asm::AsmProvider));
+        registry.register(Box::new(crate::language::perl::PerlProvider));
+        registry.register(Box::new(crate::language::dart::DartProvider));
+        registry.register(Box::new(crate::language::elixir::ElixirProvider));
+        registry.register(Box::new(crate::language::swift::SwiftProvider));
         registry
     }
 

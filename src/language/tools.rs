@@ -72,6 +72,13 @@ pub enum Tool {
     KotlinLs,
     Phpactor,
     LuaLs,
+    Sqls,
+    RubyLs,
+    AsmLsp,
+    PerlLs,
+    DartAnalyzer,
+    ElixirLs,
+    SwiftLs,
     HtmlLs,
     CssLs,
     Rustfmt,
@@ -99,6 +106,13 @@ impl Tool {
         Tool::KotlinLs,
         Tool::Phpactor,
         Tool::LuaLs,
+        Tool::Sqls,
+        Tool::RubyLs,
+        Tool::AsmLsp,
+        Tool::PerlLs,
+        Tool::DartAnalyzer,
+        Tool::ElixirLs,
+        Tool::SwiftLs,
         Tool::HtmlLs,
         Tool::CssLs,
         Tool::Rustfmt,
@@ -118,6 +132,13 @@ impl Tool {
             Tool::KotlinLs => "kotlin-language-server",
             Tool::Phpactor => "phpactor",
             Tool::LuaLs => "lua-language-server",
+            Tool::Sqls => "sqls",
+            Tool::RubyLs => "solargraph",
+            Tool::AsmLsp => "asm-lsp",
+            Tool::PerlLs => "perl-language-server",
+            Tool::DartAnalyzer => "dart",
+            Tool::ElixirLs => "elixir-ls",
+            Tool::SwiftLs => "sourcekit-lsp",
             Tool::HtmlLs => "vscode-html-language-server",
             Tool::CssLs => "vscode-css-language-server",
             Tool::Rustfmt => "rustfmt",
@@ -138,6 +159,13 @@ impl Tool {
             Tool::KotlinLs => "kotlin-language-server",
             Tool::Phpactor => "phpactor",
             Tool::LuaLs => "lua-language-server",
+            Tool::Sqls => "sqls",
+            Tool::RubyLs => "solargraph",
+            Tool::AsmLsp => "asm-lsp",
+            Tool::PerlLs => "perl-language-server",
+            Tool::DartAnalyzer => "dart",
+            Tool::ElixirLs => "elixir-ls",
+            Tool::SwiftLs => "sourcekit-lsp",
             Tool::HtmlLs => "vscode-html-language-server",
             Tool::CssLs => "vscode-css-language-server",
             Tool::Rustfmt => "rustfmt",
@@ -158,6 +186,13 @@ impl Tool {
             Tool::KotlinLs => LanguageId::Kotlin,
             Tool::Phpactor => LanguageId::Php,
             Tool::LuaLs => LanguageId::Lua,
+            Tool::Sqls => LanguageId::Sql,
+            Tool::RubyLs => LanguageId::Ruby,
+            Tool::AsmLsp => LanguageId::Assembly,
+            Tool::PerlLs => LanguageId::Perl,
+            Tool::DartAnalyzer => LanguageId::Dart,
+            Tool::ElixirLs => LanguageId::Elixir,
+            Tool::SwiftLs => LanguageId::Swift,
             Tool::HtmlLs => LanguageId::Html,
             Tool::CssLs => LanguageId::Css,
         }
@@ -184,6 +219,13 @@ impl Tool {
             | Tool::KotlinLs
             | Tool::Phpactor
             | Tool::LuaLs
+            | Tool::Sqls
+            | Tool::RubyLs
+            | Tool::AsmLsp
+            | Tool::PerlLs
+            | Tool::DartAnalyzer
+            | Tool::ElixirLs
+            | Tool::SwiftLs
             | Tool::HtmlLs
             | Tool::CssLs => ToolPurpose::LanguageServer,
             Tool::Rustfmt | Tool::Gofmt => ToolPurpose::Formatter,
@@ -203,6 +245,13 @@ impl Tool {
             | Tool::KotlinLs
             | Tool::Phpactor
             | Tool::LuaLs
+            | Tool::Sqls
+            | Tool::RubyLs
+            | Tool::AsmLsp
+            | Tool::PerlLs
+            | Tool::DartAnalyzer
+            | Tool::ElixirLs
+            | Tool::SwiftLs
             | Tool::HtmlLs
             | Tool::CssLs => &["--version"],
             Tool::Gopls => &["version"],
@@ -224,6 +273,10 @@ impl Tool {
             Tool::OmniSharp => &["-z", "--languageserver"],
             // `phpactor` speaks LSP through its `language-server` subcommand.
             Tool::Phpactor => &["language-server"],
+            // `solargraph` needs its `stdio` subcommand.
+            Tool::RubyLs => &["stdio"],
+            // The Dart SDK's analysis server is launched as a subcommand.
+            Tool::DartAnalyzer => &["language-server", "--protocol=lsp"],
             // The extracted VS Code servers speak stdio.
             Tool::HtmlLs | Tool::CssLs => &["--stdio"],
             _ => &[],
@@ -237,7 +290,16 @@ impl Tool {
     /// install as missing. They are verified by starting the server and
     /// confirming it stays up instead.
     fn probe_as_server(self) -> bool {
-        matches!(self, Tool::HtmlLs | Tool::CssLs | Tool::KotlinLs)
+        matches!(
+            self,
+            Tool::HtmlLs
+                | Tool::CssLs
+                | Tool::KotlinLs
+                | Tool::Sqls
+                | Tool::PerlLs
+                | Tool::ElixirLs
+                | Tool::SwiftLs
+        )
     }
 
     /// A short, actionable message for when the tool is missing.
@@ -256,6 +318,15 @@ impl Tool {
             Tool::KotlinLs => "Koda can install a managed JDK 21 and kotlin-language-server",
             Tool::Phpactor => "install phpactor with `composer global require phpactor/phpactor`",
             Tool::LuaLs => "Koda can install a self-contained lua-language-server",
+            Tool::Sqls => "install with `go install github.com/sqls-server/sqls@latest`",
+            Tool::RubyLs => "install with `gem install solargraph`",
+            Tool::AsmLsp => "install with `cargo install asm-lsp`",
+            Tool::PerlLs => {
+                "install the Perl::LanguageServer module (for example `cpan Perl::LanguageServer`)"
+            }
+            Tool::DartAnalyzer => "install the Dart SDK — Koda uses its bundled analysis server",
+            Tool::ElixirLs => "install ElixirLS; it needs your Erlang/Elixir toolchain",
+            Tool::SwiftLs => "install the Swift toolchain — it ships `sourcekit-lsp`",
             Tool::HtmlLs | Tool::CssLs => "install with npm — Koda provisions Node.js if missing",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
@@ -298,6 +369,12 @@ impl Tool {
             // `kotlin-language-server` plus a dedicated JDK 21 are installed by
             // Koda's own managed download plan.
             Tool::KotlinLs => None,
+            Tool::Sqls => Some(("go", &["install", "github.com/sqls-server/sqls@latest"])),
+            Tool::RubyLs => Some(("gem", &["install", "solargraph"])),
+            Tool::AsmLsp => Some(("cargo", &["install", "asm-lsp"])),
+            // Perl, Dart, Elixir and Swift servers need a toolchain Koda does
+            // not manage; they are discovered when present.
+            Tool::PerlLs | Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => None,
             // `jdtls` and `OmniSharp` are installed by Koda's own managed
             // download plan rather than a single package-manager command.
             Tool::Jdtls | Tool::OmniSharp => None,
@@ -327,6 +404,15 @@ impl Tool {
             // The dedicated JDK 21 is provided by Koda's managed download plan,
             // so no system Java is required.
             Tool::KotlinLs => &[],
+            // These install through a toolchain the user provides, and are
+            // otherwise discovered when already present.
+            Tool::Sqls => &["go"],
+            Tool::RubyLs => &["gem"],
+            Tool::AsmLsp => &["cargo"],
+            Tool::PerlLs => &["perl"],
+            Tool::DartAnalyzer => &["dart"],
+            Tool::ElixirLs => &["elixir"],
+            Tool::SwiftLs => &["swift"],
         }
     }
 
@@ -370,6 +456,21 @@ impl Tool {
             // `kotlin-language-server` needs a JDK whose version its bundled
             // compiler understands, so Koda installs a dedicated JDK 21.
             Tool::KotlinLs => kotlin_ls_attempts(),
+            Tool::Sqls => vec![InstallAttempt::one(
+                "go install",
+                InstallCommand::new("go", &["install", "github.com/sqls-server/sqls@latest"]),
+            )],
+            Tool::RubyLs => vec![InstallAttempt::one(
+                "gem install",
+                InstallCommand::new("gem", &["install", "solargraph"]),
+            )],
+            Tool::AsmLsp => vec![InstallAttempt::one(
+                "cargo install",
+                InstallCommand::new("cargo", &["install", "asm-lsp"]),
+            )],
+            // These servers need a toolchain Koda does not manage; they are
+            // discovered when the user already has one.
+            Tool::PerlLs | Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => Vec::new(),
             Tool::Jdtls => jdtls_attempts(),
             Tool::OmniSharp => omnisharp_attempts(),
             Tool::HtmlLs | Tool::CssLs => npm_attempts(&["vscode-langservers-extracted"]),
@@ -1888,6 +1989,13 @@ mod tests {
                     | LanguageId::Php
                     | LanguageId::Lua
                     | LanguageId::Kotlin
+                    | LanguageId::Sql
+                    | LanguageId::Ruby
+                    | LanguageId::Assembly
+                    | LanguageId::Perl
+                    | LanguageId::Dart
+                    | LanguageId::Elixir
+                    | LanguageId::Swift
                     | LanguageId::Html
                     | LanguageId::Css
             ));
@@ -1963,6 +2071,43 @@ mod tests {
             steps
                 .iter()
                 .any(|step| matches!(step, InstallStep::Extract { strip: 0, .. }))
+        );
+    }
+
+    #[test]
+    fn new_language_tools_use_trusted_managers() {
+        assert_eq!(
+            Tool::Sqls.install_command(),
+            Some(("go", &["install", "github.com/sqls-server/sqls@latest"][..]))
+        );
+        assert_eq!(
+            Tool::RubyLs.install_command(),
+            Some(("gem", &["install", "solargraph"][..]))
+        );
+        assert_eq!(
+            Tool::AsmLsp.install_command(),
+            Some(("cargo", &["install", "asm-lsp"][..]))
+        );
+        // Toolchains Koda does not manage are discovered, never promised.
+        for tool in [
+            Tool::DartAnalyzer,
+            Tool::ElixirLs,
+            Tool::SwiftLs,
+            Tool::PerlLs,
+        ] {
+            assert!(
+                tool.install_command().is_none(),
+                "{tool:?} must not advertise an installer"
+            );
+            assert!(!can_install(tool), "{tool:?} must not promise an install");
+        }
+        assert_eq!(
+            Tool::for_language(LanguageId::Dart, ToolPurpose::LanguageServer),
+            Some(Tool::DartAnalyzer)
+        );
+        assert_eq!(
+            Tool::for_language(LanguageId::Swift, ToolPurpose::LanguageServer),
+            Some(Tool::SwiftLs)
         );
     }
 

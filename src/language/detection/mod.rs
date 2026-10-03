@@ -53,6 +53,13 @@ mod tests {
                 LanguageId::Css => &["css"],
                 LanguageId::Lua => &["lua"],
                 LanguageId::Kotlin => &["kt", "kts"],
+                LanguageId::Sql => &["sql"],
+                LanguageId::Ruby => &["rb"],
+                LanguageId::Assembly => &["asm", "s"],
+                LanguageId::Perl => &["pl", "pm"],
+                LanguageId::Dart => &["dart"],
+                LanguageId::Elixir => &["ex", "exs"],
+                LanguageId::Swift => &["swift"],
                 LanguageId::Unknown => &[],
             },
             project_markers: match id {

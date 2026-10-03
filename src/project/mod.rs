@@ -24,6 +24,11 @@ pub enum ProjectKind {
     Php,
     Lua,
     Kotlin,
+    Ruby,
+    Elixir,
+    Dart,
+    Swift,
+    Perl,
     Generic,
 }
 
@@ -45,6 +50,14 @@ pub const KNOWN_MARKERS: &[(&str, ProjectKind)] = &[
     ("global.json", ProjectKind::CSharp),
     ("composer.json", ProjectKind::Php),
     (".luarc.json", ProjectKind::Lua),
+    ("Gemfile", ProjectKind::Ruby),
+    ("Rakefile", ProjectKind::Ruby),
+    (".ruby-version", ProjectKind::Ruby),
+    ("mix.exs", ProjectKind::Elixir),
+    ("pubspec.yaml", ProjectKind::Dart),
+    ("Package.swift", ProjectKind::Swift),
+    ("cpanfile", ProjectKind::Perl),
+    ("Makefile.PL", ProjectKind::Perl),
 ];
 
 /// Markers identified by a file-name suffix rather than an exact name, which
@@ -65,6 +78,11 @@ impl ProjectKind {
             ProjectKind::Php => "PHP",
             ProjectKind::Lua => "Lua",
             ProjectKind::Kotlin => "Kotlin",
+            ProjectKind::Ruby => "Ruby",
+            ProjectKind::Elixir => "Elixir",
+            ProjectKind::Dart => "Dart",
+            ProjectKind::Swift => "Swift",
+            ProjectKind::Perl => "Perl",
             ProjectKind::Generic => "Workspace",
         }
     }
@@ -79,6 +97,11 @@ impl ProjectKind {
             ProjectKind::Php => LanguageId::Php,
             ProjectKind::Lua => LanguageId::Lua,
             ProjectKind::Kotlin => LanguageId::Kotlin,
+            ProjectKind::Ruby => LanguageId::Ruby,
+            ProjectKind::Elixir => LanguageId::Elixir,
+            ProjectKind::Dart => LanguageId::Dart,
+            ProjectKind::Swift => LanguageId::Swift,
+            ProjectKind::Perl => LanguageId::Perl,
             ProjectKind::Generic => LanguageId::Unknown,
         }
     }
@@ -327,6 +350,28 @@ mod tests {
         assert_eq!(Project::detect(&dir).kind, ProjectKind::Java);
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn detects_new_project_markers() {
+        for (marker, kind) in [
+            ("Gemfile", ProjectKind::Ruby),
+            ("mix.exs", ProjectKind::Elixir),
+            ("pubspec.yaml", ProjectKind::Dart),
+            ("Package.swift", ProjectKind::Swift),
+            ("cpanfile", ProjectKind::Perl),
+        ] {
+            let dir = std::env::temp_dir().join(format!(
+                "koda-proj-{}-{}",
+                marker.replace('.', "-"),
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join(marker), "").unwrap();
+            assert_eq!(Project::detect(&dir).kind, kind, "marker {marker}");
+            fs::remove_dir_all(&dir).ok();
+        }
     }
 
     #[test]

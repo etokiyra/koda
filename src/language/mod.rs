@@ -9,13 +9,16 @@
 //! [`LanguageService`] wires the two together for convenient use by the app, but
 //! neither half depends on the other.
 
+pub mod asm;
 pub mod c;
 pub mod completion;
 pub mod csharp;
 pub mod css;
+pub mod dart;
 pub mod data;
 pub mod detection;
 pub mod diagnostics;
+pub mod elixir;
 pub mod format;
 pub mod go;
 pub mod hover;
@@ -27,11 +30,15 @@ pub mod kotlin;
 pub mod lsp;
 pub mod lua;
 pub mod markdown;
+pub mod perl;
 pub mod php;
 pub mod provider;
 pub mod python;
+pub mod ruby;
 pub mod rust;
 pub mod shell;
+pub mod sql;
+pub mod swift;
 pub mod symbols;
 pub mod toml;
 pub mod tools;

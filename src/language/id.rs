@@ -45,6 +45,20 @@ pub enum LanguageId {
     Lua,
     /// Kotlin sources and scripts.
     Kotlin,
+    /// SQL scripts and migrations (dialect-neutral baseline).
+    Sql,
+    /// Ruby sources and build files.
+    Ruby,
+    /// Assembly (x86/x86-64 and AArch64 baseline).
+    Assembly,
+    /// Perl scripts, modules and tests.
+    Perl,
+    /// Dart and Flutter sources.
+    Dart,
+    /// Elixir sources and scripts.
+    Elixir,
+    /// Swift sources.
+    Swift,
     /// Used when detection could not reach a confident answer.
     #[default]
     Unknown,
@@ -52,7 +66,7 @@ pub enum LanguageId {
 
 impl LanguageId {
     /// Every language Koda understands today. Keep this in sync with [`crate::language::provider`].
-    pub const ALL: [LanguageId; 19] = [
+    pub const ALL: [LanguageId; 26] = [
         LanguageId::Rust,
         LanguageId::Go,
         LanguageId::Python,
@@ -72,6 +86,13 @@ impl LanguageId {
         LanguageId::Css,
         LanguageId::Lua,
         LanguageId::Kotlin,
+        LanguageId::Sql,
+        LanguageId::Ruby,
+        LanguageId::Assembly,
+        LanguageId::Perl,
+        LanguageId::Dart,
+        LanguageId::Elixir,
+        LanguageId::Swift,
     ];
 
     /// A human readable display name.
@@ -96,6 +117,13 @@ impl LanguageId {
             LanguageId::Css => "CSS",
             LanguageId::Lua => "Lua",
             LanguageId::Kotlin => "Kotlin",
+            LanguageId::Sql => "SQL",
+            LanguageId::Ruby => "Ruby",
+            LanguageId::Assembly => "Assembly",
+            LanguageId::Perl => "Perl",
+            LanguageId::Dart => "Dart",
+            LanguageId::Elixir => "Elixir",
+            LanguageId::Swift => "Swift",
             LanguageId::Unknown => "Plain Text",
         }
     }
@@ -122,6 +150,13 @@ impl LanguageId {
             LanguageId::Css => "css",
             LanguageId::Lua => "lua",
             LanguageId::Kotlin => "kotlin",
+            LanguageId::Sql => "sql",
+            LanguageId::Ruby => "ruby",
+            LanguageId::Assembly => "assembly",
+            LanguageId::Perl => "perl",
+            LanguageId::Dart => "dart",
+            LanguageId::Elixir => "elixir",
+            LanguageId::Swift => "swift",
             LanguageId::Unknown => "text",
         }
     }

@@ -26,6 +26,13 @@ pub const CREATABLE: &[LanguageId] = &[
     LanguageId::Php,
     LanguageId::Lua,
     LanguageId::Kotlin,
+    LanguageId::Ruby,
+    LanguageId::Elixir,
+    LanguageId::Dart,
+    LanguageId::Swift,
+    LanguageId::Perl,
+    LanguageId::Sql,
+    LanguageId::Assembly,
     LanguageId::Html,
     LanguageId::Shell,
     LanguageId::C,
@@ -50,6 +57,13 @@ pub fn describe(language: LanguageId) -> &'static str {
         LanguageId::Php => "composer.json + index.php",
         LanguageId::Lua => "init.lua + .luarc.json",
         LanguageId::Kotlin => "Gradle Kotlin DSL + src/main/kotlin",
+        LanguageId::Ruby => "Gemfile + lib/<name>.rb",
+        LanguageId::Elixir => "mix.exs + lib/<name>.ex",
+        LanguageId::Dart => "pubspec.yaml + bin/main.dart",
+        LanguageId::Swift => "Package.swift + Sources/<name>",
+        LanguageId::Perl => "an executable <name>.pl",
+        LanguageId::Sql => "schema.sql",
+        LanguageId::Assembly => "main.asm + Makefile",
         LanguageId::Html => "index.html + style.css",
         LanguageId::Shell => "an executable <name>.sh",
         LanguageId::C => "CMakeLists.txt + src/main.c",
@@ -158,6 +172,13 @@ pub fn create(parent: &Path, name: &str, language: LanguageId) -> CreateOutcome 
         LanguageId::Php => php(&root, name),
         LanguageId::Lua => lua(&root, name),
         LanguageId::Kotlin => kotlin(&root, name),
+        LanguageId::Ruby => ruby(&root, name),
+        LanguageId::Elixir => elixir(&root, name),
+        LanguageId::Dart => dart(&root, name),
+        LanguageId::Swift => swift(&root, name),
+        LanguageId::Perl => perl(&root, name),
+        LanguageId::Sql => sql(&root, name),
+        LanguageId::Assembly => assembly(&root, name),
         LanguageId::Html => html(&root, name),
         LanguageId::Shell => shell(&root, name),
         LanguageId::C => c(&root, name),
@@ -376,6 +397,100 @@ fn kotlin(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
     ])
 }
 
+fn ruby(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let module = python_module(name);
+    let gemfile = "source \"https://rubygems.org\"\n\ngem \"rake\"\n";
+    let lib = format!(
+        "# frozen_string_literal: true\n\nmodule {pascal}\n  def self.greet\n    puts \"Hello from {name}!\"\n  end\nend\n\n{pascal}.greet if $PROGRAM_NAME == __FILE__\n",
+        pascal = pascal_case(name)
+    );
+    Ok(vec![
+        write(root, "Gemfile", gemfile)?,
+        write(root, &format!("lib/{module}.rb"), &lib)?,
+        write(root, ".gitignore", "*.gem\n.bundle/\nvendor/bundle/\n")?,
+    ])
+}
+
+fn elixir(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let app = python_module(name);
+    let mix = format!(
+        "defmodule {pascal}.MixProject do\n  use Mix.Project\n\n  def project do\n    [\n      app: :{app},\n      version: \"0.1.0\",\n      elixir: \"~> 1.15\"\n    ]\n  end\nend\n",
+        pascal = pascal_case(name)
+    );
+    let lib = format!(
+        "defmodule {pascal} do\n  @moduledoc \"A new project created with Koda.\"\n\n  def hello do\n    IO.puts(\"Hello from {name}!\")\n  end\nend\n",
+        pascal = pascal_case(name)
+    );
+    Ok(vec![
+        write(root, "mix.exs", &mix)?,
+        write(root, &format!("lib/{app}.ex"), &lib)?,
+        write(root, ".gitignore", "_build/\ndeps/\n*.ez\n")?,
+    ])
+}
+
+fn dart(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let package = python_module(name);
+    let pubspec = format!(
+        "name: {package}\ndescription: A new project created with Koda.\nversion: 0.1.0\nenvironment:\n  sdk: '>=3.0.0 <4.0.0'\n"
+    );
+    let main = format!("void main() {{\n  print('Hello from {name}!');\n}}\n");
+    Ok(vec![
+        write(root, "pubspec.yaml", &pubspec)?,
+        write(root, "bin/main.dart", &main)?,
+        write(root, ".gitignore", ".dart_tool/\nbuild/\n")?,
+    ])
+}
+
+fn swift(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let module = python_module(name);
+    let manifest = format!(
+        "// swift-tools-version:5.9\nimport PackageDescription\n\nlet package = Package(\n    name: \"{name}\",\n    targets: [\n        .executableTarget(name: \"{module}\")\n    ]\n)\n"
+    );
+    let main = format!("print(\"Hello from {name}!\")\n");
+    let readme = format!("# {name}\n\nA Swift package created with Koda.\n");
+    Ok(vec![
+        write(root, "Package.swift", &manifest)?,
+        write(root, &format!("Sources/{module}/main.swift"), &main)?,
+        write(root, "README.md", &readme)?,
+        write(root, ".gitignore", ".build/\n.swiftpm/\n")?,
+    ])
+}
+
+fn perl(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let script = format!(
+        "#!/usr/bin/env perl\nuse strict;\nuse warnings;\n\nsub main {{\n    print \"Hello from {name}!\\n\";\n}}\n\nmain();\n"
+    );
+    let readme = format!("# {name}\n\nA Perl project created with Koda.\n");
+    let script_path = write(root, &format!("{name}.pl"), &script)?;
+    make_executable(&script_path);
+    Ok(vec![script_path, write(root, "README.md", &readme)?])
+}
+
+fn sql(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let schema = format!(
+        "-- {name}: a starter schema.\n\nCREATE TABLE example (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n);\n\nINSERT INTO example (name) VALUES ('hello');\n"
+    );
+    let readme = format!("# {name}\n\nA SQL project created with Koda.\n");
+    Ok(vec![
+        write(root, "schema.sql", &schema)?,
+        write(root, "README.md", &readme)?,
+    ])
+}
+
+fn assembly(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    // A conservative x86-64 NASM skeleton; assembly is target-specific, so the
+    // generated file states its assumption explicitly.
+    let source = format!(
+        "; {name}: x86-64 NASM skeleton.\n; Build with: make\n\n    global _start\n\n    section .text\n_start:\n    mov rax, 60     ; sys_exit\n    xor rdi, rdi    ; status 0\n    syscall\n"
+    );
+    let makefile = "main: main.asm\n\tnasm -f elf64 main.asm -o main.o\n\tld main.o -o main\n\nclean:\n\trm -f main main.o\n";
+    Ok(vec![
+        write(root, "main.asm", &source)?,
+        write(root, "Makefile", makefile)?,
+        write(root, ".gitignore", "*.o\nmain\n")?,
+    ])
+}
+
 fn html(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
     let page = format!(
         "<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <title>{name}</title>\n    <link rel=\"stylesheet\" href=\"style.css\" />\n  </head>\n  <body>\n    <main class=\"card\">\n      <h1>Hello from {name}!</h1>\n      <p>Edit <code>index.html</code> to get started.</p>\n    </main>\n  </body>\n</html>\n"
@@ -401,6 +516,28 @@ fn make_executable(path: &Path) {
     #[cfg(not(unix))]
     {
         let _ = path;
+    }
+}
+
+/// A `CamelCase` identifier derived from the directory name (Elixir/Ruby
+/// module names).
+pub fn pascal_case(name: &str) -> String {
+    let snake = python_module(name);
+    let pascal: String = snake
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect();
+    if pascal.is_empty() {
+        "App".to_string()
+    } else {
+        pascal
     }
 }
 
@@ -730,6 +867,33 @@ mod tests {
             crate::project::ProjectKind::Kotlin.language(),
             LanguageId::Kotlin
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scaffolds_the_new_languages() {
+        let dir = scratch("newlangs");
+        let parent = dir.join("parent");
+        std::fs::create_dir_all(&parent).unwrap();
+        let cases = [
+            (LanguageId::Ruby, "Gemfile"),
+            (LanguageId::Elixir, "mix.exs"),
+            (LanguageId::Dart, "pubspec.yaml"),
+            (LanguageId::Swift, "Package.swift"),
+            (LanguageId::Perl, "sample-perl.pl"),
+            (LanguageId::Sql, "schema.sql"),
+            (LanguageId::Assembly, "main.asm"),
+        ];
+        for (language, file) in cases {
+            let name = format!("sample-{}", language.slug());
+            let CreateOutcome::Created { root, .. } = create(&parent, &name, language) else {
+                panic!("expected {language:?} to scaffold");
+            };
+            assert!(
+                root.join(file).is_file(),
+                "{language:?} should create {file}"
+            );
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 
