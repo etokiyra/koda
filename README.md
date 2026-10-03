@@ -75,6 +75,9 @@ Implemented:
   selection-aware indent/outdent, line move/duplicate and bracket matching.
 - An inline fuzzy file filter in the sidebar, tab overflow scrolling and
   name disambiguation.
+- Provider-driven diagnostics (lexical structural checks for Rust and Go today)
+  surfaced as gutter markers, underlines, a statusline count, and `F8`/`Shift+F8`
+  navigation.
 - Lightweight git integration (branch + per-file status, via the `git` binary).
 - A distinctive Mellow-based visual identity: a semantic theme layer, an
   adaptive ASCII welcome scene, the Koda familiar and personality-rich empty
@@ -133,6 +136,7 @@ and establishes language context automatically.
 | `Ctrl+W` | Close tab (press twice to discard unsaved changes) |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+/` | Toggle comment |
+| `F8` / `Shift+F8` | Next / previous diagnostic |
 | `Tab` / `Shift+Tab` | Indent / outdent selection |
 | `Alt+↑` / `Alt+↓` | Move line up / down |
 | `Ctrl+Shift+D` | Duplicate line |

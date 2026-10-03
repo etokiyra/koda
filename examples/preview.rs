@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! cargo run --example preview -- [width] [height] [mode]
-//! mode: welcome | file | empty | palette | quick | find
+//! mode: welcome | file | empty | palette | quick | find | filter | tabs | diagnostics
 //! ```
 
 use koda::app::App;
@@ -88,6 +88,25 @@ fn main() {
             let path = std::env::temp_dir().join("koda-preview-empty.rs");
             std::fs::write(&path, "").unwrap();
             App::new(Some(&path)).expect("app")
+        }
+        "diagnostics" => {
+            let path = std::env::temp_dir().join("koda-preview-diagnostics.rs");
+            std::fs::write(
+                &path,
+                "fn main() {\n    let values = [1, 2, 3;\n    println!(\"hi\");\n}\n",
+            )
+            .unwrap();
+            let mut app = App::new(Some(&path)).expect("app");
+            let text = app.editor.active_document().unwrap().buffer.text();
+            let language = app.editor.active_document().unwrap().buffer.language;
+            let diagnostics = app.language.provider(language).diagnostics(&text);
+            if let Some(doc) = app.editor.active_document_mut() {
+                doc.set_diagnostics_revision(1);
+                doc.apply_diagnostics(1, diagnostics);
+                doc.move_to(koda::editor::Position::new(1, 17));
+            }
+            app.clear_status();
+            app
         }
         _ => App::new(Some(&root)).expect("app"),
     };

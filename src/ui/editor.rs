@@ -12,6 +12,7 @@ use ratatui::widgets::Paragraph;
 
 use crate::app::overlay::Search;
 use crate::editor::{Document, Position};
+use crate::language::diagnostics::Severity;
 use crate::language::provider::{LanguageProvider, TokenKind};
 use crate::ui::{art, theme};
 
@@ -36,7 +37,9 @@ pub fn render(
     }
 
     let total_lines = doc.buffer.len_lines();
-    let gutter = (total_lines.max(1).to_string().len() + 1) as u16;
+    // One column for the diagnostic marker, the widest line number, and a gap.
+    let number_width = total_lines.max(1).to_string().len();
+    let gutter = (number_width + 2) as u16;
     let text_width = area.width.saturating_sub(gutter) as usize;
     if text_width == 0 {
         return;
@@ -133,6 +136,31 @@ fn render_line(
         }
     }
 
+    // Diagnostics overlay per original character (rendered as an underline).
+    let mut diagnostic_severity: Vec<Option<Severity>> = vec![None; char_count];
+    for diagnostic in doc.diagnostics() {
+        if row < diagnostic.start.line || row > diagnostic.end.line {
+            continue;
+        }
+        let from = if row == diagnostic.start.line {
+            diagnostic.start.col
+        } else {
+            0
+        };
+        let to = if row == diagnostic.end.line {
+            diagnostic.end.col
+        } else {
+            char_count
+        };
+        for slot in diagnostic_severity
+            .iter_mut()
+            .take(to.min(char_count))
+            .skip(from)
+        {
+            *slot = Some(diagnostic.severity);
+        }
+    }
+
     // Selection and search overlays per original character.
     let mut selected = vec![false; char_count];
     if let Some((from, to)) = selection_columns(doc, row) {
@@ -164,14 +192,24 @@ fn render_line(
     let start = doc.scroll_left.min(layout.len);
     let end = (start + text_width).min(layout.len);
 
-    let mut spans: Vec<Span> = Vec::new();
+    let marker_severity = doc.diagnostic_severity_on_line(row);
     let gutter_style = if current {
         theme::accent_bold()
     } else {
         theme::dim()
     };
+    let marker_style = match marker_severity {
+        Some(severity) => with_bg(severity_style(severity), base_bg),
+        None => with_bg(gutter_style, base_bg),
+    };
+    let marker = marker_severity.map(Severity::gutter).unwrap_or(' ');
+    let mut spans: Vec<Span> = vec![Span::styled(marker.to_string(), marker_style)];
     spans.push(Span::styled(
-        format!("{:>width$} ", row + 1, width = gutter as usize - 1),
+        format!(
+            "{:>width$} ",
+            row + 1,
+            width = gutter.saturating_sub(2) as usize
+        ),
         with_bg(gutter_style, base_bg),
     ));
 
@@ -189,6 +227,12 @@ fn render_line(
             style = theme::dim();
         }
         style = with_bg(style, base_bg);
+        if diagnostic_severity
+            .get(original)
+            .is_some_and(|slot| slot.is_some())
+        {
+            style = style.add_modifier(Modifier::UNDERLINED);
+        }
         if let Some((open, close)) = brackets
             && ((open.row == row && open.col == original)
                 || (close.row == row && close.col == original))
@@ -236,6 +280,16 @@ fn with_bg(style: Style, bg: Option<Color>) -> Style {
     match bg {
         Some(color) => style.bg(color),
         None => style,
+    }
+}
+
+/// Foreground style for a diagnostic severity.
+fn severity_style(severity: Severity) -> Style {
+    match severity {
+        Severity::Error => theme::error(),
+        Severity::Warning => theme::warn(),
+        Severity::Info => theme::info(),
+        Severity::Hint => theme::dim(),
     }
 }
 

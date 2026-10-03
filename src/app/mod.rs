@@ -17,6 +17,7 @@ use crate::background::{Background, Event as BackgroundEvent};
 use crate::commands::{Command, CommandRegistry, ids};
 use crate::editor::{Document, Editor, Position, Selection};
 use crate::filesystem;
+use crate::language::diagnostics::Severity;
 use crate::language::{Capability, LanguageId, LanguageService};
 use crate::project::Workspace;
 use crate::terminal;
@@ -24,6 +25,10 @@ use crate::ui;
 use overlay::{
     Overlay, Picker, PickerAction, PickerItem, Prompt, PromptKind, Search, SearchField, TreeFilter,
 };
+
+/// How long typing must pause before diagnostics are recomputed. Short enough to
+/// feel immediate, long enough not to reanalyse on every keystroke.
+const DIAGNOSTICS_DEBOUNCE: Duration = Duration::from_millis(150);
 
 /// Which surface receives keyboard input when no overlay is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +67,10 @@ pub struct App {
     quit_armed: bool,
     /// Tab index armed for a forced close (dirty, first Ctrl+W).
     close_armed: Option<usize>,
+    /// Monotonic id for diagnostics requests.
+    diagnostics_seq: u64,
+    /// When set, diagnostics should be recomputed once typing pauses.
+    diagnostics_dirty_at: Option<Instant>,
 }
 
 impl App {
@@ -98,6 +107,8 @@ impl App {
             should_quit: false,
             quit_armed: false,
             close_armed: None,
+            diagnostics_seq: 0,
+            diagnostics_dirty_at: None,
         };
 
         if let Some(path) = target
@@ -118,6 +129,7 @@ impl App {
             // Only repaint when something changed: input arrived, background
             // work completed, a status message expired, or the terminal was
             // resized. An idle Koda does no work at all.
+            self.poll_diagnostics();
             let background_changed = self.apply_background_events();
             if needs_redraw || background_changed || self.tick_status() {
                 terminal.draw(|frame| ui::render(frame, self))?;
@@ -169,6 +181,10 @@ impl App {
     fn handle_global_key(&mut self, key: KeyEvent) -> bool {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        if key.code == KeyCode::F(8) {
+            self.goto_diagnostic(if shift { -1 } else { 1 });
+            return true;
+        }
         if !ctrl {
             return false;
         }
@@ -537,6 +553,9 @@ impl App {
             | ids::SHOW_SYMBOLS
             | ids::RENAME
             | ids::CODE_ACTIONS => self.report_language_capability(id),
+            ids::DIAGNOSTICS_NEXT => self.goto_diagnostic(1),
+            ids::DIAGNOSTICS_PREV => self.goto_diagnostic(-1),
+            ids::DIAGNOSTICS_LIST => self.open_diagnostics_list(),
             _ => {}
         }
     }
@@ -545,6 +564,7 @@ impl App {
         match action {
             PickerAction::Command(id) => self.execute_command(id),
             PickerAction::OpenPath(path) => self.open_path(path),
+            PickerAction::Reveal { path, position } => self.reveal(path, position),
         }
     }
 
@@ -595,6 +615,18 @@ impl App {
     fn after_edit(&mut self) {
         if self.search.open {
             self.refresh_search_matches();
+        }
+        self.schedule_diagnostics();
+    }
+
+    /// Queue a diagnostics recompute when the active document changed.
+    fn schedule_diagnostics(&mut self) {
+        if self
+            .editor
+            .active_document()
+            .is_some_and(|doc| doc.diagnostics_dirty())
+        {
+            self.diagnostics_dirty_at = Some(Instant::now());
         }
     }
 
@@ -885,16 +917,193 @@ impl App {
                     .iter_mut()
                     .find(|doc| same_file(doc.buffer.path.as_deref(), &path))
                 {
+                    let changed = doc.buffer.language != language;
                     doc.set_language(language);
-                    return true;
+                    if changed {
+                        // The provider changed, so any earlier analysis is void:
+                        // reset the revision to force a fresh first pass.
+                        doc.clear_diagnostics();
+                        doc.set_diagnostics_revision(0);
+                    }
+                    return changed;
                 }
                 false
             }
+            BackgroundEvent::Diagnostics {
+                path,
+                revision,
+                diagnostics,
+            } => self
+                .editor
+                .documents
+                .iter_mut()
+                .find(|doc| same_file(doc.buffer.path.as_deref(), &path))
+                .is_some_and(|doc| doc.apply_diagnostics(revision, diagnostics)),
             BackgroundEvent::Git(info) => {
                 self.workspace.git = info;
                 true
             }
         }
+    }
+
+    // ----------------------------------------------------------------------
+    // Diagnostics
+    // ----------------------------------------------------------------------
+
+    /// Dispatch a debounced recompute once typing pauses, or run the first pass
+    /// for a document that has not been analysed yet.
+    fn poll_diagnostics(&mut self) {
+        if let Some(at) = self.diagnostics_dirty_at
+            && at.elapsed() >= DIAGNOSTICS_DEBOUNCE
+        {
+            self.diagnostics_dirty_at = None;
+            self.dispatch_diagnostics();
+            return;
+        }
+
+        let needs_first_pass = self.editor.active_document().is_some_and(|doc| {
+            doc.diagnostics_revision() == 0
+                && self
+                    .language
+                    .provider(doc.buffer.language)
+                    .capabilities()
+                    .contains(&Capability::Diagnostics)
+        });
+        if needs_first_pass {
+            self.dispatch_diagnostics();
+        }
+    }
+
+    /// Send the active document's text to the background worker for analysis.
+    fn dispatch_diagnostics(&mut self) {
+        let (path, language) = match self.editor.active_document() {
+            Some(doc) => (doc.buffer.path.clone(), doc.buffer.language),
+            None => return,
+        };
+        let supported = self
+            .language
+            .provider(language)
+            .capabilities()
+            .contains(&Capability::Diagnostics);
+
+        self.diagnostics_seq += 1;
+        let revision = self.diagnostics_seq;
+        if let Some(doc) = self.editor.active_document_mut() {
+            doc.set_diagnostics_revision(revision);
+        }
+
+        // Unsupported languages are marked analysed so we do not retry forever.
+        if !supported {
+            return;
+        }
+        let Some(path) = path else {
+            return;
+        };
+        let text = self
+            .editor
+            .active_document()
+            .map(|doc| doc.buffer.text())
+            .unwrap_or_default();
+        self.background.diagnose(path, language, text, revision);
+    }
+
+    /// Jump to the next (`direction > 0`) or previous diagnostic, wrapping.
+    fn goto_diagnostic(&mut self, direction: i32) {
+        let Some(doc) = self.editor.active_document() else {
+            return;
+        };
+        if doc.diagnostics().is_empty() {
+            self.set_status("No diagnostics");
+            return;
+        }
+        let cursor = doc.clamped_cursor();
+        let targets: Vec<Position> = doc
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| Position::new(diagnostic.start.line, diagnostic.start.col))
+            .collect();
+        let target = if direction >= 0 {
+            targets
+                .iter()
+                .copied()
+                .find(|position| *position > cursor)
+                .unwrap_or(targets[0])
+        } else {
+            targets
+                .iter()
+                .copied()
+                .rev()
+                .find(|position| *position < cursor)
+                .unwrap_or_else(|| *targets.last().expect("non-empty"))
+        };
+
+        let center = self.viewport_height / 2;
+        self.with_doc(|doc| {
+            doc.move_to(target);
+            doc.scroll_top = target.row.saturating_sub(center);
+        });
+
+        let message = self.editor.active_document().and_then(|doc| {
+            doc.diagnostics()
+                .iter()
+                .find(|diagnostic| {
+                    diagnostic.start.line == target.row && diagnostic.start.col == target.col
+                })
+                .map(|diagnostic| (diagnostic.severity, diagnostic.message.clone()))
+        });
+        if let Some((severity, message)) = message {
+            let text = format!("{}: {message}", severity.label());
+            if severity == Severity::Error {
+                self.set_error(text);
+            } else {
+                self.set_status(text);
+            }
+        }
+    }
+
+    /// List every diagnostic across open files, jumping on selection.
+    fn open_diagnostics_list(&mut self) {
+        let mut items = Vec::new();
+        for doc in &self.editor.documents {
+            let Some(path) = doc.buffer.path.clone() else {
+                continue;
+            };
+            let file = doc.file_name();
+            for diagnostic in doc.diagnostics() {
+                let position = Position::new(diagnostic.start.line, diagnostic.start.col);
+                let detail = format!(
+                    "{file}:{}:{}  ·  {}",
+                    diagnostic.start.line + 1,
+                    diagnostic.start.col + 1,
+                    diagnostic.severity.label()
+                );
+                items.push(PickerItem::new(
+                    diagnostic.message.clone(),
+                    detail,
+                    PickerAction::Reveal {
+                        path: path.clone(),
+                        position,
+                    },
+                ));
+            }
+        }
+        if items.is_empty() {
+            self.set_status("No diagnostics");
+            return;
+        }
+        let mut picker = Picker::new("Diagnostics", "Filter problems…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+    }
+
+    /// Open `path` and place the cursor at `position`, centred in the viewport.
+    fn reveal(&mut self, path: PathBuf, position: Position) {
+        self.open_path(path);
+        let center = self.viewport_height / 2;
+        self.with_doc(|doc| {
+            doc.move_to(position);
+            doc.scroll_top = position.row.saturating_sub(center);
+        });
     }
 
     /// Wait up to `timeout` for startup background work to settle.
@@ -1034,6 +1243,7 @@ impl App {
             doc.replace_range(start, end, &replacement);
         }
         self.refresh_search_matches();
+        self.schedule_diagnostics();
         let next = current.min(self.search.matches.len().saturating_sub(1));
         self.jump_to_match(next);
     }
@@ -1103,6 +1313,20 @@ impl App {
             }
             ids::CLOSE_TAB | ids::CLOSE_ALL | ids::SAVE_ALL if self.editor.is_empty() => {
                 (false, Some("no files open".to_string()))
+            }
+            ids::DIAGNOSTICS_NEXT | ids::DIAGNOSTICS_PREV
+                if !document.is_some_and(|doc| !doc.diagnostics().is_empty()) =>
+            {
+                (false, Some("no diagnostics".to_string()))
+            }
+            ids::DIAGNOSTICS_LIST
+                if !self
+                    .editor
+                    .documents
+                    .iter()
+                    .any(|doc| !doc.diagnostics().is_empty()) =>
+            {
+                (false, Some("no diagnostics".to_string()))
             }
             _ => (true, None),
         }
@@ -1248,6 +1472,13 @@ impl App {
             return true;
         }
         false
+    }
+
+    /// Clear any transient status message.
+    pub fn clear_status(&mut self) {
+        self.status.message.clear();
+        self.status.error = false;
+        self.status.expires_at = None;
     }
 
     /// The message shown in the status bar.
@@ -1465,6 +1696,83 @@ mod tests {
         app.execute_command(ids::FIND);
         assert_eq!(app.search.query, "fn");
         assert!(!app.search.matches.is_empty());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Spin the background channel until the active document has diagnostics.
+    fn wait_for_diagnostics(app: &mut App) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            app.apply_background_events();
+            if app
+                .editor
+                .active_document()
+                .is_some_and(|doc| !doc.diagnostics().is_empty())
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn diagnostics_are_computed_in_the_background() {
+        let dir = temp_project("diagnostics");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main() {\n    let x = 1;\n").unwrap();
+
+        let mut app = App::new(Some(&file)).unwrap();
+        assert_eq!(
+            app.editor.active_document().unwrap().buffer.language,
+            LanguageId::Rust
+        );
+        app.poll_diagnostics();
+        wait_for_diagnostics(&mut app);
+
+        let doc = app.editor.active_document().unwrap();
+        assert!(
+            !doc.diagnostics().is_empty(),
+            "expected an unclosed-brace diagnostic"
+        );
+        assert_eq!(doc.diagnostic_counts().0, 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn next_diagnostic_moves_the_cursor() {
+        let dir = temp_project("diagnostics-next");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main() {\n    let x = 1;\n").unwrap();
+
+        let mut app = App::new(Some(&file)).unwrap();
+        app.poll_diagnostics();
+        wait_for_diagnostics(&mut app);
+        app.editor
+            .active_document_mut()
+            .unwrap()
+            .move_to(Position::new(0, 0));
+
+        app.execute_command(ids::DIAGNOSTICS_NEXT);
+        let cursor = app.editor.active_document().unwrap().clamped_cursor();
+        assert_eq!(cursor, Position::new(0, 10));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn diagnostics_list_opens_when_there_are_problems() {
+        let dir = temp_project("diagnostics-list");
+        let file = dir.join("src/main.rs");
+        fs::write(&file, "fn main() {\n").unwrap();
+
+        let mut app = App::new(Some(&file)).unwrap();
+        app.poll_diagnostics();
+        wait_for_diagnostics(&mut app);
+
+        app.execute_command(ids::DIAGNOSTICS_LIST);
+        let Overlay::Picker(picker) = &app.overlay else {
+            panic!("expected the diagnostics list");
+        };
+        assert!(!picker.filtered.is_empty());
         fs::remove_dir_all(&dir).ok();
     }
 }

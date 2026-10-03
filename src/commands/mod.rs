@@ -39,6 +39,10 @@ pub mod ids {
     pub const RENAME: &str = "language.rename";
     pub const CODE_ACTIONS: &str = "language.codeActions";
 
+    pub const DIAGNOSTICS_NEXT: &str = "diagnostics.next";
+    pub const DIAGNOSTICS_PREV: &str = "diagnostics.previous";
+    pub const DIAGNOSTICS_LIST: &str = "diagnostics.list";
+
     pub const TOGGLE_TREE: &str = "view.toggleTree";
     pub const FOCUS_TREE: &str = "view.focusTree";
     pub const TOGGLE_HIDDEN: &str = "view.toggleHidden";
@@ -212,6 +216,25 @@ impl CommandRegistry {
                 .describes("Show quick fixes and refactors for the cursor")
                 .needs_doc()
                 .capability(Capability::CodeActions),
+            Command::new(
+                DIAGNOSTICS_NEXT,
+                "Next Diagnostic",
+                "Diagnostics",
+                Some("F8"),
+            )
+            .describes("Jump to the next problem in the file")
+            .needs_doc(),
+            Command::new(
+                DIAGNOSTICS_PREV,
+                "Previous Diagnostic",
+                "Diagnostics",
+                Some("Shift+F8"),
+            )
+            .describes("Jump to the previous problem in the file")
+            .needs_doc(),
+            Command::new(DIAGNOSTICS_LIST, "Show Diagnostics", "Diagnostics", None)
+                .describes("List every problem in open files")
+                .needs_doc(),
             Command::new(TOGGLE_TREE, "Toggle File Tree", "View", Some("Ctrl+B"))
                 .describes("Show or hide the project sidebar"),
             Command::new(

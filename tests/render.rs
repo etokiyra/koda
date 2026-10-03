@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 
 use koda::app::App;
 use koda::commands::ids;
+use koda::language::diagnostics::{Diagnostic, Severity, TextPos};
 use koda::ui::theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier};
 
 fn temp_project(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("koda-render-{name}-{}", std::process::id()));
@@ -258,6 +259,89 @@ fn statusline_shows_selection_size() {
     assert!(
         screen.contains("sel"),
         "the selection size should be visible:\n{screen}"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn gutter_and_statusline_show_diagnostics() {
+    let dir = temp_project("diagnostics-ui");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    {
+        let doc = app.editor.active_document_mut().unwrap();
+        doc.set_diagnostics_revision(1);
+        doc.apply_diagnostics(
+            1,
+            vec![Diagnostic::new(
+                TextPos::new(0, 10),
+                TextPos::new(0, 11),
+                Severity::Error,
+                "unclosed `{`; expected `}`",
+            )],
+        );
+        doc.move_to(koda::editor::Position::new(0, 10));
+    }
+    // Let the diagnostic message show instead of the transient "Opened" status.
+    app.clear_status();
+
+    let screen = draw_at(&mut app, 100, 20);
+    assert!(
+        screen.contains('●'),
+        "the gutter should mark the error:\n{screen}"
+    );
+    assert!(
+        screen.contains("1✖"),
+        "the statusline should count the error:\n{screen}"
+    );
+    assert!(
+        screen.contains("unclosed"),
+        "the statusline should explain the problem under the cursor:\n{screen}"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn diagnostics_underline_the_affected_characters() {
+    let dir = temp_project("diagnostics-underline");
+    let file = dir.join("src/main.rs");
+    let mut app = App::new(Some(&file)).unwrap();
+    {
+        let doc = app.editor.active_document_mut().unwrap();
+        doc.set_diagnostics_revision(1);
+        doc.apply_diagnostics(
+            1,
+            vec![Diagnostic::new(
+                TextPos::new(0, 0),
+                TextPos::new(0, 2),
+                Severity::Error,
+                "bad",
+            )],
+        );
+    }
+
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| koda::ui::render(frame, &mut app))
+        .unwrap();
+
+    // Collect every underlined grapheme; the diagnostic covers `fn`.
+    let buffer = terminal.backend().buffer();
+    let mut underlined = Vec::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            if let Some(cell) = buffer.cell((x, y))
+                && cell.modifier.contains(Modifier::UNDERLINED)
+            {
+                underlined.push(cell.symbol().to_string());
+            }
+        }
+    }
+    assert_eq!(
+        underlined,
+        vec!["f".to_string(), "n".to_string()],
+        "diagnostic text should be underlined"
     );
     cleanup(&dir);
 }

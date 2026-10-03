@@ -5,6 +5,7 @@
 //! need to know it exists.
 
 use crate::language::detection::LanguageDescriptor;
+use crate::language::diagnostics::Diagnostic;
 use crate::language::id::LanguageId;
 use crate::language::provider::{
     Capability, HighlightSpan, HighlightState, LanguageProvider, TokenKind,
@@ -92,7 +93,11 @@ impl LanguageProvider for GoProvider {
     }
 
     fn capabilities(&self) -> &'static [Capability] {
-        &[Capability::SyntaxHighlighting]
+        &[Capability::SyntaxHighlighting, Capability::Diagnostics]
+    }
+
+    fn diagnostics(&self, text: &str) -> Vec<Diagnostic> {
+        crate::language::diagnostics::check_delimiters(self, text)
     }
 
     fn line_comment(&self) -> &'static str {

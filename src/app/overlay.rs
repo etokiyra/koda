@@ -9,6 +9,11 @@ use crate::editor::Position;
 pub enum PickerAction {
     Command(&'static str),
     OpenPath(PathBuf),
+    /// Open a file and place the cursor at a position (diagnostics, symbols).
+    Reveal {
+        path: PathBuf,
+        position: Position,
+    },
 }
 
 /// A single row in a picker.

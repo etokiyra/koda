@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use crate::language::detection::LanguageDescriptor;
+use crate::language::diagnostics::Diagnostic;
 use crate::language::id::LanguageId;
 
 /// A feature a provider may offer.
@@ -97,6 +98,14 @@ pub trait LanguageProvider: Send + Sync {
     ///
     /// Returns the spans for this line and the state to carry into the next one.
     fn highlight(&self, line: &str, state: HighlightState) -> (Vec<HighlightSpan>, HighlightState);
+
+    /// Diagnostics for a whole document.
+    ///
+    /// Providers that cannot analyse need not override this; returning nothing
+    /// simply means the provider contributes no diagnostics.
+    fn diagnostics(&self, _text: &str) -> Vec<Diagnostic> {
+        Vec::new()
+    }
 
     /// The comment marker used by "toggle comment" and friends.
     fn line_comment(&self) -> &'static str {

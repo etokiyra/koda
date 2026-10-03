@@ -17,12 +17,20 @@ use std::time::Duration;
 use crate::git::GitInfo;
 use crate::language::LanguageService;
 use crate::language::detection::Confidence;
+use crate::language::diagnostics::Diagnostic;
 use crate::language::id::LanguageId;
 
 /// Work sent to the background thread.
 enum Request {
     /// Detect the language of a file within a project.
     Detect { path: PathBuf, markers: Vec<String> },
+    /// Compute diagnostics for a document snapshot.
+    Diagnostics {
+        path: PathBuf,
+        language: LanguageId,
+        text: String,
+        revision: u64,
+    },
     /// Recompute git status for a repository root.
     RefreshGit { root: PathBuf },
 }
@@ -33,6 +41,11 @@ pub enum Event {
         path: PathBuf,
         language: LanguageId,
         confidence: Confidence,
+    },
+    Diagnostics {
+        path: PathBuf,
+        revision: u64,
+        diagnostics: Vec<Diagnostic>,
     },
     Git(GitInfo),
 }
@@ -62,6 +75,19 @@ impl Background {
                                 confidence: result.confidence,
                             });
                         }
+                        Request::Diagnostics {
+                            path,
+                            language: id,
+                            text,
+                            revision,
+                        } => {
+                            let diagnostics = language.provider(id).diagnostics(&text);
+                            let _ = event_tx.send(Event::Diagnostics {
+                                path,
+                                revision,
+                                diagnostics,
+                            });
+                        }
                         Request::RefreshGit { root } => {
                             let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
                         }
@@ -78,6 +104,18 @@ impl Background {
     /// Ask for a file's language to be detected.
     pub fn detect(&self, path: PathBuf, markers: Vec<String>) {
         let _ = self.requests.send(Request::Detect { path, markers });
+    }
+
+    /// Ask for diagnostics on a document snapshot.
+    ///
+    /// `revision` lets the app discard results that arrive out of order.
+    pub fn diagnose(&self, path: PathBuf, language: LanguageId, text: String, revision: u64) {
+        let _ = self.requests.send(Request::Diagnostics {
+            path,
+            language,
+            text,
+            revision,
+        });
     }
 
     /// Ask for git status to be refreshed.

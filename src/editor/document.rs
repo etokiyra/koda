@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::editor::buffer::{Buffer, LineEnding};
 use crate::editor::history::{Coalesce, Edit, History};
 use crate::editor::position::{Position, Selection};
+use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::id::LanguageId;
 use crate::language::provider::{HighlightSpan, HighlightState, LanguageProvider, TokenKind};
 
@@ -26,6 +27,13 @@ pub struct Document {
     history: History,
     highlight_states: Vec<HighlightState>,
     highlight_computed: usize,
+    /// Diagnostics from the provider, sorted by position.
+    diagnostics: Vec<Diagnostic>,
+    /// Revision of the most recent diagnostics request for this document. Used
+    /// to drop results that arrive after a newer request.
+    diagnostics_revision: u64,
+    /// Whether the text changed since diagnostics were last requested.
+    diagnostics_dirty: bool,
 }
 
 impl Document {
@@ -40,6 +48,9 @@ impl Document {
             history: History::default(),
             highlight_states: vec![HighlightState::default()],
             highlight_computed: 1,
+            diagnostics: Vec::new(),
+            diagnostics_revision: 0,
+            diagnostics_dirty: false,
         }
     }
 
@@ -64,6 +75,73 @@ impl Document {
 
     pub fn mark_clean(&mut self) {
         self.buffer.mark_clean();
+    }
+
+    // ----------------------------------------------------------------------
+    // Diagnostics
+    // ----------------------------------------------------------------------
+
+    /// The diagnostics currently attached to this document.
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+
+    /// The revision of the most recent diagnostics request for this document.
+    pub fn diagnostics_revision(&self) -> u64 {
+        self.diagnostics_revision
+    }
+
+    /// Whether the text has changed since diagnostics were last requested.
+    pub fn diagnostics_dirty(&self) -> bool {
+        self.diagnostics_dirty
+    }
+
+    /// Record that a diagnostics request with `revision` was dispatched. The
+    /// pending edit, if any, is considered handled.
+    pub fn set_diagnostics_revision(&mut self, revision: u64) {
+        self.diagnostics_revision = revision;
+        self.diagnostics_dirty = false;
+    }
+
+    /// Replace the diagnostics if `revision` is still the newest request.
+    ///
+    /// Results computed from an older snapshot are ignored so markers never
+    /// reflect text that has since changed.
+    pub fn apply_diagnostics(&mut self, revision: u64, mut diagnostics: Vec<Diagnostic>) -> bool {
+        if revision != self.diagnostics_revision {
+            return false;
+        }
+        diagnostics.sort_by_key(|diagnostic| (diagnostic.start.line, diagnostic.start.col));
+        self.diagnostics = diagnostics;
+        true
+    }
+
+    /// Discard diagnostics, e.g. because the document just changed.
+    pub fn clear_diagnostics(&mut self) {
+        self.diagnostics.clear();
+    }
+
+    /// Number of `(errors, warnings)`; other severities are not counted.
+    pub fn diagnostic_counts(&self) -> (usize, usize) {
+        let mut errors = 0;
+        let mut warnings = 0;
+        for diagnostic in &self.diagnostics {
+            match diagnostic.severity {
+                Severity::Error => errors += 1,
+                Severity::Warning => warnings += 1,
+                _ => {}
+            }
+        }
+        (errors, warnings)
+    }
+
+    /// The most severe diagnostic that *starts* on `row`, for the gutter marker.
+    pub fn diagnostic_severity_on_line(&self, row: usize) -> Option<Severity> {
+        self.diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.start.line == row)
+            .map(|diagnostic| diagnostic.severity)
+            .max()
     }
 
     // ----------------------------------------------------------------------
@@ -119,6 +197,9 @@ impl Document {
         self.preferred_col = None;
         self.buffer.mark_dirty();
         self.invalidate_highlight(a.row);
+        // Diagnostics describe the previous text; drop them until recomputed.
+        self.diagnostics.clear();
+        self.diagnostics_dirty = true;
     }
 
     /// Replace the text between `start` and `end` with `text`, as a single edit.
@@ -433,6 +514,8 @@ impl Document {
             self.preferred_col = None;
             self.invalidate_highlight(self.cursor.row);
             self.buffer.mark_dirty();
+            self.diagnostics.clear();
+            self.diagnostics_dirty = true;
         }
     }
 
@@ -451,6 +534,8 @@ impl Document {
             self.preferred_col = None;
             self.invalidate_highlight(self.cursor.row);
             self.buffer.mark_dirty();
+            self.diagnostics.clear();
+            self.diagnostics_dirty = true;
         }
     }
 
@@ -901,6 +986,7 @@ fn is_word_char(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::language::diagnostics::TextPos;
 
     fn doc(text: &str) -> Document {
         Document::new(Buffer::from_text(text, None))
@@ -1109,5 +1195,47 @@ mod tests {
         d.duplicate_line();
         assert_eq!(d.buffer.text(), "a\na\nb");
         assert_eq!(d.cursor.row, 1);
+    }
+
+    #[test]
+    fn diagnostics_apply_and_reject_stale_results() {
+        let mut d = doc("fn main() {\n");
+        let diagnostic = Diagnostic::new(
+            TextPos::new(0, 10),
+            TextPos::new(0, 11),
+            Severity::Error,
+            "unclosed `{`",
+        );
+
+        d.set_diagnostics_revision(2);
+        assert!(d.apply_diagnostics(2, vec![diagnostic.clone()]));
+        assert_eq!(d.diagnostics().len(), 1);
+        assert_eq!(d.diagnostic_counts(), (1, 0));
+        assert_eq!(d.diagnostic_severity_on_line(0), Some(Severity::Error));
+        assert_eq!(d.diagnostic_severity_on_line(1), None);
+
+        // A result from an older request must not replace the current one.
+        assert!(!d.apply_diagnostics(1, vec![diagnostic]));
+    }
+
+    #[test]
+    fn editing_clears_diagnostics_and_marks_them_dirty() {
+        let mut d = doc("fn main() {\n");
+        d.set_diagnostics_revision(1);
+        d.apply_diagnostics(
+            1,
+            vec![Diagnostic::new(
+                TextPos::new(0, 10),
+                TextPos::new(0, 11),
+                Severity::Error,
+                "unclosed `{`",
+            )],
+        );
+        assert!(!d.diagnostics().is_empty());
+        assert!(!d.diagnostics_dirty());
+
+        d.insert_text("// hi\n");
+        assert!(d.diagnostics().is_empty());
+        assert!(d.diagnostics_dirty());
     }
 }

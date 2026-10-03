@@ -5,6 +5,7 @@
 //! readable code and stays fast and maintainable.
 
 use crate::language::detection::LanguageDescriptor;
+use crate::language::diagnostics::Diagnostic;
 use crate::language::id::LanguageId;
 use crate::language::provider::{
     Capability, HighlightSpan, HighlightState, LanguageProvider, TokenKind,
@@ -48,9 +49,11 @@ impl LanguageProvider for RustProvider {
     }
 
     fn capabilities(&self) -> &'static [Capability] {
-        // Only highlighting is implemented today. The rest are declared by the
-        // architecture and will light up as providers gain language intelligence.
-        &[Capability::SyntaxHighlighting]
+        &[Capability::SyntaxHighlighting, Capability::Diagnostics]
+    }
+
+    fn diagnostics(&self, text: &str) -> Vec<Diagnostic> {
+        crate::language::diagnostics::check_delimiters(self, text)
     }
 
     fn line_comment(&self) -> &'static str {

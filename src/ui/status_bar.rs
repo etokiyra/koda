@@ -5,12 +5,13 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::app::App;
 use crate::language::LanguageId;
+use crate::language::diagnostics::{Severity, TextPos};
 use crate::ui::{art, theme};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -48,6 +49,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             spans.push(Span::styled(
                 label,
                 Style::default().fg(theme::ACCENT).bg(theme::PANEL_BG),
+            ));
+        }
+
+        // Diagnostics: keep errors loud, warnings present, both compact.
+        let (errors, warnings) = doc.diagnostic_counts();
+        if errors > 0 {
+            spans.push(Span::styled(
+                format!("  {errors}✖"),
+                Style::default().fg(theme::ERROR).bg(theme::PANEL_BG),
+            ));
+        }
+        if warnings > 0 {
+            spans.push(Span::styled(
+                format!("  {warnings}⚠"),
+                Style::default().fg(theme::WARN).bg(theme::PANEL_BG),
             ));
         }
 
@@ -89,22 +105,42 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     });
     let right_width = right.as_ref().map_or(0, |text| text.chars().count());
 
-    // Fit a status message into whatever space is left, truncating if needed.
-    if let Some(message) = app.status_message() {
-        let base_width: usize = spans.iter().map(|span| span.content.chars().count()).sum();
-        let budget = (area.width as usize).saturating_sub(base_width + right_width + 6);
-        if budget > 1 {
-            let color = if app.status.error {
+    // A transient status message wins; otherwise surface the diagnostic under
+    // the cursor so problems explain themselves as you move through the file.
+    let message = match app.status_message() {
+        Some(message) => Some((
+            message.to_string(),
+            if app.status.error {
                 theme::ERROR
             } else {
                 theme::ACCENT
-            };
+            },
+        )),
+        None => document
+            .and_then(|doc| {
+                let cursor = doc.clamped_cursor();
+                doc.diagnostics()
+                    .iter()
+                    .find(|diagnostic| diagnostic.covers(TextPos::new(cursor.row, cursor.col)))
+            })
+            .map(|diagnostic| {
+                (
+                    format!("{} {}", diagnostic.severity.gutter(), diagnostic.message),
+                    severity_color(diagnostic.severity),
+                )
+            }),
+    };
+
+    if let Some((text, color)) = message {
+        let base_width: usize = spans.iter().map(|span| span.content.chars().count()).sum();
+        let budget = (area.width as usize).saturating_sub(base_width + right_width + 6);
+        if budget > 1 {
             spans.push(Span::styled(
                 "  ·  ",
                 Style::default().fg(theme::FAINT).bg(theme::PANEL_BG),
             ));
             spans.push(Span::styled(
-                truncate(message, budget),
+                truncate(&text, budget),
                 Style::default().fg(color).bg(theme::PANEL_BG),
             ));
         }
@@ -130,4 +166,13 @@ fn truncate(text: &str, max: usize) -> String {
     let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
     out.push('…');
     out
+}
+
+fn severity_color(severity: Severity) -> Color {
+    match severity {
+        Severity::Error => theme::ERROR,
+        Severity::Warning => theme::WARN,
+        Severity::Info => theme::INFO,
+        Severity::Hint => theme::MUTED,
+    }
 }

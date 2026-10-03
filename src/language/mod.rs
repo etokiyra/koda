@@ -10,6 +10,7 @@
 //! neither half depends on the other.
 
 pub mod detection;
+pub mod diagnostics;
 pub mod go;
 pub mod id;
 pub mod provider;

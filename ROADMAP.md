@@ -48,8 +48,12 @@ The highest-value work. These turn Koda from an editor into an IDE.
       a request/event channel now runs language detection and git status off the
       UI thread; the event loop applies results as they arrive. Language
       intelligence will reuse this channel.
-- [ ] **Diagnostics pipeline.** Provider → diagnostics store → inline markers and
-      a diagnostics list.
+- [x] **Diagnostics pipeline (built-in).** Providers produce diagnostics that
+      flow through the background worker into the editor: gutter markers,
+      underlines, a statusline count, cursor messages, navigation (`F8`/
+      `Shift+F8`) and a diagnostics list. Rust and Go currently report lexical
+      structural problems; richer, compiler-backed diagnostics arrive with the
+      language-server backends below.
 - [ ] **Completion.** A completion popup driven by providers, with filtering and
       acceptance via `Tab`/`Enter`.
 - [ ] **Hover information.** Show type/docs for the symbol under the cursor.
@@ -75,7 +79,7 @@ command palette already reports which are available. Filling them in is additive
 - [ ] Indentation guides and a more complete tokenizer (strings, lifetimes,
       generics) for both providers.
 - [ ] Incremental search options (case sensitivity, whole word, regex).
-- [ ] Undo grouping for consecutive typing.
+- [x] Undo grouping for consecutive typing.
 - [ ] Soft wrap and a configurable tab width.
 - [ ] Persist cursor position, open tabs and expanded directories per project.
 - [ ] A kill-ring/registers model for copy/paste.

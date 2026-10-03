@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Language intelligence
+
+- Added provider-driven diagnostics. Rust and Go now perform a lexical
+  structural check (unbalanced brackets, ignoring strings and comments) and
+  declare the `Diagnostics` capability.
+- Diagnostics are computed on the background worker: editing clears stale
+  markers immediately and a fresh pass runs about 150 ms after typing pauses, so
+  results are always for the current text and never block the keystroke.
+- Problems surface as a gutter marker (error `●`, warning `▲`), an underline on
+  the affected characters, a statusline count (`2✖ 1⚠`), and — when the cursor
+  rests on one — its message in the statusline.
+- New commands: **Next Diagnostic** (`F8`), **Previous Diagnostic**
+  (`Shift+F8`) and **Show Diagnostics**, which lists every problem across open
+  files and jumps to the chosen one.
+
 ### Performance
 
 - Added a background worker thread. Language detection and git status now run
