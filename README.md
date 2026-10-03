@@ -85,7 +85,7 @@ keep you productive **offline**.
 
 - **Diagnostics** — gutter markers, underlines, a statusline count, `F8`/`Shift+F8`
   navigation, a diagnostics list, and an optional inline note at the end of the
-  affected line (**Toggle Inline Diagnostics**).
+  affected line (**Toggle Inline Diagnostics**, `Alt+I`).
 - **Completion** — appears automatically as you type and merges buffer
   identifiers, language keywords, and server candidates. Matching is fuzzy and
   prefix-biased, so `mrs` finds `main_result` while exact prefixes still rank
@@ -363,7 +363,8 @@ Koda reports what happened rather than deleting anything.
 | `Ctrl+Shift+G` | List the files changed in git |
 | `Space` (in changed files) | Stage / unstage the selected file |
 | `d` (in changed files) | Show the selected file's diff |
-| `Diff File` (palette) | Show the active file's unified diff |
+| `Alt+D` | Show the active file's unified diff |
+| `Alt+I` | Toggle inline diagnostic messages |
 | `Ctrl+Shift+M` | Show diagnostics |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |

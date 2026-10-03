@@ -403,6 +403,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Keymap
 
+- Added `Alt+D` **Diff File**, `Alt+I` **Toggle Inline Diagnostics** and `v`
+  (on the welcome screen) to cycle the scene. A keymap test now asserts that
+  every command id and every shortcut is unique, so future bindings cannot
+  silently collide.
 - Rebound **Go to Matching Bracket** from `Ctrl+M` to `Alt+M`: most terminals
   encode `Ctrl+M` as Enter, so the old binding was effectively unreachable
   (it still works on terminals with enhanced keyboard reporting).

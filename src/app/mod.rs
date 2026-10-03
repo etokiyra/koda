@@ -637,7 +637,7 @@ impl App {
             }
             return true;
         }
-        // Pane shortcuts work from any surface.
+        // Pane and view shortcuts work from any surface.
         if key.modifiers.contains(KeyModifiers::ALT) {
             match key.code {
                 KeyCode::Char('v') | KeyCode::Char('V') => {
@@ -646,6 +646,14 @@ impl App {
                 }
                 KeyCode::Char('o') | KeyCode::Char('O') => {
                     self.execute_command(ids::FOCUS_PANE);
+                    return true;
+                }
+                KeyCode::Char('d') | KeyCode::Char('D') => {
+                    self.execute_command(ids::DIFF);
+                    return true;
+                }
+                KeyCode::Char('i') | KeyCode::Char('I') => {
+                    self.execute_command(ids::TOGGLE_INLINE_DIAGNOSTICS);
                     return true;
                 }
                 _ => {}
@@ -6138,6 +6146,33 @@ mod tests {
         assert!(
             state.items.iter().any(|item| item.label == "value"),
             "the buffer identifier should be offered"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn alt_shortcuts_toggle_inline_diagnostics_and_diff() {
+        let dir = temp_project("alt-keys");
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+
+        let before = app.inline_diagnostics;
+        app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::ALT));
+        assert_ne!(
+            app.inline_diagnostics, before,
+            "Alt+I toggles inline diagnostics"
+        );
+
+        // Alt+D opens a diff; with no repository it explains itself but must not
+        // panic or open an overlay.
+        app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT));
+        assert!(app.overlay.is_none());
+        assert!(
+            app.status_message()
+                .unwrap_or("")
+                .contains("Not a git repository"),
+            "status was {:?}",
+            app.status_message()
         );
         fs::remove_dir_all(&dir).ok();
     }

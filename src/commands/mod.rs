@@ -356,7 +356,7 @@ impl CommandRegistry {
                 .describes("Stage all changes and commit with a message"),
             Command::new(GIT_TOGGLE_STAGE, "Stage / Unstage File", "Git", None)
                 .describes("Toggle the selected file in the git index"),
-            Command::new(DIFF, "Diff File", "Git", None)
+            Command::new(DIFF, "Diff File", "Git", Some("Alt+D"))
                 .describes("Show the unified diff for the active file"),
             Command::new(TOGGLE_TREE, "Toggle File Tree", "View", Some("Ctrl+B"))
                 .describes("Show or hide the project sidebar"),
@@ -373,7 +373,7 @@ impl CommandRegistry {
                 TOGGLE_INLINE_DIAGNOSTICS,
                 "Toggle Inline Diagnostics",
                 "View",
-                None,
+                Some("Alt+I"),
             )
             .describes("Show or hide diagnostic messages at the end of each line"),
             Command::new(REFRESH, "Refresh File Tree", "View", Some("F5"))
@@ -403,5 +403,49 @@ impl CommandRegistry {
 
     pub fn get(&self, id: &str) -> Option<&Command> {
         self.commands.iter().find(|c| c.id == id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn command_ids_and_shortcuts_are_unique() {
+        let registry = CommandRegistry::builtin();
+        let mut ids = HashSet::new();
+        let mut shortcuts = HashSet::new();
+        for command in registry.all() {
+            assert!(
+                ids.insert(command.id),
+                "duplicate command id {}",
+                command.id
+            );
+            if let Some(shortcut) = command.shortcut {
+                assert!(
+                    shortcuts.insert(shortcut),
+                    "duplicate shortcut {shortcut} on {}",
+                    command.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn core_commands_are_registered() {
+        let registry = CommandRegistry::builtin();
+        for id in [
+            ids::SAVE,
+            ids::SAVE_ALL,
+            ids::PALETTE,
+            ids::COMPLETE,
+            ids::GOTO_DEFINITION,
+            ids::FORMAT,
+            ids::DIFF,
+            ids::SETUP,
+        ] {
+            assert!(registry.get(id).is_some(), "missing command {id}");
+        }
     }
 }
