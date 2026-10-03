@@ -47,6 +47,20 @@ pub enum PositionEncoding {
     Utf32,
 }
 
+/// How a server wants documents synchronized, from `textDocumentSync`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextDocumentSyncKind {
+    /// The server asked for no document synchronization.
+    None,
+    /// The server accepts whole-document changes. Koda sends full text for both
+    /// this and `Incremental`, which the protocol permits as the safe fallback.
+    #[default]
+    Full,
+    /// The server prefers incremental changes; Koda still sends full text
+    /// (omitting `range`), which is a valid whole-document replacement.
+    Incremental,
+}
+
 /// The server features Koda knows how to use, from its `initialize` result.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct ServerCapabilities {
@@ -59,6 +73,7 @@ struct ServerCapabilities {
     workspace_symbol: bool,
     signature_help: bool,
     document_formatting: bool,
+    sync: TextDocumentSyncKind,
 }
 
 /// The LSP `languageId` string for a language.
@@ -361,6 +376,10 @@ impl Server {
 
     /// Notify the server that a document was opened.
     pub fn did_open(&mut self, path: &Path, text: &str) {
+        // A server that advertises no synchronization does not want documents.
+        if self.capabilities.sync == TextDocumentSyncKind::None {
+            return;
+        }
         let version = self.next_version(path);
         let _ = self.notify(
             "textDocument/didOpen",
@@ -549,7 +568,7 @@ impl Server {
         loop {
             match self.events.try_recv() {
                 Ok(Message::Response { id, result, error }) => {
-                    let id_number = id.as_i64().unwrap_or(-1);
+                    let id_number = jsonrpc::id_as_i64(&id).unwrap_or(-1);
                     if Some(id_number) == self.init_id {
                         self.init_id = None;
                         match error {
@@ -708,6 +727,7 @@ fn parse_initialize(result: &Value) -> (PositionEncoding, ServerCapabilities) {
             .get(name)
             .is_some_and(|value| !value.is_null() && value != &Value::Bool(false))
     };
+    let sync = parse_sync(capabilities.get("textDocumentSync"));
     (
         encoding,
         ServerCapabilities {
@@ -720,8 +740,28 @@ fn parse_initialize(result: &Value) -> (PositionEncoding, ServerCapabilities) {
             workspace_symbol: advertised("workspaceSymbolProvider"),
             signature_help: advertised("signatureHelpProvider"),
             document_formatting: advertised("documentFormattingProvider"),
+            sync,
         },
     )
+}
+
+/// Parse `textDocumentSync`, which the protocol defines as either a numeric
+/// `TextDocumentSyncKind` or an object carrying a `change` kind.
+///
+/// Koda has always sent whole-document changes; an omitted field keeps that
+/// behaviour (some servers rely on it), while an explicit `None` is honoured so
+/// such a server is not spammed with changes it does not want.
+fn parse_sync(value: Option<&Value>) -> TextDocumentSyncKind {
+    let kind = match value {
+        Some(Value::Number(number)) => number.as_u64(),
+        Some(object) => object.get("change").and_then(Value::as_u64),
+        None => return TextDocumentSyncKind::Full,
+    };
+    match kind {
+        Some(0) => TextDocumentSyncKind::None,
+        Some(2) => TextDocumentSyncKind::Incremental,
+        _ => TextDocumentSyncKind::Full,
+    }
 }
 
 fn parse_publish_diagnostics(params: &Value) -> Option<ServerEvent> {
@@ -842,9 +882,18 @@ pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
         decoded.push(bytes[index]);
         index += 1;
     }
-    Some(PathBuf::from(
-        String::from_utf8_lossy(&decoded).into_owned(),
-    ))
+    let mut decoded = String::from_utf8_lossy(&decoded).into_owned();
+    // `file:///C:/x` decodes to `/C:/x`; drop the leading slash so the path is
+    // usable on Windows. Harmless on other platforms, where no drive letter
+    // follows.
+    let bytes = decoded.as_bytes();
+    if bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':' {
+        decoded.remove(0);
+    }
+    if decoded.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(decoded))
 }
 
 #[cfg(test)]
@@ -857,6 +906,14 @@ mod tests {
         let uri = path_to_uri(&path);
         assert_eq!(uri, "file:///tmp/koda%20lsp/main.rs");
         assert_eq!(uri_to_path(&uri).as_deref(), Some(path.as_path()));
+    }
+
+    #[test]
+    fn decodes_windows_drive_uris() {
+        assert_eq!(
+            uri_to_path("file:///C:/tmp/a.rs"),
+            Some(PathBuf::from("C:/tmp/a.rs"))
+        );
     }
 
     #[test]
@@ -996,6 +1053,29 @@ cat >/dev/null
         assert!(!diagnostics_are_stale(Some(3), Some(2)), "newer is kept");
         assert!(!diagnostics_are_stale(None, Some(2)), "missing is kept");
         assert!(!diagnostics_are_stale(Some(1), None));
+    }
+
+    #[test]
+    fn parses_text_document_sync_forms() {
+        assert_eq!(parse_sync(Some(&json!(0))), TextDocumentSyncKind::None);
+        assert_eq!(parse_sync(Some(&json!(1))), TextDocumentSyncKind::Full);
+        assert_eq!(
+            parse_sync(Some(&json!(2))),
+            TextDocumentSyncKind::Incremental
+        );
+        assert_eq!(
+            parse_sync(Some(&json!({ "change": 0 }))),
+            TextDocumentSyncKind::None
+        );
+        assert_eq!(
+            parse_sync(Some(&json!({ "change": 2 }))),
+            TextDocumentSyncKind::Incremental
+        );
+        // An omitted field keeps Koda's long-standing full-text sync.
+        assert_eq!(parse_sync(None), TextDocumentSyncKind::Full);
+
+        let (_, caps) = parse_initialize(&json!({ "capabilities": { "textDocumentSync": 0 } }));
+        assert_eq!(caps.sync, TextDocumentSyncKind::None);
     }
 
     #[test]

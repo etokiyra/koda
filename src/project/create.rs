@@ -93,6 +93,12 @@ pub fn validate_name(name: &str) -> Result<(), String> {
     if trimmed.chars().any(|c| c == '\0' || c.is_control()) {
         return Err("A name cannot contain control characters".to_string());
     }
+    // The name is interpolated into generated source, shell scripts and HTML;
+    // reject characters that could break out of those contexts.
+    const UNSAFE: &[char] = &['"', '\\', '`', '$', '<', '>', '&'];
+    if let Some(bad) = trimmed.chars().find(|c| UNSAFE.contains(c)) {
+        return Err(format!("A name cannot contain `{bad}`"));
+    }
     if trimmed.chars().count() > 128 {
         return Err("That name is too long".to_string());
     }
@@ -435,6 +441,18 @@ mod tests {
         assert!(validate_name("nul").is_ok()); // only reserved on Windows
         assert!(validate_name("my project").is_ok());
         assert!(validate_name("プロジェクト").is_ok());
+    }
+
+    #[test]
+    fn rejects_names_unsafe_for_generated_files() {
+        // These characters would break out of the string literals or shell
+        // snippets the templates interpolate the name into.
+        for bad in ["a\"b", "a$b", "a`b", "<tag>", "a&b", "a\\b"] {
+            assert!(validate_name(bad).is_err(), "`{bad}` should be rejected");
+        }
+        // Ordinary punctuation and unicode remain allowed.
+        assert!(validate_name("my.project").is_ok());
+        assert!(validate_name("café-münchen").is_ok());
     }
 
     #[test]

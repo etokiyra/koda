@@ -157,7 +157,10 @@ fn read_rules(file: &Path, base: &Path, rules: &mut Vec<Rule>) {
         return;
     };
     for raw in text.lines() {
-        let line = raw.trim_end_matches('\r').trim();
+        // Trailing carriage returns and (unescaped) trailing spaces are
+        // insignificant, but leading whitespace is significant in git, so it is
+        // preserved rather than trimmed away.
+        let line = raw.trim_end_matches('\r').trim_end_matches(' ');
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
@@ -366,6 +369,18 @@ mod tests {
         let dir = project("comments", "# comment\n\n   \nreal\n");
         let matcher = Gitignore::load(&dir);
         assert_eq!(matcher.rules.len(), 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn leading_whitespace_in_a_pattern_is_significant() {
+        let dir = project("leading-space", " foo\n");
+        let matcher = Gitignore::load(&dir);
+        assert!(
+            ignored(&matcher, " foo", false),
+            "the leading space matches"
+        );
+        assert!(!ignored(&matcher, "foo", false), "`foo` is not ` foo`");
         fs::remove_dir_all(&dir).ok();
     }
 

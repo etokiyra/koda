@@ -35,6 +35,9 @@ pub const IGNORED_DIRS: &[&str] = &[
 ];
 
 /// Read a directory, sorted with directories first and then alphabetically.
+///
+/// Symlinks to directories are reported as directories (following the link)
+/// so they can be expanded; a symlink that cannot be resolved is a file.
 pub fn read_dir_sorted(path: &Path) -> std::io::Result<Vec<EntryInfo>> {
     let mut entries = Vec::new();
     for entry in std::fs::read_dir(path)? {
@@ -49,9 +52,9 @@ pub fn read_dir_sorted(path: &Path) -> std::io::Result<Vec<EntryInfo>> {
             Err(_) => continue,
         };
         entries.push(EntryInfo {
+            is_dir: file_type.is_dir() || (file_type.is_symlink() && entry.path().is_dir()),
             name,
             path: entry.path(),
-            is_dir: file_type.is_dir(),
         });
     }
     sort_entries(&mut entries);
@@ -200,11 +203,18 @@ pub fn collect_files(root: &Path, limit: usize) -> Vec<PathBuf> {
     let ignore = Gitignore::load(root);
     let mut files = Vec::new();
     let mut queue = std::collections::VecDeque::new();
+    let mut visited = std::collections::HashSet::new();
     queue.push_back(root.to_path_buf());
 
     while let Some(dir) = queue.pop_front() {
         if files.len() >= limit {
             break;
+        }
+        // Following symlinked directories must not loop forever; canonicalize
+        // and visit each real directory once.
+        let canonical = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+        if !visited.insert(canonical) {
+            continue;
         }
         let entries = match read_dir_sorted(&dir) {
             Ok(entries) => entries,
@@ -275,6 +285,43 @@ mod tests {
         // The destination is untouched.
         assert_eq!(fs::read_to_string(&existing).unwrap(), "b");
         assert_eq!(fs::read_to_string(&source).unwrap(), "a");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_directories_are_reported_as_directories() {
+        use std::os::unix::fs::symlink;
+        let dir = std::env::temp_dir().join(format!("koda-fs-symlink-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("real")).unwrap();
+        symlink(dir.join("real"), dir.join("link")).unwrap();
+
+        let entries = read_dir_sorted(&dir).unwrap();
+        let link = entries.iter().find(|entry| entry.name == "link").unwrap();
+        assert!(link.is_dir, "a symlink to a directory should be expandable");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn collect_files_does_not_follow_directory_cycles() {
+        use std::os::unix::fs::symlink;
+        let dir = std::env::temp_dir().join(format!("koda-fs-cycle-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        // `sub/loop` points back at the root.
+        symlink(&dir, dir.join("sub/loop")).unwrap();
+        fs::write(dir.join("sub/a.rs"), "").unwrap();
+
+        let files = collect_files(&dir, 100);
+        assert!(
+            files.iter().any(|path| path.ends_with("a.rs")),
+            "the real file is still found"
+        );
+        assert!(files.len() < 100, "the cycle terminates");
 
         fs::remove_dir_all(&dir).ok();
     }

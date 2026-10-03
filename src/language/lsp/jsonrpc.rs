@@ -4,9 +4,13 @@
 //! `Content-Length` header. This module is pure I/O with no process or thread
 //! concerns, so the tricky part — framing and decoding — is easy to test.
 
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 
 use serde_json::Value;
+
+/// The most header bytes Koda reads before a message body. A corrupt or
+/// non-LSP stream must not be able to grow a header line without bound.
+const MAX_HEADER_BYTES: usize = 16 * 1024;
 
 /// A JSON-RPC error object.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,13 +49,27 @@ pub fn write_message<W: Write>(writer: &mut W, message: &Value) -> io::Result<()
 /// Read one framed message, or `None` at end of stream.
 pub fn read_message<R: BufRead>(reader: &mut R) -> io::Result<Option<Value>> {
     let mut length = None;
-    let mut line = String::new();
+    let mut header_bytes = 0usize;
     loop {
-        line.clear();
-        if reader.read_line(&mut line)? == 0 {
+        let mut line = Vec::new();
+        // Bound each header line so a stream of garbage cannot allocate
+        // without bound before the body cap applies.
+        let read = reader
+            .by_ref()
+            .take(MAX_HEADER_BYTES as u64)
+            .read_until(b'\n', &mut line)?;
+        if read == 0 {
             return Ok(None);
         }
-        let header = line.trim_end_matches(['\r', '\n']);
+        header_bytes += read;
+        if header_bytes > MAX_HEADER_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "message header too large",
+            ));
+        }
+        let text = String::from_utf8_lossy(&line);
+        let header = text.trim_end_matches(['\r', '\n']);
         if header.is_empty() {
             break;
         }
@@ -78,6 +96,13 @@ pub fn read_message<R: BufRead>(reader: &mut R) -> io::Result<Option<Value>> {
     reader.read_exact(&mut body)?;
     let value: Value = serde_json::from_slice(&body).map_err(io::Error::other)?;
     Ok(Some(value))
+}
+
+/// A JSON-RPC id as an integer, accepting the numeric strings a non-conformant
+/// server might echo back.
+pub fn id_as_i64(id: &Value) -> Option<i64> {
+    id.as_i64()
+        .or_else(|| id.as_str().and_then(|text| text.parse::<i64>().ok()))
 }
 
 /// Classify a raw JSON value into a [`Message`].
@@ -203,5 +228,22 @@ mod tests {
         // Not a framed message, and no header follows; treat as EOF.
         let mut reader = Cursor::new(b"{\"id\":1}\n".to_vec());
         assert!(read_message(&mut reader).unwrap().is_none());
+    }
+
+    #[test]
+    fn rejects_an_oversized_header() {
+        // A stream of non-protocol bytes must not grow a header without bound.
+        let mut data = vec![b'x'; MAX_HEADER_BYTES + 10];
+        data.push(b'\n');
+        let mut reader = Cursor::new(data);
+        assert!(read_message(&mut reader).is_err());
+    }
+
+    #[test]
+    fn reads_integer_and_numeric_string_ids() {
+        assert_eq!(id_as_i64(&serde_json::json!(3)), Some(3));
+        assert_eq!(id_as_i64(&serde_json::json!("3")), Some(3));
+        assert_eq!(id_as_i64(&serde_json::json!("x")), None);
+        assert_eq!(id_as_i64(&serde_json::json!(null)), None);
     }
 }

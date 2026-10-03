@@ -34,11 +34,6 @@ impl Session {
 
     /// Write the session to `path`, creating parent directories.
     pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent)?;
-        }
         let value = json!({
             "files": self.files.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
             "active": self.active,
@@ -47,7 +42,7 @@ impl Session {
             "show_hidden": self.show_hidden,
         });
         let text = serde_json::to_string_pretty(&value).map_err(std::io::Error::other)?;
-        std::fs::write(path, text)
+        crate::filesystem::write_atomic(path, &text)
     }
 
     /// Read a session, returning `None` when it is missing or malformed.
@@ -58,14 +53,22 @@ impl Session {
     }
 
     fn from_value(value: &Value) -> Session {
+        let files = string_list(value.get("files"));
+        // Align cursors with files: a malformed entry must not shift every
+        // later cursor onto the wrong file.
+        let raw: Vec<Option<(usize, usize)>> = value
+            .get("cursors")
+            .and_then(Value::as_array)
+            .map(|items| items.iter().map(cursor_pair).collect())
+            .unwrap_or_default();
+        let cursors = (0..files.len())
+            .map(|index| raw.get(index).copied().flatten().unwrap_or((0, 0)))
+            .collect();
+        let active = value.get("active").and_then(Value::as_u64).unwrap_or(0) as usize;
         Session {
-            files: string_list(value.get("files")),
-            active: value.get("active").and_then(Value::as_u64).unwrap_or(0) as usize,
-            cursors: value
-                .get("cursors")
-                .and_then(Value::as_array)
-                .map(|items| items.iter().filter_map(cursor_pair).collect())
-                .unwrap_or_default(),
+            files,
+            active,
+            cursors,
             expanded: string_list(value.get("expanded")),
             show_hidden: value
                 .get("show_hidden")
@@ -150,6 +153,16 @@ mod tests {
             Session::load_from(Path::new("/nonexistent/koda/session.json")),
             None
         );
+    }
+
+    #[test]
+    fn malformed_cursors_stay_aligned_with_files() {
+        let value = serde_json::json!({
+            "files": ["/tmp/a.rs", "/tmp/b.rs", "/tmp/c.rs"],
+            "cursors": [[3, 4], "nonsense", [7, 8]]
+        });
+        let session = Session::from_value(&value);
+        assert_eq!(session.cursors, vec![(3, 4), (0, 0), (7, 8)]);
     }
 
     #[test]

@@ -48,17 +48,12 @@ impl Recent {
     }
 
     pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent)?;
-        }
         let value = json!({
             "projects": self.projects.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
             "files": self.files.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
         });
         let text = serde_json::to_string_pretty(&value).map_err(std::io::Error::other)?;
-        std::fs::write(path, text)
+        crate::filesystem::write_atomic(path, &text)
     }
 
     /// Record a project root, moving it to the front.

@@ -56,19 +56,42 @@ pub fn search_project(root: &Path, query: &str, limit: usize) -> Vec<SearchMatch
             if matches.len() >= limit {
                 break;
             }
-            let lower = line.to_lowercase();
-            let Some(byte_col) = lower.find(&needle) else {
+            let Some(byte) = find_case_insensitive(line, &needle) else {
                 continue;
             };
             matches.push(SearchMatch {
                 path: path.clone(),
                 line: row,
-                col: lower[..byte_col].chars().count(),
+                col: line[..byte].chars().count(),
                 text: line.trim().to_string(),
             });
         }
     }
     matches
+}
+
+/// Find `needle` (already lowercased) in `line`, ignoring case, and return its
+/// **byte offset in `line`**.
+///
+/// Lowercasing is not length-preserving (`İ` becomes `i` plus a combining
+/// dot), so the offset is mapped back to the original text rather than counted
+/// in the lowercased copy, which would report the wrong column.
+fn find_case_insensitive(line: &str, needle: &str) -> Option<usize> {
+    if needle.is_empty() {
+        return None;
+    }
+    let mut lower = String::with_capacity(line.len());
+    // For each byte of `lower`, the byte offset of the originating character.
+    let mut map = Vec::with_capacity(line.len() + 1);
+    for (origin, ch) in line.char_indices() {
+        for folded in ch.to_lowercase() {
+            map.extend(std::iter::repeat_n(origin, folded.len_utf8()));
+            lower.push(folded);
+        }
+    }
+    map.push(line.len());
+    let byte = lower.find(needle)?;
+    map.get(byte).copied()
 }
 
 #[cfg(test)]
@@ -95,6 +118,18 @@ mod tests {
         assert_eq!(matches[0].col, 8);
         assert!(matches[0].text.contains("let Name"));
 
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reports_columns_in_the_original_text() {
+        let dir = project("unicode-col");
+        // `İ` lowercases to two code points (`i` + combining dot), which used to
+        // push every later column off by one.
+        fs::write(dir.join("src/a.rs"), "İfoo\n").unwrap();
+        let matches = search_project(&dir, "foo", 10);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].col, 1, "column counted in the original line");
         fs::remove_dir_all(&dir).ok();
     }
 
