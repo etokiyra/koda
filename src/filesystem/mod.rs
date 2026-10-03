@@ -3,7 +3,11 @@
 //! All reads and writes funnel through here so the rest of Koda does not sprinkle
 //! `std::fs` calls around. Errors are surfaced rather than swallowed.
 
+pub mod gitignore;
+
 use std::path::{Path, PathBuf};
+
+use gitignore::Gitignore;
 
 /// A directory entry with just the metadata the UI needs.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -97,10 +101,12 @@ pub fn write_string(path: &Path, contents: &str) -> std::io::Result<()> {
     std::fs::write(path, contents)
 }
 
-/// Collect files under `root`, breadth-first, skipping ignored directories.
+/// Collect files under `root`, breadth-first, skipping ignored directories and
+/// anything hidden by the project's `.gitignore` rules.
 ///
 /// `limit` bounds the work so quick-open stays responsive even in huge trees.
 pub fn collect_files(root: &Path, limit: usize) -> Vec<PathBuf> {
+    let ignore = Gitignore::load(root);
     let mut files = Vec::new();
     let mut queue = std::collections::VecDeque::new();
     queue.push_back(root.to_path_buf());
@@ -121,11 +127,45 @@ pub fn collect_files(root: &Path, limit: usize) -> Vec<PathBuf> {
                 if entry.name.starts_with('.') || is_ignored_dir(&entry.name) {
                     continue;
                 }
+                if ignore.is_ignored(&entry.path, true) {
+                    continue;
+                }
                 queue.push_back(entry.path);
             } else if !entry.name.starts_with('.') {
+                if ignore.is_ignored(&entry.path, false) {
+                    continue;
+                }
                 files.push(entry.path);
             }
         }
     }
     files
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn collect_files_respects_gitignore() {
+        let dir = std::env::temp_dir().join(format!("koda-fs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::create_dir_all(dir.join("build_out")).unwrap();
+        fs::write(dir.join(".gitignore"), "build_out/\n").unwrap();
+        fs::write(dir.join("src/lib.rs"), "").unwrap();
+        fs::write(dir.join("build_out/gen.rs"), "").unwrap();
+
+        let files = collect_files(&dir, 100);
+        let names: Vec<String> = files
+            .iter()
+            .filter_map(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .collect();
+        assert!(names.iter().any(|name| name == "lib.rs"));
+        assert!(!names.iter().any(|name| name == "gen.rs"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
 }

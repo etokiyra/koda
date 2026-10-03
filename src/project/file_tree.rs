@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use crate::filesystem::gitignore::Gitignore;
 use crate::filesystem::{self, EntryInfo};
 
 /// A row in the flattened, currently-visible tree.
@@ -24,6 +25,8 @@ pub struct FileTree {
     expanded: HashSet<PathBuf>,
     cache: HashMap<PathBuf, Vec<EntryInfo>>,
     visible: Vec<VisibleEntry>,
+    /// Ignore rules from the project's `.gitignore` files.
+    ignore: Gitignore,
     /// Currently highlighted row.
     pub selected: usize,
     /// Whether dotfiles and ignored directories are shown.
@@ -38,6 +41,7 @@ impl FileTree {
             expanded: HashSet::new(),
             cache: HashMap::new(),
             visible: Vec::new(),
+            ignore: Gitignore::load(root),
             selected: 0,
             show_hidden: false,
         };
@@ -69,9 +73,11 @@ impl FileTree {
         self.rebuild();
     }
 
-    /// Drop all cached directory listings and re-read the visible tree.
+    /// Drop all cached directory listings, reload ignore rules and re-read the
+    /// visible tree.
     pub fn refresh(&mut self) {
         self.cache.clear();
+        self.ignore = Gitignore::load(&self.root);
         self.rebuild();
     }
 
@@ -192,6 +198,49 @@ impl FileTree {
         if entry.is_dir && filesystem::is_ignored_dir(&entry.name) {
             return false;
         }
-        true
+        !self.ignore.is_ignored(&entry.path, entry.is_dir)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_project(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("koda-tree-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::create_dir_all(dir.join("generated")).unwrap();
+        fs::write(dir.join(".gitignore"), "generated/\n*.tmp\n").unwrap();
+        fs::write(dir.join("src/main.rs"), "").unwrap();
+        fs::write(dir.join("notes.tmp"), "").unwrap();
+        dir
+    }
+
+    fn names(tree: &FileTree) -> Vec<String> {
+        tree.entries().iter().map(|e| e.name.clone()).collect()
+    }
+
+    #[test]
+    fn hides_gitignored_entries() {
+        let dir = temp_project("ignore");
+        let tree = FileTree::new(&dir);
+        let names = names(&tree);
+        assert!(names.iter().any(|n| n == "src"));
+        assert!(!names.iter().any(|n| n == "generated"));
+        assert!(!names.iter().any(|n| n == "notes.tmp"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn toggling_hidden_reveals_ignored_entries() {
+        let dir = temp_project("toggle");
+        let mut tree = FileTree::new(&dir);
+        tree.toggle_hidden();
+        let names = names(&tree);
+        assert!(names.iter().any(|n| n == "generated"));
+        assert!(names.iter().any(|n| n == "notes.tmp"));
+        fs::remove_dir_all(&dir).ok();
     }
 }

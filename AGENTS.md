@@ -174,8 +174,12 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
 - **Line-based highlight cache.** Providers return `(spans, next_state)` so
   multi-line constructs (block comments) work. The cache is invalidated from the
   edited line down.
-- **Lazy file tree.** Directory listings are read only when expanded; ignored
-  directories (`target`, `node_modules`, …) are skipped.
+- **Lazy, `.gitignore`-aware file tree.** Directory listings are read only when
+  expanded; ignored directories (`target`, `node_modules`, …) are skipped, and
+  the project's `.gitignore` rules (including nested files and
+  `.git/info/exclude`) hide generated and local files from the tree, quick open,
+  the inline filter and workspace symbol search. Toggling hidden files reveals
+  them again.
 - **Git via subprocess.** We shell out to `git` instead of linking a heavy
   library. Failures degrade gracefully (no repo → no git UI).
 - **OSC 52 clipboard.** Copy works over SSH and in most terminals; internal

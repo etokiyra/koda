@@ -124,7 +124,10 @@ command palette already reports which are available. Filling them in is additive
 - [x] Non-code language support (Markdown, JSON, TOML, YAML) for config files.
       Each has built-in highlighting; JSON/TOML/YAML also report unbalanced
       delimiters and expose their keys (and Markdown its headings) as symbols.
-- [ ] `.gitignore`-aware file tree and quick open.
+- [x] `.gitignore`-aware file tree and quick open. A dependency-free matcher
+      reads root and nested `.gitignore` files plus `.git/info/exclude`, and
+      hides ignored paths from the tree, quick open, the inline filter and
+      workspace symbol search.
 - [ ] File operations: create, rename, delete, move.
 - [x] Save all and external-change detection: clean files reload from disk and
       dirty files are preserved with a warning.

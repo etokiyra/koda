@@ -37,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project root — never inside the project — and is written on quit. Opening a
   file directly (`koda src/main.rs`) still bypasses the saved session.
 
+### Navigation
+
+- Koda now honours `.gitignore`. A dependency-free matcher reads the root
+  `.gitignore`, nested `.gitignore` files and `.git/info/exclude`, then hides
+  ignored paths from the file tree, quick open, the inline tree filter and
+  workspace symbol search. It supports comments, negation, directory-only
+  patterns, anchoring and `*`/`?`/`**` wildcards; character classes are not
+  supported yet. **Toggle Hidden Files** reveals ignored entries again.
+
 ### Language support
 
 - Added built-in support for **Markdown, JSON, TOML and YAML**. Each gets
