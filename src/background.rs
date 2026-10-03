@@ -57,6 +57,12 @@ enum Request {
     RefreshGit { root: PathBuf },
     /// Stage all changes and commit them.
     GitCommit { root: PathBuf, message: String },
+    /// Stage or unstage one path.
+    GitStage {
+        root: PathBuf,
+        path: PathBuf,
+        staged: bool,
+    },
 }
 
 /// A finished piece of background work.
@@ -96,6 +102,12 @@ pub enum Event {
     /// The result of staging and committing.
     GitCommitted {
         result: Result<String, String>,
+    },
+    /// The result of staging or unstaging one path.
+    GitStaged {
+        path: PathBuf,
+        staged: bool,
+        result: Result<(), String>,
     },
 }
 
@@ -182,6 +194,19 @@ impl Background {
                             // reflect the new state immediately.
                             let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
                         }
+                        Request::GitStage { root, path, staged } => {
+                            let result = if staged {
+                                crate::git::stage(&root, &path)
+                            } else {
+                                crate::git::unstage(&root, &path)
+                            };
+                            let _ = event_tx.send(Event::GitStaged {
+                                path,
+                                staged,
+                                result,
+                            });
+                            let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
+                        }
                     }
                 }
             });
@@ -253,6 +278,11 @@ impl Background {
     /// Ask to stage all changes and commit them.
     pub fn commit_all(&self, root: PathBuf, message: String) {
         let _ = self.requests.send(Request::GitCommit { root, message });
+    }
+
+    /// Ask to stage or unstage one path.
+    pub fn stage_path(&self, root: PathBuf, path: PathBuf, staged: bool) {
+        let _ = self.requests.send(Request::GitStage { root, path, staged });
     }
 
     /// Take the next finished event, if any.

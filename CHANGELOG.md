@@ -225,8 +225,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added **Changed Files…** (`Ctrl+Shift+G`): a filterable list of every file
   with a working-tree status (modified, added, deleted, renamed, untracked,
-  conflicted), each showing its short indicator. Choosing one opens it. This is
-  a read-only view built from the existing git snapshot.
+  conflicted), each showing its short indicator and whether it is staged.
+  Choosing one opens it; pressing `Space` stages or unstages the selected file,
+  and the list refreshes from the new snapshot. A **Stage / Unstage File**
+  command does the same for the tree selection or active file.
 - Added **Commit Changes…**: prompts for a message, stages every change
   (`git add -A`) and commits on the background worker, then refreshes the
   status bar and changed-files list. Failures — such as a missing git identity

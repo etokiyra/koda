@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-227%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-229%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -157,7 +157,8 @@ The editor is the heart of Koda, and it is built for real projects.
 
 - Multiple files in tabs, a lazy `.gitignore`-aware project tree, file
   create/rename/delete, git branch and per-file status, a changed-files list
-  (`Ctrl+Shift+G`) and a **Commit Changes…** flow.
+  (`Ctrl+Shift+G`) where `Space` stages or unstages the selected file, and a
+  **Commit Changes…** flow.
 - A **split editor** (`Alt+V`): view two files side by side, with `Alt+O`
   moving focus between the panes. The focused pane owns the cursor and the
   active tab.
@@ -248,6 +249,7 @@ establishes the language context automatically.
 | `Alt+Enter` (in replace) | Replace every match |
 | `Ctrl+G` | Go to line |
 | `Ctrl+Shift+G` | List the files changed in git |
+| `Space` (in changed files) | Stage / unstage the selected file |
 | `Ctrl+Shift+M` | Show diagnostics |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |

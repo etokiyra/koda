@@ -192,6 +192,9 @@ pub struct App {
     pending_install: Option<Tool>,
     /// Whether a git commit is running on the worker.
     pending_commit: bool,
+    /// Whether a stage/unstage is running and the changed-files picker should
+    /// be rebuilt when the refreshed snapshot arrives.
+    pending_stage_refresh: bool,
     /// Code actions from the most recent server response.
     pending_code_actions: Vec<convert::CodeAction>,
     /// Connection state, shown in the statusline.
@@ -270,6 +273,7 @@ impl App {
             pending_rename_file: None,
             pending_install: None,
             pending_commit: false,
+            pending_stage_refresh: false,
             pending_code_actions: Vec::new(),
             lsp_status: LspStatus::Offline,
             last_disk_check: Instant::now(),
@@ -780,6 +784,7 @@ impl App {
             Close,
             Run(PickerAction, Option<String>),
             Submit(PromptKind, String),
+            Stage(PathBuf, bool),
         }
 
         let outcome = match &mut self.overlay {
@@ -804,6 +809,15 @@ impl App {
                 KeyCode::Backspace => {
                     picker.backspace();
                     Outcome::Nothing
+                }
+                KeyCode::Char(' ') if picker.title == "Changed Files" => {
+                    match picker.selected_item().map(|item| item.action.clone()) {
+                        Some(PickerAction::OpenPath(path)) => {
+                            let staged = !self.workspace.git.is_staged(&path);
+                            Outcome::Stage(path, staged)
+                        }
+                        _ => Outcome::Nothing,
+                    }
                 }
                 KeyCode::Char(c) if !ctrl => {
                     picker.push_char(c);
@@ -860,6 +874,7 @@ impl App {
                 self.overlay = Overlay::None;
                 self.submit_prompt(kind, input);
             }
+            Outcome::Stage(path, staged) => self.dispatch_stage(path, staged, true),
         }
     }
 
@@ -1146,6 +1161,7 @@ impl App {
             ids::PROJECT_SEARCH => self.open_project_search(),
             ids::CHANGED_FILES => self.open_changed_files(),
             ids::GIT_COMMIT => self.commit_changes(),
+            ids::GIT_TOGGLE_STAGE => self.toggle_stage_target(),
             ids::FIND => self.open_search(false),
             ids::REPLACE => self.open_search(true),
             ids::REPLACE_ALL => self.replace_all(),
@@ -2041,6 +2057,32 @@ impl App {
             }
             BackgroundEvent::Git(info) => {
                 self.workspace.git = info;
+                if self.pending_stage_refresh {
+                    self.pending_stage_refresh = false;
+                    if matches!(&self.overlay, Overlay::Picker(picker) if picker.title == "Changed Files")
+                    {
+                        self.show_changed_files();
+                    }
+                }
+                true
+            }
+            BackgroundEvent::GitStaged {
+                path,
+                staged,
+                result,
+            } => {
+                match result {
+                    Ok(()) => {
+                        let action = if staged { "Staged" } else { "Unstaged" };
+                        let name = path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("file")
+                            .to_string();
+                        self.set_status(format!("{action} {name}"));
+                    }
+                    Err(message) => self.set_error(format!("Git: {message}")),
+                }
                 true
             }
             BackgroundEvent::GitCommitted { result } => {
@@ -2108,7 +2150,7 @@ impl App {
         );
     }
 
-    /// List the files changed in the working tree, newest snapshot.
+    /// List the files changed in the working tree.
     fn open_changed_files(&mut self) {
         if !self.workspace.git.available {
             self.set_status("Not a git repository");
@@ -2118,6 +2160,19 @@ impl App {
             self.set_status("Working tree clean");
             return;
         }
+        self.show_changed_files();
+    }
+
+    /// Build and show the changed-files picker from the current snapshot.
+    fn show_changed_files(&mut self) {
+        let items = self.changed_files_items();
+        let mut picker = Picker::new("Changed Files", "Filter files…  ·  Space stages", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+    }
+
+    /// Rows for the changed-files picker, sorted by path.
+    fn changed_files_items(&self) -> Vec<PickerItem> {
         let root = self.workspace.root().to_path_buf();
         let mut entries: Vec<(PathBuf, GitFileStatus)> = self
             .workspace
@@ -2127,8 +2182,7 @@ impl App {
             .map(|(path, status)| (path.clone(), *status))
             .collect();
         entries.sort_by(|a, b| a.0.cmp(&b.0));
-
-        let items = entries
+        entries
             .into_iter()
             .map(|(path, status)| {
                 let relative = path
@@ -2136,16 +2190,51 @@ impl App {
                     .unwrap_or(&path)
                     .display()
                     .to_string();
+                let stage = if self.workspace.git.is_staged(&path) {
+                    "staged"
+                } else {
+                    "unstaged"
+                };
                 PickerItem::new(
                     relative,
-                    format!("{} {}", status.indicator(), status.label()),
+                    format!("{} {} · {stage}", status.indicator(), status.label()),
                     PickerAction::OpenPath(path),
                 )
             })
-            .collect();
-        let mut picker = Picker::new("Changed Files", "Filter files…", items);
-        picker.refilter();
-        self.overlay = Overlay::Picker(picker);
+            .collect()
+    }
+
+    /// Stage or unstage the selected file (tree selection or active document).
+    fn toggle_stage_target(&mut self) {
+        if !self.workspace.git.available {
+            self.set_status("Not a git repository");
+            return;
+        }
+        let Some(path) = self.file_op_target() else {
+            self.set_status("Select a file to stage");
+            return;
+        };
+        let staged = !self.workspace.git.is_staged(&path);
+        self.dispatch_stage(path, staged, true);
+    }
+
+    /// Send a stage/unstage request and show a short status hint.
+    fn dispatch_stage(&mut self, path: PathBuf, staged: bool, refresh_picker: bool) {
+        let root = self
+            .workspace
+            .git
+            .repo_root
+            .clone()
+            .unwrap_or_else(|| self.workspace.root().to_path_buf());
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("file")
+            .to_string();
+        self.pending_stage_refresh = refresh_picker;
+        self.background.stage_path(root, path, staged);
+        let action = if staged { "Staging" } else { "Unstaging" };
+        self.set_status(format!("{action} {name}…"));
     }
 
     /// Prompt for a project-wide text query.
@@ -3465,6 +3554,12 @@ impl App {
             }
             ids::GIT_COMMIT if self.workspace.git.files.is_empty() => {
                 (false, Some("nothing to commit".to_string()))
+            }
+            ids::GIT_TOGGLE_STAGE if !self.workspace.git.available => {
+                (false, Some("not a git repository".to_string()))
+            }
+            ids::GIT_TOGGLE_STAGE if self.file_op_target().is_none() => {
+                (false, Some("select a file first".to_string()))
             }
             ids::DIAGNOSTICS_NEXT | ids::DIAGNOSTICS_PREV
                 if !document.is_some_and(|doc| !doc.diagnostics().is_empty()) =>
@@ -4810,10 +4905,13 @@ mod tests {
         let mut app = App::new(Some(&file)).unwrap();
         let mut files = std::collections::HashMap::new();
         files.insert(file.clone(), GitFileStatus::Modified);
+        let mut staged = std::collections::HashSet::new();
+        staged.insert(file.clone());
         app.workspace.git = crate::git::GitInfo {
             repo_root: Some(dir.clone()),
             branch: Some("main".to_string()),
             files,
+            staged,
             available: true,
         };
 
@@ -4825,6 +4923,11 @@ mod tests {
         let item = picker.item(0).expect("an item");
         assert!(matches!(item.action, PickerAction::OpenPath(_)));
         assert!(item.detail.contains('M'), "detail was {}", item.detail);
+        assert!(
+            item.detail.contains("modified · staged"),
+            "detail was {}",
+            item.detail
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -4851,6 +4954,7 @@ mod tests {
             repo_root: Some(dir.clone()),
             branch: Some("main".to_string()),
             files,
+            staged: std::collections::HashSet::new(),
             available: true,
         };
         app.execute_command(ids::GIT_COMMIT);
@@ -4859,6 +4963,35 @@ mod tests {
         app.submit_prompt(PromptKind::CommitMessage, "a message".to_string());
         assert!(app.pending_commit);
         assert_eq!(app.busy(), Some("committing"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn space_in_changed_files_stages_the_selected_file() {
+        let dir = temp_project("stage-space");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+        let mut files = std::collections::HashMap::new();
+        files.insert(file.clone(), GitFileStatus::Modified);
+        app.workspace.git = crate::git::GitInfo {
+            repo_root: Some(dir.clone()),
+            branch: Some("main".to_string()),
+            files,
+            staged: std::collections::HashSet::new(),
+            available: true,
+        };
+
+        app.execute_command(ids::CHANGED_FILES);
+        assert!(matches!(app.overlay, Overlay::Picker(_)));
+
+        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert!(app.pending_stage_refresh);
+        assert!(
+            app.status_message().unwrap_or("").contains("Staging"),
+            "status was {:?}",
+            app.status_message()
+        );
 
         fs::remove_dir_all(&dir).ok();
     }

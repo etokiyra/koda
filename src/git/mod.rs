@@ -55,6 +55,8 @@ pub struct GitInfo {
     pub repo_root: Option<PathBuf>,
     pub branch: Option<String>,
     pub files: HashMap<PathBuf, GitFileStatus>,
+    /// Paths that have staged (index) changes.
+    pub staged: std::collections::HashSet<PathBuf>,
     /// `true` when a repository was found and git responded.
     pub available: bool,
 }
@@ -68,6 +70,7 @@ impl GitInfo {
 
         let branch = run(&repo_root, &["rev-parse", "--abbrev-ref", "HEAD"]);
         let mut files = HashMap::new();
+        let mut staged = std::collections::HashSet::new();
 
         if let Some(output) = run(
             &repo_root,
@@ -77,7 +80,8 @@ impl GitInfo {
                 if line.len() < 4 {
                     continue;
                 }
-                let status = parse_status(&line[..2]);
+                let code = &line[..2];
+                let status = parse_status(code);
                 // Renames are reported as "old -> new"; take the destination.
                 let raw_path = line[3..].trim();
                 let path = match raw_path.split_once(" -> ") {
@@ -85,7 +89,13 @@ impl GitInfo {
                     None => raw_path,
                 };
                 let path = path.trim_matches('"');
-                files.insert(repo_root.join(path), status);
+                let absolute = repo_root.join(path);
+                // The first column is the index (staged) state; `?` is untracked.
+                let index = code.chars().next().unwrap_or(' ');
+                if index != ' ' && index != '?' {
+                    staged.insert(absolute.clone());
+                }
+                files.insert(absolute, status);
             }
         }
 
@@ -93,6 +103,7 @@ impl GitInfo {
             repo_root: Some(repo_root),
             branch,
             files,
+            staged,
             available: true,
         }
     }
@@ -111,6 +122,11 @@ impl GitInfo {
             current = dir.parent();
         }
         None
+    }
+
+    /// Whether `path` has staged changes.
+    pub fn is_staged(&self, path: &Path) -> bool {
+        self.staged.contains(path)
     }
 
     /// Short branch label for the status bar.
@@ -173,6 +189,21 @@ pub fn commit_all(root: &Path, message: &str) -> Result<String, String> {
         Ok("Committed".to_string())
     } else {
         Ok(output)
+    }
+}
+
+/// Stage one path (`git add -- <path>`).
+pub fn stage(root: &Path, path: &Path) -> Result<(), String> {
+    let path = path.to_string_lossy().to_string();
+    run_checked(root, &["add", "--", path.as_str()]).map(|_| ())
+}
+
+/// Unstage one path, falling back to `git reset` on older git versions.
+pub fn unstage(root: &Path, path: &Path) -> Result<(), String> {
+    let path = path.to_string_lossy().to_string();
+    match run_checked(root, &["restore", "--staged", "--", path.as_str()]) {
+        Ok(_) => Ok(()),
+        Err(_) => run_checked(root, &["reset", "-q", "HEAD", "--", path.as_str()]).map(|_| ()),
     }
 }
 
@@ -257,6 +288,42 @@ mod tests {
 
         let log = git(&["log", "--oneline"]).unwrap();
         assert!(String::from_utf8_lossy(&log.stdout).contains("initial commit"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stages_and_unstages_a_file() {
+        if std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return; // Skip when git is unavailable.
+        }
+        let dir = std::env::temp_dir().join(format!("koda-git-stage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+        };
+        assert!(git(&["init", "-q"]).unwrap().status.success());
+        std::fs::write(dir.join("a.txt"), "hello\n").unwrap();
+        let path = dir.join("a.txt");
+
+        let info = GitInfo::detect(&dir);
+        assert!(info.available);
+        assert!(!info.is_staged(&path), "an untracked file is not staged");
+
+        stage(&dir, &path).unwrap();
+        assert!(GitInfo::detect(&dir).is_staged(&path));
+
+        unstage(&dir, &path).unwrap();
+        assert!(!GitInfo::detect(&dir).is_staged(&path));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
