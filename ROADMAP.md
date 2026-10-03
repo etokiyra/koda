@@ -128,6 +128,11 @@ The highest-value work. These turn Koda from an editor into an IDE.
 - [x] **Signature help.** Parameter hints for the call under the cursor, from
       the server's `textDocument/signatureHelp`, with the active parameter
       emphasised and overloads counted.
+- [x] **Managed runtimes and Java/C# servers.** Provisioning can download and
+      verify a runtime, not only run a package manager: Java installs Eclipse
+      JDT with a checksum-verified Eclipse Adoptium JDK, and C# installs
+      OmniSharp with the .NET SDK, both under Koda's data directory. Servers are
+      launched with their runtime on `PATH` (`JAVA_HOME`, `DOTNET_ROOT`).
 
 The abstraction is already in place: providers declare `Capability`s, and the
 command palette already reports which are available. Filling them in is additive.

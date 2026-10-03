@@ -98,6 +98,14 @@ pub enum LspStatus {
     Failed(String),
 }
 
+/// How to launch a language server: the program, its arguments and any extra
+/// environment (used to point managed servers at Koda-provisioned runtimes).
+struct LspLaunch {
+    program: String,
+    args: &'static [&'static str],
+    env: Vec<(String, String)>,
+}
+
 /// One language's language-server job.
 ///
 /// Koda keeps a server per language rather than one per session, so a workspace
@@ -3672,15 +3680,15 @@ impl App {
             if let Some(job) = self.lsp.get_mut(&language) {
                 job.start_at = None;
             }
-            let Some((program, args)) = self.lsp_launch(language) else {
+            let Some(launch) = self.lsp_launch(language) else {
                 continue;
             };
-            self.start_lsp(language, &program, args);
+            self.start_lsp_with_env(language, &launch.program, launch.args, &launch.env);
         }
     }
 
-    /// The program and arguments for `language`'s server, when it is installed.
-    fn lsp_launch(&self, language: LanguageId) -> Option<(String, &'static [&'static str])> {
+    /// The program, arguments and environment for `language`'s server.
+    fn lsp_launch(&self, language: LanguageId) -> Option<LspLaunch> {
         let tools = self.tools.as_ref()?;
         let tool = Tool::for_language(language, ToolPurpose::LanguageServer)?;
         if !tools.available(tool) {
@@ -3692,13 +3700,32 @@ impl App {
             .program_path(tool)
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| tool.program().to_string());
-        Some((program, tool.server_args()))
+        // Managed servers are launched with the runtimes Koda provisioned.
+        Some(LspLaunch {
+            program,
+            args: tool.server_args(),
+            env: crate::language::tools::launch_env(tool),
+        })
     }
 
     /// Start a language server, recording our attempt either way.
+    ///
+    /// Test helper: production launches go through `start_lsp_with_env`.
+    #[cfg(test)]
     fn start_lsp(&mut self, language: LanguageId, program: &str, args: &[&str]) {
+        self.start_lsp_with_env(language, program, args, &[]);
+    }
+
+    /// Start a language server with extra environment variables.
+    fn start_lsp_with_env(
+        &mut self,
+        language: LanguageId,
+        program: &str,
+        args: &[&str],
+        env: &[(String, String)],
+    ) {
         let root = self.workspace.root().to_path_buf();
-        match Server::start(language, program, args, &root) {
+        match Server::start_with_env(language, program, args, &root, env) {
             Ok(server) => {
                 let job = self.lsp.entry(language).or_default();
                 job.server = Some(server);

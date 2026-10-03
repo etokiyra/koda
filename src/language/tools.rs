@@ -29,6 +29,8 @@ pub enum Tool {
     BashLs,
     TypeScriptLs,
     Clangd,
+    Jdtls,
+    OmniSharp,
     Rustfmt,
     Gofmt,
 }
@@ -49,6 +51,8 @@ impl Tool {
         Tool::BashLs,
         Tool::TypeScriptLs,
         Tool::Clangd,
+        Tool::Jdtls,
+        Tool::OmniSharp,
         Tool::Rustfmt,
         Tool::Gofmt,
     ];
@@ -61,6 +65,8 @@ impl Tool {
             Tool::BashLs => "bash-language-server",
             Tool::TypeScriptLs => "typescript-language-server",
             Tool::Clangd => "clangd",
+            Tool::Jdtls => "jdtls",
+            Tool::OmniSharp => "OmniSharp",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
         }
@@ -74,6 +80,8 @@ impl Tool {
             Tool::BashLs => "bash-language-server",
             Tool::TypeScriptLs => "typescript-language-server",
             Tool::Clangd => "clangd",
+            Tool::Jdtls => "jdtls",
+            Tool::OmniSharp => "omnisharp",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
         }
@@ -87,6 +95,8 @@ impl Tool {
             Tool::BashLs => LanguageId::Shell,
             Tool::TypeScriptLs => LanguageId::TypeScript,
             Tool::Clangd => LanguageId::C,
+            Tool::Jdtls => LanguageId::Java,
+            Tool::OmniSharp => LanguageId::CSharp,
         }
     }
 
@@ -105,7 +115,9 @@ impl Tool {
             | Tool::Pylsp
             | Tool::BashLs
             | Tool::TypeScriptLs
-            | Tool::Clangd => ToolPurpose::LanguageServer,
+            | Tool::Clangd
+            | Tool::Jdtls
+            | Tool::OmniSharp => ToolPurpose::LanguageServer,
             Tool::Rustfmt | Tool::Gofmt => ToolPurpose::Formatter,
         }
     }
@@ -121,6 +133,9 @@ impl Tool {
             | Tool::TypeScriptLs
             | Tool::Clangd => &["--version"],
             Tool::Gopls => &["version"],
+            // `jdtls` and `OmniSharp` have no `--version`; `--help` proves they
+            // launch (and, for OmniSharp, that the .NET runtime is present).
+            Tool::Jdtls | Tool::OmniSharp => &["--help"],
             Tool::Gofmt => &[],
         }
     }
@@ -132,6 +147,8 @@ impl Tool {
             Tool::BashLs => &["start"],
             // `typescript-language-server` speaks stdio when asked.
             Tool::TypeScriptLs => &["--stdio"],
+            // `OmniSharp` needs LSP mode and zero-based (LSP) positions.
+            Tool::OmniSharp => &["-z", "--languageserver"],
             _ => &[],
         }
     }
@@ -147,6 +164,8 @@ impl Tool {
             Tool::Clangd => {
                 "install clangd with your system package manager (it ships with most C/C++ toolchains)"
             }
+            Tool::Jdtls => "Koda can install a managed JDK and Eclipse JDT",
+            Tool::OmniSharp => "Koda can install the .NET SDK and OmniSharp",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
         }
@@ -179,6 +198,9 @@ impl Tool {
             // `clangd` has no portable user-local installer; it ships with the
             // C/C++ toolchain and is used when it is already present.
             Tool::Clangd => None,
+            // `jdtls` and `OmniSharp` are installed by Koda's own managed
+            // download plan rather than a single package-manager command.
+            Tool::Jdtls | Tool::OmniSharp => None,
             Tool::Gofmt => None,
         }
     }
@@ -191,7 +213,9 @@ impl Tool {
             Tool::Gopls | Tool::Gofmt => &["go"],
             Tool::Pylsp => &["python3"],
             Tool::BashLs | Tool::TypeScriptLs => &["npm"],
-            Tool::Clangd => &[],
+            // `jdtls` is a Python launcher script.
+            Tool::Jdtls => &["python3"],
+            Tool::Clangd | Tool::OmniSharp => &[],
         }
     }
 
@@ -226,6 +250,8 @@ impl Tool {
             // `clangd` ships with the C/C++ toolchain; there is no user-local
             // installer to run, so Koda uses it when it is already present.
             Tool::Clangd => Vec::new(),
+            Tool::Jdtls => jdtls_attempts(),
+            Tool::OmniSharp => omnisharp_attempts(),
             // `gofmt` ships with the Go toolchain; there is nothing to install.
             Tool::Gofmt => Vec::new(),
         }
@@ -255,25 +281,61 @@ impl InstallCommand {
     }
 }
 
-/// A strategy for installing a tool: a short command sequence that Koda runs
+/// One executable step in an install strategy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InstallStep {
+    /// Run a program with arguments.
+    Run(InstallCommand),
+    /// Download `url` to `dest` over HTTPS, verifying `sha256` when known.
+    Download {
+        url: String,
+        dest: PathBuf,
+        sha256: Option<String>,
+    },
+    /// Download and verify an Eclipse Adoptium JDK, whose checksum Adoptium
+    /// publishes in the same JSON document that carries the link.
+    AdoptiumJdk { feature: u32, dest: PathBuf },
+    /// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`, optionally
+    /// dropping `strip` leading path components.
+    Extract {
+        archive: PathBuf,
+        dest: PathBuf,
+        strip: usize,
+    },
+}
+
+impl From<InstallCommand> for InstallStep {
+    fn from(command: InstallCommand) -> Self {
+        InstallStep::Run(command)
+    }
+}
+
+/// A strategy for installing a tool: an ordered command sequence that Koda runs
 /// and then verifies by re-probing the tool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstallAttempt {
     /// A short description of the strategy.
     pub via: &'static str,
-    pub commands: Vec<InstallCommand>,
+    pub steps: Vec<InstallStep>,
 }
 
 impl InstallAttempt {
     fn one(via: &'static str, command: InstallCommand) -> Self {
         InstallAttempt {
             via,
-            commands: vec![command],
+            steps: vec![InstallStep::Run(command)],
         }
     }
 
     fn sequence(via: &'static str, commands: Vec<InstallCommand>) -> Self {
-        InstallAttempt { via, commands }
+        InstallAttempt {
+            via,
+            steps: commands.into_iter().map(InstallStep::Run).collect(),
+        }
+    }
+
+    fn managed(via: &'static str, steps: Vec<InstallStep>) -> Self {
+        InstallAttempt { via, steps }
     }
 }
 
@@ -501,21 +563,10 @@ pub fn install(tool: Tool) -> Result<String, String> {
 
     let mut last_error = None;
     for attempt in &attempts {
-        for command in &attempt.commands {
-            match Command::new(&command.program).args(&command.args).output() {
-                Ok(output) if output.status.success() => {}
-                Ok(output) => {
-                    last_error = Some(format!(
-                        "{}: {}",
-                        tool.label(),
-                        first_stderr_line(&output.stderr)
-                    ));
-                    break;
-                }
-                Err(err) => {
-                    last_error = Some(format!("could not run {}: {err}", command.program));
-                    break;
-                }
+        for step in &attempt.steps {
+            if let Err(message) = run_step(step) {
+                last_error = Some(format!("{}: {message}", tool.label()));
+                break;
             }
         }
         if probe(tool).available {
@@ -523,6 +574,164 @@ pub fn install(tool: Tool) -> Result<String, String> {
         }
     }
     Err(last_error.unwrap_or_else(|| format!("could not install {}", tool.label())))
+}
+
+/// Execute one install step.
+fn run_step(step: &InstallStep) -> Result<(), String> {
+    match step {
+        InstallStep::Run(command) => run_command(command),
+        InstallStep::Download { url, dest, sha256 } => download(url, dest, sha256.as_deref()),
+        InstallStep::AdoptiumJdk { feature, dest } => adoptium_jdk(*feature, dest),
+        InstallStep::Extract {
+            archive,
+            dest,
+            strip,
+        } => extract(archive, dest, *strip),
+    }
+}
+
+/// Run a program, reporting its first stderr line on failure.
+fn run_command(command: &InstallCommand) -> Result<(), String> {
+    match Command::new(&command.program).args(&command.args).output() {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => Err(first_stderr_line(&output.stderr)),
+        Err(err) => Err(format!("could not run {}: {err}", command.program)),
+    }
+}
+
+/// Download `url` to `dest` over HTTPS, verifying a SHA-256 when one is known.
+fn download(url: &str, dest: &Path, sha256: Option<&str>) -> Result<(), String> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("could not create {}: {err}", parent.display()))?;
+    }
+    let output = Command::new("curl")
+        .args([
+            "--proto",
+            "=https",
+            "--tlsv1.2",
+            "-L",
+            "--fail",
+            "-sS",
+            "-o",
+        ])
+        .arg(dest)
+        .arg(url)
+        .output()
+        .map_err(|err| format!("could not run curl: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "download failed: {}",
+            first_stderr_line(&output.stderr)
+        ));
+    }
+    if let Some(expected) = sha256 {
+        let actual = file_sha256(dest)?;
+        if !actual.eq_ignore_ascii_case(expected) {
+            let _ = std::fs::remove_file(dest);
+            return Err(format!(
+                "checksum mismatch for {} (expected {expected}, got {actual})",
+                dest.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Fetch and verify the latest Eclipse Adoptium JDK for `feature`.
+///
+/// Adoptium's API reports the download link and its SHA-256 together, so the
+/// archive is verified even though the version moves.
+fn adoptium_jdk(feature: u32, dest: &Path) -> Result<(), String> {
+    let (os, arch) = adoptium_platform().ok_or_else(|| {
+        "no managed JDK is published for this platform; install Java 25 manually".to_string()
+    })?;
+    let api = format!(
+        "https://api.adoptium.net/v3/assets/latest/{feature}/hotspot?os={os}&architecture={arch}&image_type=jdk"
+    );
+    let output = Command::new("curl")
+        .args(["-sS", "-L", "--fail"])
+        .arg(&api)
+        .output()
+        .map_err(|err| format!("could not query Adoptium: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "could not query Adoptium: {}",
+            first_stderr_line(&output.stderr)
+        ));
+    }
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|err| format!("bad Adoptium response: {err}"))?;
+    let package = value
+        .get(0)
+        .and_then(|entry| entry.pointer("/binary/package"))
+        .ok_or_else(|| "Adoptium returned no JDK package".to_string())?;
+    let link = package
+        .get("link")
+        .and_then(|link| link.as_str())
+        .ok_or_else(|| "Adoptium package had no link".to_string())?;
+    let checksum = package.get("checksum").and_then(|sum| sum.as_str());
+    download(link, dest, checksum)
+}
+
+/// The Adoptium OS/architecture names for this platform.
+fn adoptium_platform() -> Option<(&'static str, &'static str)> {
+    let os = match std::env::consts::OS {
+        "linux" => "linux",
+        "macos" => "mac",
+        "windows" => "windows",
+        _ => return None,
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "aarch64",
+        _ => return None,
+    };
+    Some((os, arch))
+}
+
+/// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`.
+fn extract(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
+    std::fs::create_dir_all(dest)
+        .map_err(|err| format!("could not create {}: {err}", dest.display()))?;
+    let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
+    let mut command = if zip {
+        let mut command = Command::new("unzip");
+        command.arg("-q").arg("-o").arg(archive).arg("-d").arg(dest);
+        command
+    } else {
+        let mut command = Command::new("tar");
+        command.arg("-xf").arg(archive).arg("-C").arg(dest);
+        if strip > 0 {
+            command.arg(format!("--strip-components={strip}"));
+        }
+        command
+    };
+    match command.output() {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => Err(format!(
+            "could not extract {}: {}",
+            archive.display(),
+            first_stderr_line(&output.stderr)
+        )),
+        Err(err) => Err(format!("could not run the archive tool: {err}")),
+    }
+}
+
+/// SHA-256 of a file, using whichever tool the platform provides.
+fn file_sha256(path: &Path) -> Result<String, String> {
+    for (program, args) in [("sha256sum", &[][..]), ("shasum", &["-a", "256"][..])] {
+        if let Ok(output) = Command::new(program).args(args).arg(path).output()
+            && output.status.success()
+            && let Some(hash) = String::from_utf8_lossy(&output.stdout)
+                .split_whitespace()
+                .next()
+            && !hash.is_empty()
+        {
+            return Ok(hash.to_string());
+        }
+    }
+    Err("no SHA-256 tool found (looked for sha256sum and shasum)".to_string())
 }
 
 fn first_stderr_line(stderr: &[u8]) -> String {
@@ -534,17 +743,26 @@ fn first_stderr_line(stderr: &[u8]) -> String {
         .to_string()
 }
 
-/// Whether any command in `tool`'s install attempts is available.
+/// Whether every step of at least one install strategy can run here.
 ///
 /// Koda only offers to install a tool it can really install, so it never
-/// promises an install and then fails because no package manager exists.
+/// promises an install and then fails because no package manager, `curl` or
+/// archive tool exists.
 pub fn can_install(tool: Tool) -> bool {
-    tool.install_attempts().iter().any(|attempt| {
-        attempt
-            .commands
-            .iter()
-            .any(|command| locate(&command.program).is_some())
-    })
+    tool.install_attempts()
+        .iter()
+        .any(|attempt| attempt.steps.iter().all(step_available))
+}
+
+fn step_available(step: &InstallStep) -> bool {
+    match step {
+        InstallStep::Run(command) => locate(&command.program).is_some(),
+        InstallStep::Download { .. } | InstallStep::AdoptiumJdk { .. } => locate("curl").is_some(),
+        InstallStep::Extract { archive, .. } => {
+            let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
+            locate(if zip { "unzip" } else { "tar" }).is_some()
+        }
+    }
 }
 
 /// What Koda learned about one tool.
@@ -627,13 +845,21 @@ fn probe(tool: Tool) -> ToolStatus {
     };
     let mut command = Command::new(&path);
     command.args(tool.version_args());
+    // Managed runtimes (the JDK for jdtls, the .NET SDK for OmniSharp) are
+    // found through the launch environment.
+    for (key, value) in launch_env(tool) {
+        command.env(key, value);
+    }
     // `output()` nulls stdin, so `gofmt` reads an empty document and exits.
     match command.output() {
         Ok(output) if output.status.success() => {
+            // Only keep a version line that actually looks like one; `--help`
+            // usage output should not masquerade as a version.
             let version = String::from_utf8_lossy(&output.stdout)
                 .lines()
                 .map(str::trim)
                 .find(|line| !line.is_empty())
+                .filter(|line| line.chars().any(|c| c.is_ascii_digit()))
                 .map(str::to_string);
             ToolStatus {
                 tool,
@@ -695,8 +921,8 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         dirs.push(home.join(".npm-global/bin"));
         dirs.push(home.join(".local/share/pnpm"));
     }
-    // Tools Koda installed itself, plus the npm prefix and Python virtualenv
-    // it manages.
+    // Tools Koda installed itself, plus the npm prefix, Python virtualenv and
+    // managed runtimes it maintains.
     if let Some(tools) = tools_dir() {
         if let Some(prefix) = npm_prefix() {
             dirs.push(prefix.join("bin"));
@@ -706,6 +932,10 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         if let Some(venv) = venv_dir() {
             dirs.push(venv_bin_dir(&venv));
         }
+        dirs.push(tools.join("omnisharp"));
+        dirs.push(tools.join("jdtls/bin"));
+        dirs.push(tools.join("jdk/bin"));
+        dirs.push(tools.join("dotnet"));
         dirs.push(tools.join("bin"));
     }
     dirs.push(PathBuf::from("/usr/local/bin"));
@@ -734,6 +964,165 @@ pub fn npm_prefix() -> Option<PathBuf> {
 /// server even when the system Python has no `pip`.
 pub fn venv_dir() -> Option<PathBuf> {
     tools_dir().map(|dir| dir.join("python"))
+}
+
+/// Koda's managed .NET install directory (the SDK OmniSharp runs on).
+pub fn dotnet_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("dotnet"))
+}
+
+/// Koda's managed JDK directory, used to run `jdtls` without touching the
+/// user's system Java.
+pub fn jdk_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("jdk"))
+}
+
+/// Koda's managed OmniSharp directory.
+pub fn omnisharp_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("omnisharp"))
+}
+
+/// Koda's managed `jdtls` directory.
+pub fn jdtls_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("jdtls"))
+}
+
+/// Scratch space for downloaded archives.
+fn downloads_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("downloads"))
+}
+
+/// Environment a tool needs to run, pointing it at Koda-managed runtimes and
+/// prepending their bin directories to `PATH` so child processes find them.
+pub fn launch_env(tool: Tool) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    match tool {
+        Tool::OmniSharp => {
+            if let Some(dir) = dotnet_dir() {
+                let dir = dir.to_string_lossy().into_owned();
+                env.push(("DOTNET_ROOT".to_string(), dir.clone()));
+                env.push(("DOTNET_ROOT_X64".to_string(), dir.clone()));
+                env.push(("PATH".to_string(), prepend_path(&dir)));
+            }
+        }
+        Tool::Jdtls => {
+            if let Some(jdk) = jdk_dir() {
+                let jdk = jdk.to_string_lossy().into_owned();
+                env.push(("JAVA_HOME".to_string(), jdk.clone()));
+                env.push(("PATH".to_string(), prepend_path(&format!("{jdk}/bin"))));
+            }
+        }
+        _ => {}
+    }
+    env
+}
+
+fn prepend_path(dir: &str) -> String {
+    match std::env::var_os("PATH") {
+        Some(existing) => format!("{dir}:{}", existing.to_string_lossy()),
+        None => dir.to_string(),
+    }
+}
+
+/// The OmniSharp release asset for this platform, if one exists.
+fn omnisharp_asset() -> Option<&'static str> {
+    Some(match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "omnisharp-linux-x64.tar.gz",
+        ("linux", "aarch64") => "omnisharp-linux-arm64.tar.gz",
+        ("macos", "x86_64") => "omnisharp-osx-x64.tar.gz",
+        ("macos", "aarch64") => "omnisharp-osx-arm64.tar.gz",
+        _ => return None,
+    })
+}
+
+/// Eclipse JDT Language Server, installed together with a managed JDK.
+///
+/// `jdtls` tracks the newest snapshot and follows the JDK it requires; the
+/// managed JDK is the Adoptium build the Adoptium API reports as latest for
+/// that feature release, so the pair stays consistent.
+fn jdtls_attempts() -> Vec<InstallAttempt> {
+    const JDTLS_URL: &str =
+        "https://download.eclipse.org/jdtls/snapshots/jdt-language-server-latest.tar.gz";
+    let (Some(downloads), Some(dest)) = (downloads_dir(), jdtls_dir()) else {
+        return Vec::new();
+    };
+    let jdk_archive = downloads.join("temurin.tar.gz");
+    let jdtls_archive = downloads.join("jdtls.tar.gz");
+    let jdk = match tools_dir() {
+        Some(tools) => tools.join("jdk"),
+        None => return Vec::new(),
+    };
+    vec![InstallAttempt::managed(
+        "a Koda-managed JDK and Eclipse JDT",
+        vec![
+            InstallStep::AdoptiumJdk {
+                feature: 25,
+                dest: jdk_archive.clone(),
+            },
+            InstallStep::Extract {
+                archive: jdk_archive,
+                dest: jdk,
+                strip: 1,
+            },
+            InstallStep::Download {
+                url: JDTLS_URL.to_string(),
+                dest: jdtls_archive.clone(),
+                sha256: None,
+            },
+            InstallStep::Extract {
+                archive: jdtls_archive,
+                dest,
+                strip: 0,
+            },
+        ],
+    )]
+}
+
+/// OmniSharp plus the .NET SDK it runs on, both managed by Koda.
+fn omnisharp_attempts() -> Vec<InstallAttempt> {
+    let Some(asset) = omnisharp_asset() else {
+        return Vec::new();
+    };
+    let (Some(tools), Some(dotnet), Some(downloads), Some(dest)) =
+        (tools_dir(), dotnet_dir(), downloads_dir(), omnisharp_dir())
+    else {
+        return Vec::new();
+    };
+    let installer = tools.join("dotnet-install.sh");
+    let archive = downloads.join("omnisharp.tar.gz");
+    vec![InstallAttempt::managed(
+        "the .NET SDK and OmniSharp",
+        vec![
+            InstallStep::Download {
+                url: "https://dot.net/v1/dotnet-install.sh".to_string(),
+                dest: installer.clone(),
+                sha256: None,
+            },
+            InstallStep::Run(InstallCommand::with_args(
+                "sh",
+                vec![
+                    installer.to_string_lossy().into_owned(),
+                    "--channel".into(),
+                    "10.0".into(),
+                    "--install-dir".into(),
+                    dotnet.to_string_lossy().into_owned(),
+                    "--no-path".into(),
+                ],
+            )),
+            InstallStep::Download {
+                url: format!(
+                    "https://github.com/OmniSharp/omnisharp-roslyn/releases/download/v2.0.0/{asset}"
+                ),
+                dest: archive.clone(),
+                sha256: None,
+            },
+            InstallStep::Extract {
+                archive,
+                dest,
+                strip: 0,
+            },
+        ],
+    )]
 }
 
 fn venv_bin_dir(venv: &Path) -> PathBuf {
@@ -769,7 +1158,54 @@ mod tests {
                     | LanguageId::Shell
                     | LanguageId::TypeScript
                     | LanguageId::C
+                    | LanguageId::Java
+                    | LanguageId::CSharp
             ));
+        }
+    }
+
+    /// The `Run` commands inside a strategy's steps.
+    fn run_commands(attempt: &InstallAttempt) -> Vec<&InstallCommand> {
+        attempt
+            .steps
+            .iter()
+            .filter_map(|step| match step {
+                InstallStep::Run(command) => Some(command),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn managed_tools_have_download_plans() {
+        // jdtls brings its own JDK; OmniSharp brings the .NET SDK it needs.
+        if tools_dir().is_some() {
+            let attempts = Tool::Jdtls.install_attempts();
+            let steps = &attempts.first().expect("a jdtls plan").steps;
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| matches!(step, InstallStep::AdoptiumJdk { feature: 25, .. }))
+            );
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| matches!(step, InstallStep::Extract { .. }))
+            );
+        }
+        if omnisharp_asset().is_some() && tools_dir().is_some() {
+            let attempts = Tool::OmniSharp.install_attempts();
+            let steps = &attempts.first().expect("an OmniSharp plan").steps;
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| matches!(step, InstallStep::Download { .. }))
+            );
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| matches!(step, InstallStep::Extract { .. }))
+            );
         }
     }
 
@@ -839,15 +1275,15 @@ mod tests {
 
         let attempts = Tool::TypeScriptLs.install_attempts();
         assert!(
-            attempts
-                .iter()
-                .any(|attempt| attempt.commands.iter().any(|command| {
+            attempts.iter().any(|attempt| {
+                run_commands(attempt).into_iter().any(|command| {
                     command.args.iter().any(|arg| arg == "--prefix")
                         && command
                             .args
                             .iter()
                             .any(|arg| arg == "typescript-language-server")
-                })),
+                })
+            }),
             "TypeScript should install with npm into Koda's own prefix: {attempts:?}"
         );
     }
@@ -900,7 +1336,10 @@ mod tests {
         };
         let attempts = Tool::BashLs.install_attempts();
         let first = attempts.first().expect("an npm attempt");
-        let command = first.commands.first().expect("an npm command");
+        let command = run_commands(first)
+            .into_iter()
+            .next()
+            .expect("an npm command");
         assert_eq!(command.program, "npm");
         assert!(
             command.args.iter().any(|arg| arg == "--prefix"),
@@ -927,16 +1366,15 @@ mod tests {
         let attempts = Tool::Pylsp.install_attempts();
         assert!(
             attempts.iter().any(|attempt| {
-                attempt
-                    .commands
-                    .iter()
+                run_commands(attempt)
+                    .into_iter()
                     .any(|command| command.args.iter().any(|arg| arg == "venv"))
             }),
             "expected a managed-virtualenv strategy: {attempts:?}"
         );
         assert!(
             attempts.iter().all(|attempt| {
-                attempt.commands.iter().all(|command| {
+                run_commands(attempt).into_iter().all(|command| {
                     !command
                         .args
                         .iter()

@@ -154,13 +154,29 @@ impl Server {
         args: &[&str],
         root: &Path,
     ) -> io::Result<Self> {
-        let mut child = Command::new(program)
+        Self::start_with_env(language, program, args, root, &[])
+    }
+
+    /// Spawn a server with extra environment variables, used to point managed
+    /// servers at Koda-provisioned runtimes (the .NET SDK, a managed JDK).
+    pub fn start_with_env(
+        language: LanguageId,
+        program: &str,
+        args: &[&str],
+        root: &Path,
+        env: &[(String, String)],
+    ) -> io::Result<Self> {
+        let mut command = Command::new(program);
+        command
             .args(args)
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+            .stderr(Stdio::piped());
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let mut child = command.spawn()?;
 
         let stdin = child
             .stdin

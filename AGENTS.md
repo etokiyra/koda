@@ -220,12 +220,19 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   directory is searched when locating tools, alongside the usual user bin
   directories.
 - **Verified install attempts.** A tool's provisioning is an ordered list of
-  self-contained attempts (each a short command sequence). Koda re-probes the
-  tool after every attempt rather than trusting a package manager's exit code,
-  and reports a missing prerequisite (a whole absent toolchain) instead of
-  offering an install that cannot run. Installs into the shared managed
-  directory are guarded by an advisory lock (with stale-lock recovery) so
-  concurrent Koda instances cannot corrupt the same npm prefix or virtualenv.
+  self-contained steps — run a command, download an archive (optionally
+  verifying a published SHA-256), fetch and verify an Adoptium JDK, or extract.
+  Koda re-probes the tool after every attempt rather than trusting a package
+  manager's exit code, and reports a missing prerequisite (a whole absent
+  toolchain) instead of offering an install that cannot run. Installs into the
+  shared managed directory are guarded by an advisory lock (with stale-lock
+  recovery) so concurrent Koda instances cannot corrupt the same npm prefix or
+  virtualenv.
+- **Managed runtimes.** Some language servers need a runtime, so Koda provisions
+  one under its own data directory and launches the server with it: the .NET SDK
+  for OmniSharp (`DOTNET_ROOT`), and a checksum-verified Eclipse Adoptium JDK for
+  Eclipse JDT (`JAVA_HOME`). `Tool::launch_env` supplies the environment for both
+  probing and launching; the user's system environment is never modified.
 - **Split editor.** The editor keeps a single active document; a split stores
   one document index per pane and `editor.active` follows the focused pane, so
   every existing editing path keeps working unchanged. Panes share the tab

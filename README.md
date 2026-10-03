@@ -121,10 +121,13 @@ The complexity lives inside Koda:
 ```
 
 Missing something? Koda notices when a Rust, Go, Python, TypeScript,
-JavaScript, C, C++ or Shell file is open without its language server and offers
-to install it, once, without blocking startup. Some servers have no portable,
-user-local installer — `clangd` ships with the C/C++ toolchain — so Koda uses
-them when present and says so plainly when they are not.
+JavaScript, Java, C#, C, C++ or Shell file is open without its language server
+and offers to install it, once, without blocking startup. Some servers have no
+portable, user-local installer — `clangd` ships with the C/C++ toolchain — so
+Koda uses them when present and says so plainly when they are not. Others need a
+runtime, and Koda provisions that too: the **.NET SDK** for C# and a
+**checksum-verified Eclipse Adoptium JDK** for Java, both under Koda's own data
+directory.
 **Language Setup…** in the command palette then lists every tool Koda knows
 about and installs a missing one with a single `Enter` — through the official
 channel, so provenance and integrity stay with the package manager:
@@ -137,6 +140,8 @@ channel, so provenance and integrity stay with the package manager:
 | `bash-language-server` | Shell language server | `npm`, with a prefix Koda manages |
 | `typescript-language-server` | TypeScript & JavaScript language server | `npm`, with a prefix Koda manages |
 | `clangd` | C/C++ language server | detected if installed (ships with the C/C++ toolchain) |
+| `jdtls` | Java language server | a managed Adoptium JDK 25 + Eclipse JDT |
+| `omnisharp` | C# language server | a managed .NET SDK + OmniSharp |
 | `rustfmt` | Rust formatting | `rustup component add rustfmt` |
 | `gofmt` | Go formatting | ships with the Go toolchain |
 
@@ -147,13 +152,16 @@ so positions stay accurate in non-ASCII files, and only uses features the server
 advertises — built-in intelligence fills any gap.
 
 Every install targets a directory you can write to — `rustup` under
-`~/.cargo`, `go install` under `~/go`, a Python virtualenv and npm prefix Koda
-manages under its own data directory, and `pip --user`/`pipx` under `~/.local`
-— so Koda never needs `sudo` and a system-owned prefix can never make
-provisioning fail. The Python virtualenv seeds its own `pip`, so a Python
-without the `pip` module (or one that is externally managed) still works.
-Installation is serialised with an advisory lock (with stale-lock recovery), so
-two Koda instances cannot corrupt the same managed prefix.
+`~/.cargo`, `go install` under `~/go`, a Python virtualenv, npm prefix, .NET SDK
+and JDK that Koda manages under its own data directory, and
+`pip --user`/`pipx` under `~/.local` — so Koda never needs `sudo` and a
+system-owned prefix can never make provisioning fail. The Python virtualenv
+seeds its own `pip`, so a Python without the `pip` module (or one that is
+externally managed) still works. Managed servers are launched with those
+runtimes on their `PATH` (`DOTNET_ROOT`, `JAVA_HOME`), so the user's system
+environment is left untouched. Installation is serialised with an advisory lock
+(with stale-lock recovery), so two Koda instances cannot corrupt the same
+managed prefix.
 
 ### Supported languages
 

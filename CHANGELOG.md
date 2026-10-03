@@ -109,6 +109,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same npm prefix or Python virtualenv at once. A lock left by a crashed
   instance is reclaimed after a timeout, so an interrupted install never wedges
   provisioning.
+- Koda can now **provision runtimes**, not just package-managed tools. Installing
+  the Java server fetches a **checksum-verified Eclipse Adoptium JDK** and
+  Eclipse JDT into Koda's data directory; installing the C# server fetches the
+  **.NET SDK** and a self-contained OmniSharp. Both are launched with their
+  runtime on `PATH` (`JAVA_HOME`, `DOTNET_ROOT`) so the user's system is never
+  modified. Downloads are HTTPS-only, archive extraction is handled by Koda, and
+  every install is still verified by re-probing the tool. Platforms without a
+  published runtime are reported honestly rather than half-installed.
 
 - Installation runs on the background worker with a busy indicator; Koda
   re-probes when it finishes and, if a server is now available, starts it.
