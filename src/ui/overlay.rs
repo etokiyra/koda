@@ -476,6 +476,115 @@ pub fn render_help(
     );
 }
 
+/// Render the signature-help popup, anchored just below the cursor.
+pub fn render_signature(
+    frame: &mut Frame,
+    area: Rect,
+    help: &crate::language::lsp::convert::SignatureHelp,
+    anchor: Option<(u16, u16)>,
+) {
+    let Some(signature) = help.signatures.get(help.active) else {
+        return;
+    };
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let on_panel = Style::default().bg(theme::PANEL_BG);
+
+    // The label with the active parameter emphasised.
+    let (before, parameter, after) =
+        split_parameter(&signature.label, &signature.parameters, help.parameter);
+    let mut spans = vec![Span::styled("✦ ", theme::star())];
+    match parameter {
+        Some(parameter) => {
+            spans.push(Span::styled(before.to_string(), theme::text()));
+            spans.push(Span::styled(parameter.to_string(), theme::accent_bold()));
+            spans.push(Span::styled(after.to_string(), theme::text()));
+        }
+        None => spans.push(Span::styled(signature.label.clone(), theme::text())),
+    }
+
+    let documentation = signature
+        .documentation
+        .as_deref()
+        .and_then(|text| text.lines().find(|line| !line.trim().is_empty()));
+    let label_width = signature.label.chars().count();
+    let doc_width = documentation.map_or(0, |line| line.trim().chars().count());
+    let width = ((label_width.max(doc_width) + 4).clamp(24, 84) as u16).min(area.width);
+    let inner_width = width.saturating_sub(2) as usize;
+
+    let mut rows: Vec<Line> = vec![Line::from(spans)];
+    if let Some(documentation) = documentation {
+        rows.push(Line::from(Span::styled(
+            truncate(documentation.trim(), inner_width),
+            theme::muted(),
+        )));
+    }
+    if help.signatures.len() > 1 {
+        rows.push(Line::from(Span::styled(
+            format!("{}/{} signatures", help.active + 1, help.signatures.len()),
+            theme::dim(),
+        )));
+    }
+    let height = (rows.len() as u16 + 2).min(area.height);
+
+    let (ax, ay) = anchor.unwrap_or((area.x, area.y));
+    let x = ax.min(area.x + area.width.saturating_sub(width));
+    let below = ay.saturating_add(1);
+    let y = if below + height <= area.y + area.height {
+        below
+    } else {
+        ay.saturating_sub(height).max(area.y)
+    };
+    let rect = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+
+    frame.render_widget(Clear, rect);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme::accent())
+        .style(on_panel)
+        .title(Line::from(vec![
+            Span::styled("✦ ", theme::star()),
+            Span::styled("signature", theme::accent_bold()),
+        ]));
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+    if inner.height == 0 {
+        return;
+    }
+
+    // The paragraph clips horizontally at the panel edge, keeping the styled
+    // signature spans intact.
+    frame.render_widget(Paragraph::new(Text::from(rows)).style(on_panel), inner);
+}
+
+/// Split a signature label around its active parameter, if it can be found.
+fn split_parameter<'a>(
+    signature: &'a str,
+    parameters: &'a [String],
+    active: usize,
+) -> (&'a str, Option<&'a str>, &'a str) {
+    let Some(parameter) = parameters.get(active) else {
+        return (signature, None, "");
+    };
+    if parameter.is_empty() {
+        return (signature, None, "");
+    }
+    match signature.find(parameter.as_str()) {
+        Some(index) => (
+            &signature[..index],
+            Some(&signature[index..index + parameter.len()]),
+            &signature[index + parameter.len()..],
+        ),
+        None => (signature, None, ""),
+    }
+}
+
 /// Render a unified diff in a scrollable panel.
 pub fn render_diff(frame: &mut Frame, area: Rect, diff: &DiffState) {
     if area.width == 0 || area.height == 0 {

@@ -65,6 +65,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             overlay::render_hover(frame, area, hover, app.cursor_screen);
         } else if let Some(completion) = &app.completion {
             overlay::render_completion(frame, area, completion, app.cursor_screen);
+        } else if let Some(signature) = &app.signature {
+            overlay::render_signature(
+                frame,
+                area,
+                &signature.help,
+                signature.anchor.or(app.cursor_screen),
+            );
         }
     }
 }

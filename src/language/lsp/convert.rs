@@ -324,10 +324,122 @@ fn location(item: &Value) -> Option<Location> {
     })
 }
 
+/// One overload from a `textDocument/signatureHelp` response.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Signature {
+    /// The full callable label, e.g. `fn add(a: i32, b: i32) -> i32`.
+    pub label: String,
+    /// The parameter labels, sliced out of `label` when the server sends
+    /// offsets instead of strings.
+    pub parameters: Vec<String>,
+    /// The signature's documentation, flattened to plain lines.
+    pub documentation: Option<String>,
+}
+
+/// The active parameter hints for a call.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignatureHelp {
+    pub signatures: Vec<Signature>,
+    /// Index of the signature to show.
+    pub active: usize,
+    /// Index of the parameter the cursor is on.
+    pub parameter: usize,
+}
+
+/// Parse a `textDocument/signatureHelp` result.
+pub fn signature_help(value: &Value) -> Option<SignatureHelp> {
+    let signatures = value.get("signatures")?.as_array()?;
+    let active = value
+        .get("activeSignature")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let mut items = Vec::new();
+    for signature in signatures {
+        let label = signature.get("label")?.as_str()?.to_string();
+        let parameters = signature
+            .get("parameters")
+            .and_then(Value::as_array)
+            .map(|parameters| {
+                parameters
+                    .iter()
+                    .filter_map(|parameter| parameter_label(parameter, &label))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let documentation = signature
+            .get("documentation")
+            .map(markup_text)
+            .filter(|text| !text.trim().is_empty());
+        items.push(Signature {
+            label,
+            parameters,
+            documentation,
+        });
+    }
+    if items.is_empty() {
+        return None;
+    }
+    let active = active.min(items.len() - 1);
+    // `activeParameter` may sit on the help object or on the active signature.
+    let parameter = value
+        .get("activeParameter")
+        .or_else(|| signatures.get(active)?.get("activeParameter"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    Some(SignatureHelp {
+        signatures: items,
+        active,
+        parameter,
+    })
+}
+
+/// A parameter label, either a string or `[start, end]` offsets into `label`.
+fn parameter_label(parameter: &Value, label: &str) -> Option<String> {
+    match parameter.get("label")? {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(offsets) => {
+            let start = offsets.first()?.as_u64()? as usize;
+            let end = offsets.get(1)?.as_u64()? as usize;
+            let chars: Vec<char> = label.chars().collect();
+            (start < end && end <= chars.len())
+                .then(|| chars[start..end].iter().collect::<String>())
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn parses_signature_help_with_offset_parameters() {
+        let value = json!({
+            "signatures": [
+                {
+                    "label": "fn add(a: i32, b: i32)",
+                    "parameters": [ { "label": [7, 13] }, { "label": [15, 21] } ],
+                    "documentation": "Adds two numbers"
+                },
+                { "label": "fn add(a: f64, b: f64)" }
+            ],
+            "activeSignature": 1,
+            "activeParameter": 0
+        });
+        let help = signature_help(&value).expect("help");
+        assert_eq!(help.active, 1);
+        assert_eq!(help.signatures.len(), 2);
+        assert_eq!(help.signatures[0].parameters, vec!["a: i32", "b: i32"]);
+        assert_eq!(
+            help.signatures[0].documentation.as_deref(),
+            Some("Adds two numbers")
+        );
+        assert_eq!(help.parameter, 0);
+
+        assert!(signature_help(&json!({})).is_none());
+        assert!(signature_help(&json!({ "signatures": [] })).is_none());
+    }
 
     #[test]
     fn completes_from_a_list_or_array() {

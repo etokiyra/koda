@@ -537,6 +537,13 @@ pub struct HoverState {
     pub body: Vec<String>,
 }
 
+/// The signature-help popup's state.
+pub struct SignatureState {
+    pub help: crate::language::lsp::convert::SignatureHelp,
+    /// The screen anchor captured when the response arrived.
+    pub anchor: Option<(u16, u16)>,
+}
+
 /// The completion popup's state: a candidate pool filtered by the typed prefix.
 pub struct CompletionState {
     pool: Vec<Completion>,

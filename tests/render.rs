@@ -113,6 +113,37 @@ fn renders_indent_guides_at_the_detected_width() {
 }
 
 #[test]
+fn renders_the_signature_help_popup() {
+    use koda::app::overlay::SignatureState;
+    use koda::language::lsp::convert::{Signature, SignatureHelp};
+
+    let dir = temp_project("signature-popup");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+    app.signature = Some(SignatureState {
+        help: SignatureHelp {
+            signatures: vec![Signature {
+                label: "fn add(a: i32, b: i32) -> i32".to_string(),
+                parameters: vec!["a: i32".to_string(), "b: i32".to_string()],
+                documentation: Some("Adds two numbers".to_string()),
+            }],
+            active: 0,
+            parameter: 1,
+        },
+        anchor: Some((10, 5)),
+    });
+
+    let screen = draw(&mut app);
+    assert!(screen.contains("fn add"), "signature missing:\n{screen}");
+    assert!(
+        screen.contains("Adds two numbers"),
+        "signature documentation missing:\n{screen}"
+    );
+
+    cleanup(&dir);
+}
+
+#[test]
 fn renders_a_unified_diff_overlay() {
     let dir = temp_project("diff-view");
     let file = dir.join("src/main.rs");

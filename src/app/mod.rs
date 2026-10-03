@@ -39,7 +39,8 @@ use crate::terminal;
 use crate::ui;
 use overlay::{
     CompletionState, DiffState, DirPicker, Help, HoverState, NewProject, NewProjectStep, Overlay,
-    Picker, PickerAction, PickerItem, Prompt, PromptKind, Search, SearchField, TreeFilter,
+    Picker, PickerAction, PickerItem, Prompt, PromptKind, Search, SearchField, SignatureState,
+    TreeFilter,
 };
 
 /// How long typing must pause before diagnostics are recomputed. Short enough to
@@ -219,6 +220,11 @@ pub struct App {
     completion_request: Option<(LanguageId, i64)>,
     /// Hover popup, when open.
     pub hover: Option<HoverState>,
+    /// Signature-help popup, when open.
+    pub signature: Option<SignatureState>,
+    /// The id of the newest signature-help request, so an older response can be
+    /// discarded when the cursor has moved on.
+    signature_request: Option<(LanguageId, i64)>,
     /// Screen position of the editor cursor, updated during rendering.
     pub cursor_screen: Option<(u16, u16)>,
     pub tree_visible: bool,
@@ -339,6 +345,8 @@ impl App {
             completion_due: None,
             completion_request: None,
             hover: None,
+            signature: None,
+            signature_request: None,
             cursor_screen: None,
             tree_visible: true,
             inline_diagnostics: true,
@@ -581,6 +589,15 @@ impl App {
                 return;
             }
         }
+        // Signature help persists while literal characters and Backspace keep
+        // the call open; any other key dismisses it.
+        let keep_signature = matches!(key.code, KeyCode::Char(_) | KeyCode::Backspace)
+            && !key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::ALT);
+        if !keep_signature {
+            self.signature = None;
+            self.signature_request = None;
+        }
         if self.handle_global_key(key) {
             return;
         }
@@ -737,6 +754,7 @@ impl App {
             Overlay::None => {}
         }
         self.completion = None;
+        self.signature = None;
         if self.search.open {
             match self.search.field {
                 SearchField::Query => self.search.query.push_str(text),
@@ -756,6 +774,14 @@ impl App {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
+
+        // Signature help is transient: any key that is not a literal character
+        // dismisses it.
+        let typing = matches!(key.code, KeyCode::Char(_)) && !ctrl && !alt;
+        if !typing {
+            self.signature = None;
+            self.signature_request = None;
+        }
 
         match key.code {
             KeyCode::Char(c) => {
@@ -789,9 +815,7 @@ impl App {
                     }
                 } else {
                     self.with_doc(|d| d.type_char(c));
-                    if is_word_char(c) {
-                        self.after_word_char_typed();
-                    }
+                    self.after_typed_char(c);
                 }
             }
             KeyCode::Enter => self.with_doc(|d| d.insert_newline()),
@@ -1298,14 +1322,7 @@ impl App {
             }
             KeyCode::Char(c) if !ctrl => {
                 self.with_doc(|doc| doc.type_char(c));
-                if is_word_char(c) {
-                    self.after_word_char_typed();
-                } else {
-                    // Whitespace or punctuation ends the word: dismiss the popup
-                    // so it does not linger with an empty prefix.
-                    self.completion = None;
-                    self.completion_due = None;
-                }
+                self.after_typed_char(c);
                 true
             }
             _ => {
@@ -1339,6 +1356,48 @@ impl App {
             self.refresh_completion();
         }
         self.schedule_auto_completion();
+    }
+
+    /// React to a literal character typed in the editor: drive completion and
+    /// signature help together.
+    fn after_typed_char(&mut self, c: char) {
+        if is_word_char(c) {
+            self.after_word_char_typed();
+        } else {
+            // Whitespace or punctuation ends the word: dismiss the completion
+            // popup so it does not linger with an empty prefix.
+            self.completion = None;
+            self.completion_due = None;
+        }
+
+        if matches!(c, '(' | ',') {
+            self.request_lsp_signature();
+        } else if !is_word_char(c) && c != ' ' {
+            // A closing bracket or any other punctuation leaves the arguments.
+            self.signature = None;
+            self.signature_request = None;
+        }
+    }
+
+    /// Ask the language server for signature help at the cursor.
+    fn request_lsp_signature(&mut self) {
+        let Some(language) = self.lsp_language() else {
+            self.signature = None;
+            return;
+        };
+        let Some((path, row, col)) = self.lsp_target_for(RequestKind::SignatureHelp) else {
+            self.signature = None;
+            return;
+        };
+        if let Some(server) = self
+            .lsp
+            .get_mut(&language)
+            .and_then(|job| job.server.as_mut())
+        {
+            self.signature_request = server
+                .signature_help(&path, row, col)
+                .map(|id| (language, id));
+        }
     }
 
     /// Schedule an automatic completion a short pause after the last keystroke.
@@ -2103,6 +2162,8 @@ impl App {
 
     /// Open a file, focusing the editor and applying language detection.
     pub fn open_path(&mut self, path: PathBuf) {
+        self.signature = None;
+        self.signature_request = None;
         match self.editor.open_path(&path) {
             Ok(index) => {
                 // The focused pane adopts the newly opened document.
@@ -4052,6 +4113,16 @@ impl App {
                 if !items.is_empty() {
                     self.merge_workspace_symbols(items);
                 }
+            }
+            RequestKind::SignatureHelp => {
+                if self.signature_request != Some((language, id)) {
+                    return;
+                }
+                self.signature_request = None;
+                self.signature = convert::signature_help(&value).map(|help| SignatureState {
+                    help,
+                    anchor: self.cursor_screen,
+                });
             }
         }
     }
@@ -6173,6 +6244,51 @@ mod tests {
                 .contains("Not a git repository"),
             "status was {:?}",
             app.status_message()
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn signature_help_response_populates_the_popup() {
+        let dir = temp_project("signature");
+        let file = dir.join("src/main.rs");
+        let mut app = app_with_file(&file);
+
+        app.signature_request = Some((LanguageId::Rust, 7));
+        app.handle_lsp_response(
+            LanguageId::Rust,
+            RequestKind::SignatureHelp,
+            7,
+            Ok(serde_json::json!({
+                "signatures": [{
+                    "label": "fn add(a: i32, b: i32)",
+                    "parameters": [{ "label": "a: i32" }, { "label": "b: i32" }],
+                    "documentation": "Adds two numbers"
+                }],
+                "activeSignature": 0,
+                "activeParameter": 1
+            })),
+        );
+        let signature = app.signature.as_ref().expect("signature state");
+        assert_eq!(signature.help.active, 0);
+        assert_eq!(signature.help.parameter, 1);
+        assert_eq!(
+            signature.help.signatures[0].parameters,
+            vec!["a: i32", "b: i32"]
+        );
+
+        // A superseded response is ignored.
+        app.signature_request = Some((LanguageId::Rust, 9));
+        app.signature = None;
+        app.handle_lsp_response(
+            LanguageId::Rust,
+            RequestKind::SignatureHelp,
+            8,
+            Ok(serde_json::json!({ "signatures": [{ "label": "stale" }] })),
+        );
+        assert!(
+            app.signature.is_none(),
+            "a stale signature response is dropped"
         );
         fs::remove_dir_all(&dir).ok();
     }

@@ -51,6 +51,7 @@ struct ServerCapabilities {
     rename: bool,
     code_action: bool,
     workspace_symbol: bool,
+    signature_help: bool,
 }
 
 /// The LSP `languageId` string for a language.
@@ -94,6 +95,7 @@ pub enum RequestKind {
     Rename,
     CodeActions,
     WorkspaceSymbols,
+    SignatureHelp,
 }
 
 /// Something the app consumes from a running server.
@@ -243,7 +245,14 @@ impl Server {
                         "definition": {},
                         "references": {},
                         "rename": { "prepareSupport": false },
-                        "codeAction": {}
+                        "codeAction": {},
+                        "signatureHelp": {
+                            "signatureInformation": {
+                                "documentationFormat": ["markdown", "plaintext"],
+                                "parameterInformation": { "labelOffsetSupport": true }
+                            },
+                            "contextSupport": true
+                        }
                     },
                     "workspace": { "configuration": true, "symbol": {} }
                 },
@@ -273,6 +282,7 @@ impl Server {
             RequestKind::Rename => self.capabilities.rename,
             RequestKind::CodeActions => self.capabilities.code_action,
             RequestKind::WorkspaceSymbols => self.capabilities.workspace_symbol,
+            RequestKind::SignatureHelp => self.capabilities.signature_help,
         }
     }
 
@@ -347,6 +357,22 @@ impl Server {
     /// Whether the server has this document open.
     pub fn has_open_document(&self, path: &Path) -> bool {
         self.versions.contains_key(path)
+    }
+
+    /// Ask the server for signature help, returning the request id so a caller
+    /// can discard a superseded response.
+    pub fn signature_help(&mut self, path: &Path, line: usize, col: usize) -> Option<i64> {
+        let mut params = position_params(path, line, col);
+        if let Some(object) = params.as_object_mut() {
+            // 1 = Invoked; 2 = TriggerCharacter; 3 = ContentChange.
+            object.insert("context".to_string(), json!({ "triggerKind": 1 }));
+        }
+        self.send_request(
+            RequestKind::SignatureHelp,
+            "textDocument/signatureHelp",
+            params,
+        )
+        .ok()
     }
 
     /// Ask the server to complete at a position, returning the request id so a
@@ -585,6 +611,7 @@ fn parse_initialize(result: &Value) -> (PositionEncoding, ServerCapabilities) {
             rename: advertised("renameProvider"),
             code_action: advertised("codeActionProvider"),
             workspace_symbol: advertised("workspaceSymbolProvider"),
+            signature_help: advertised("signatureHelpProvider"),
         },
     )
 }

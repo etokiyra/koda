@@ -123,6 +123,9 @@ The highest-value work. These turn Koda from an editor into an IDE.
 - [x] **Protocol hygiene.** Koda negotiates `utf-8` positions where the server
       offers them, only requests features the server advertises (falling back to
       its built-in providers otherwise), and reports a crashing server's stderr.
+- [x] **Signature help.** Parameter hints for the call under the cursor, from
+      the server's `textDocument/signatureHelp`, with the active parameter
+      emphasised and overloads counted.
 
 The abstraction is already in place: providers declare `Capability`s, and the
 command palette already reports which are available. Filling them in is additive.

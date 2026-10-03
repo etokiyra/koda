@@ -212,6 +212,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that capability (`completionProvider`, `hoverProvider`, …), so built-in
   intelligence takes over cleanly instead of showing a spurious error. A server
   that crashes now reports its last stderr lines alongside the failure.
+- **Signature help.** Typing `(` or `,` in a call asks the server for parameter
+  hints and shows them in a small popup anchored below the cursor, with the
+  active parameter emphasised, the signature's documentation and a counter when
+  overloads exist. It is gated on the server's `signatureHelpProvider`
+  capability, refreshes as the arguments change, and is dismissed by leaving
+  the call or pressing any non-typing key. A superseded response is discarded by
+  request id.
 - Added an asynchronous language-server client. When a supported server is
   installed (`rust-analyzer` for Rust, `gopls` for Go) Koda starts it for the
   workspace, runs the LSP handshake, keeps documents in sync and shows the

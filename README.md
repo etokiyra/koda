@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-289%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-310%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -92,6 +92,9 @@ keep you productive **offline**.
   first. It stays quiet in comments and strings; `Ctrl+Space` opens it manually
   as a fallback.
 - **Hover** — `Ctrl+Shift+H`, with the symbol's kind, definition and usage count.
+- **Signature help** — parameter hints appear automatically as you type `(` or `,`
+  in a call, highlighting the argument you are on. It comes from the language
+  server and disappears when you leave the call.
 - **Navigation** — `F12` go-to-definition and `Shift+F12` find-references,
   across files when a server is attached; without one, `F12` falls back to a
   project-wide symbol search so it still works offline.
