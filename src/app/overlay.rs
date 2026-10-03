@@ -115,6 +115,35 @@ impl Picker {
         self.item(self.selected)
     }
 
+    /// Append items that are not already present, preserving the selection.
+    ///
+    /// Used to merge language-server workspace symbols into a picker that was
+    /// already populated by Koda's built-in scan.
+    pub fn extend_items(&mut self, items: Vec<PickerItem>) {
+        let selected = self
+            .selected_item()
+            .map(|item| (item.label.clone(), item.detail.clone()));
+        let mut seen: std::collections::HashSet<(String, String)> = self
+            .items
+            .iter()
+            .map(|item| (item.label.clone(), item.detail.clone()))
+            .collect();
+        for item in items {
+            if seen.insert((item.label.clone(), item.detail.clone())) {
+                self.items.push(item);
+            }
+        }
+        self.refilter();
+        if let Some((label, detail)) = selected
+            && let Some(index) = self
+                .filtered
+                .iter()
+                .position(|&i| self.items[i].label == label && self.items[i].detail == detail)
+        {
+            self.selected = index;
+        }
+    }
+
     pub fn move_up(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;

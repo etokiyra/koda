@@ -49,6 +49,7 @@ pub enum RequestKind {
     References,
     Rename,
     CodeActions,
+    WorkspaceSymbols,
 }
 
 /// Something the app consumes from a running server.
@@ -158,7 +159,7 @@ impl Server {
                         "rename": { "prepareSupport": false },
                         "codeAction": {}
                     },
-                    "workspace": { "configuration": true }
+                    "workspace": { "configuration": true, "symbol": {} }
                 },
                 "workspaceFolders": null
             }),
@@ -278,6 +279,18 @@ impl Server {
             "context": { "diagnostics": [] }
         });
         let _ = self.send_request(RequestKind::CodeActions, "textDocument/codeAction", params);
+    }
+
+    /// Ask the server for workspace-wide symbols matching `query`.
+    ///
+    /// An empty query asks for everything the server is willing to return,
+    /// which the picker then filters locally.
+    pub fn workspace_symbols(&mut self, query: &str) {
+        let _ = self.send_request(
+            RequestKind::WorkspaceSymbols,
+            "workspace/symbol",
+            json!({ "query": query }),
+        );
     }
 
     /// Ask the server to execute one of its commands. The response is ignored;

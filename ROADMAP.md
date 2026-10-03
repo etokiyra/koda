@@ -69,7 +69,8 @@ The highest-value work. These turn Koda from an editor into an IDE.
       outline; the chosen symbol is revealed. Heuristic today, LSP symbols later.
 - [x] **Project-wide symbol search.** `Ctrl+T` scans the project on the
       background worker and lists every definition in a filterable picker.
-      Extension-based and heuristic; LSP workspace symbols can replace it.
+      When a language server is attached its `workspace/symbol` results are
+      merged in, with the built-in scan as the instant, offline fallback.
 - [x] **Formatting.** `Ctrl+Shift+I` runs the language's trusted formatter
       (`rustfmt`, `gofmt`) on a snapshot through the background worker and
       replaces the buffer as one undoable edit. Reuses system tools, detects

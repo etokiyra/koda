@@ -115,6 +115,8 @@ pub struct App {
     workspace_symbols_seq: u64,
     /// The workspace symbol scan awaiting a result, if any.
     pending_workspace_symbols: Option<u64>,
+    /// Whether a language server workspace-symbol request is in flight.
+    ws_lsp_pending: bool,
     /// Animation frame, advanced while something on screen animates.
     pub anim_phase: usize,
     /// When the animation frame last advanced.
@@ -186,6 +188,7 @@ impl App {
             pending_format: None,
             workspace_symbols_seq: 0,
             pending_workspace_symbols: None,
+            ws_lsp_pending: false,
             anim_phase: 0,
             anim_last: Instant::now(),
             tools: None,
@@ -1523,18 +1526,30 @@ impl App {
         }
     }
 
-    /// Ask the background worker to scan the project for definitions.
+    /// Ask for project-wide symbols: the language server when attached, plus the
+    /// built-in scan as an immediate, always-available fallback.
     fn open_workspace_symbols(&mut self) {
+        if self.lsp.as_ref().is_some_and(|server| server.is_ready()) {
+            self.ws_lsp_pending = true;
+            if let Some(server) = self.lsp.as_mut() {
+                server.workspace_symbols("");
+            }
+        }
         self.workspace_symbols_seq += 1;
         let revision = self.workspace_symbols_seq;
         self.pending_workspace_symbols = Some(revision);
         self.background
             .workspace_symbols(self.workspace.root().to_path_buf(), revision);
+        self.set_status("Searching symbols…");
     }
 
     fn open_workspace_symbol_picker(&mut self, symbols: Vec<WorkspaceSymbol>) {
         if symbols.is_empty() {
-            self.set_status("No symbols found");
+            // A server may still be answering; only report failure when nothing
+            // else is coming and no picker is showing.
+            if !self.ws_lsp_pending && self.overlay.is_none() {
+                self.set_status("No symbols found");
+            }
             return;
         }
         let root = self.workspace.root().to_path_buf();
@@ -1562,6 +1577,18 @@ impl App {
                 )
             })
             .collect();
+        self.merge_workspace_symbols(items);
+    }
+
+    /// Show or extend the workspace-symbol picker, keeping any results already
+    /// listed. Used by both the built-in scan and the language server.
+    fn merge_workspace_symbols(&mut self, items: Vec<PickerItem>) {
+        if let Overlay::Picker(picker) = &mut self.overlay
+            && picker.title == "Workspace Symbols"
+        {
+            picker.extend_items(items);
+            return;
+        }
         let mut picker = Picker::new("Workspace Symbols", "Filter symbols…", items);
         picker.refilter();
         self.overlay = Overlay::Picker(picker);
@@ -1872,7 +1899,13 @@ impl App {
         let value = match result {
             Ok(value) => value,
             Err(message) => {
-                self.set_error(format!("Language server: {message}"));
+                if kind == RequestKind::WorkspaceSymbols {
+                    // Keep the built-in scan's results; a server that cannot
+                    // answer workspace symbols is not an error worth shouting.
+                    self.ws_lsp_pending = false;
+                } else {
+                    self.set_error(format!("Language server: {message}"));
+                }
                 return;
             }
         };
@@ -1944,6 +1977,35 @@ impl App {
                 let mut picker = Picker::new("Code Actions", "Filter actions…", items);
                 picker.refilter();
                 self.overlay = Overlay::Picker(picker);
+            }
+            RequestKind::WorkspaceSymbols => {
+                self.ws_lsp_pending = false;
+                let root = self.workspace.root().to_path_buf();
+                let items: Vec<PickerItem> = convert::workspace_symbols(&value)
+                    .into_iter()
+                    .take(2000)
+                    .map(|item| {
+                        let relative = item
+                            .path
+                            .strip_prefix(&root)
+                            .unwrap_or(&item.path)
+                            .display()
+                            .to_string();
+                        let detail =
+                            format!("{}  ·  {relative}:{}", item.kind.label(), item.line + 1);
+                        PickerItem::new(
+                            item.name,
+                            detail,
+                            PickerAction::Reveal {
+                                path: item.path,
+                                position: Position::new(item.line, item.col),
+                            },
+                        )
+                    })
+                    .collect();
+                if !items.is_empty() {
+                    self.merge_workspace_symbols(items);
+                }
             }
         }
     }
@@ -3587,6 +3649,7 @@ while read -r header; do
     textDocument/references) result="[{\"uri\":\"file://$target\",\"range\":{\"start\":{\"line\":1,\"character\":4},\"end\":{\"line\":1,\"character\":9}}}]" ;;
     textDocument/rename) result="{\"changes\":{\"file://$target\":[{\"range\":{\"start\":{\"line\":1,\"character\":8},\"end\":{\"line\":1,\"character\":13}},\"newText\":\"renamed\"}]}}" ;;
     textDocument/codeAction) result="[{\"title\":\"Apply fix\",\"edit\":{\"changes\":{\"file://$target\":[{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":0}},\"newText\":\"FIX \"}]}}}]" ;;
+    workspace/symbol) result="[{\"name\":\"koda_ws_symbol\",\"kind\":12,\"location\":{\"uri\":\"file://$target\",\"range\":{\"start\":{\"line\":3,\"character\":0},\"end\":{\"line\":3,\"character\":3}}}}]" ;;
     *) result='null' ;;
   esac
   resp=$(printf '{"jsonrpc":"2.0","id":%s,"result":%s}' "$id" "$result")
@@ -3712,6 +3775,18 @@ done
                 |doc| doc.buffer.line_text(0).starts_with("FIX ")
             )),
             "expected the code action edit to apply"
+        );
+
+        // Workspace symbols: the server's results are merged into the picker.
+        app.open_workspace_symbols();
+        assert!(
+            wait(&mut app, &|app| match &app.overlay {
+                Overlay::Picker(picker) => (0..picker.filtered.len())
+                    .filter_map(|index| picker.item(index))
+                    .any(|item| item.label == "koda_ws_symbol"),
+                _ => false,
+            }),
+            "expected the server's workspace symbol"
         );
 
         fs::remove_dir_all(&dir).ok();

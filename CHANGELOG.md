@@ -91,6 +91,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Code actions** (`Ctrl+.`) list the server's quick fixes and refactors in a
   picker and apply the chosen one, whether it carries an edit or a command
   (including server-initiated `workspace/applyEdit`).
+- **Workspace symbols** (`Ctrl+T`) now also come from the server's
+  `workspace/symbol` request when one is attached, merged with Koda's built-in
+  project scan so results appear instantly and remain available offline.
 
 ### Fixed
 

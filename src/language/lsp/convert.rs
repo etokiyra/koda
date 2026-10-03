@@ -21,6 +21,16 @@ pub struct Location {
     pub col: usize,
 }
 
+/// A symbol from a `workspace/symbol` response.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceSymbolItem {
+    pub name: String,
+    pub kind: crate::language::symbols::SymbolKind,
+    pub path: PathBuf,
+    pub line: usize,
+    pub col: usize,
+}
+
 /// A single text replacement within a file, in `(line, character)` coordinates.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextEdit {
@@ -223,6 +233,67 @@ fn markup_text(value: &Value) -> String {
         .to_string()
 }
 
+/// Workspace symbols from a `workspace/symbol` result.
+///
+/// Handles both `SymbolInformation` (a `location` with a range) and the newer
+/// `WorkspaceSymbol` shape. Symbols without a resolvable location are dropped.
+pub fn workspace_symbols(value: &Value) -> Vec<WorkspaceSymbolItem> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let name = item.get("name")?.as_str()?;
+            if name.is_empty() {
+                return None;
+            }
+            let location = item.get("location")?;
+            let uri = location
+                .get("uri")
+                .or_else(|| location.get("targetUri"))?
+                .as_str()?;
+            let path = uri_to_path(uri)?;
+            let start = location
+                .get("range")
+                .or_else(|| location.get("targetSelectionRange"))
+                .or_else(|| location.get("targetRange"))
+                .and_then(|range| range.get("start"));
+            Some(WorkspaceSymbolItem {
+                name: name.to_string(),
+                kind: symbol_kind(item.get("kind").and_then(Value::as_u64)),
+                path,
+                line: start
+                    .and_then(|start| start.get("line"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize,
+                col: start
+                    .and_then(|start| start.get("character"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize,
+            })
+        })
+        .collect()
+}
+
+/// Map an LSP `SymbolKind` number onto Koda's own symbol kinds.
+fn symbol_kind(kind: Option<u64>) -> crate::language::symbols::SymbolKind {
+    use crate::language::symbols::SymbolKind;
+    match kind {
+        Some(2..=4) => SymbolKind::Module,
+        Some(5 | 26) => SymbolKind::Type,
+        Some(6) => SymbolKind::Method,
+        Some(7 | 8 | 13) => SymbolKind::Variable,
+        Some(10) => SymbolKind::Enum,
+        Some(11) => SymbolKind::Interface,
+        Some(12) => SymbolKind::Function,
+        Some(14 | 22) => SymbolKind::Constant,
+        Some(20) => SymbolKind::Key,
+        Some(23) => SymbolKind::Struct,
+        _ => SymbolKind::Variable,
+    }
+}
+
 /// Jump targets from a definition or references result.
 ///
 /// Handles `Location`, `Location[]` and `LocationLink[]`.
@@ -312,6 +383,31 @@ mod tests {
         assert_eq!((found[1].line, found[1].col), (9, 0));
 
         assert!(locations(&json!(null)).is_empty());
+    }
+
+    #[test]
+    fn parses_workspace_symbols() {
+        use crate::language::symbols::SymbolKind;
+        let value = json!([
+            { "name": "Server", "kind": 23, "location": {
+                "uri": "file:///tmp/a.rs",
+                "range": { "start": { "line": 3, "character": 4 }, "end": { "line": 3, "character": 10 } }
+            }},
+            { "name": "run", "kind": 12, "location": {
+                "uri": "file:///tmp/b.rs",
+                "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 3 } }
+            }},
+            { "name": "NoLocation" }
+        ]);
+        let items = workspace_symbols(&value);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "Server");
+        assert_eq!(items[0].kind, SymbolKind::Struct);
+        assert_eq!(items[0].path, PathBuf::from("/tmp/a.rs"));
+        assert_eq!((items[0].line, items[0].col), (3, 4));
+        assert_eq!(items[1].kind, SymbolKind::Function);
+
+        assert!(workspace_symbols(&json!(null)).is_empty());
     }
 
     #[test]

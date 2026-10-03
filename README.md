@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-170%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-171%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -90,7 +90,9 @@ keep you productive **offline**.
 - **Hover** — `Ctrl+Shift+H`, with the symbol's kind, definition and usage count.
 - **Navigation** — `F12` go-to-definition and `Shift+F12` find-references, across
   files when a server is attached.
-- **Symbols** — `Ctrl+Shift+O` for the file, `Ctrl+T` for the whole workspace.
+- **Symbols** — `Ctrl+Shift+O` for the file, `Ctrl+T` for the whole workspace
+  (from the language server when attached, with Koda's built-in scan as the
+  instant, offline fallback).
 - **Rename** — `F2`, applying a workspace edit across every affected file.
 - **Code actions** — `Ctrl+.` for quick fixes and refactors.
 - **Formatting** — `Ctrl+Shift+I` through the language's own tool (`rustfmt`,
