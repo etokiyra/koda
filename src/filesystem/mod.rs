@@ -92,13 +92,46 @@ pub fn read_to_string(path: &Path) -> std::io::Result<String> {
 }
 
 /// Write a string to a file, creating parent directories when necessary.
+///
+/// The write goes to a temporary file in the same directory and is then
+/// renamed over the destination, so a crash, full disk or interrupted write
+/// can never leave a truncated file behind.
 pub fn write_string(path: &Path, contents: &str) -> std::io::Result<()> {
+    write_atomic(path, contents)
+}
+
+/// Atomically replace `path` with `contents`.
+///
+/// Writes a sibling temporary file, flushes it, preserves the destination's
+/// permissions when it already exists, and renames it into place.
+pub fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, contents)
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("koda");
+    let temp = path.with_file_name(format!(".{name}.koda-{}.tmp", std::process::id()));
+
+    let write = (|| {
+        let mut file = std::fs::File::create(&temp)?;
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            let _ = std::fs::set_permissions(&temp, metadata.permissions());
+        }
+        drop(file);
+        std::fs::rename(&temp, path)
+    })();
+    if write.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    write
 }
 
 /// Create an empty file (and its parent directories), failing if it exists.
@@ -115,8 +148,14 @@ pub fn create_empty_file(path: &Path) -> std::io::Result<()> {
         .map(|_| ())
 }
 
-/// Rename or move a path.
+/// Rename or move a path, refusing to overwrite an existing destination.
 pub fn rename_path(from: &Path, to: &Path) -> std::io::Result<()> {
+    if to.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("{} already exists", to.display()),
+        ));
+    }
     if let Some(parent) = to.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -126,7 +165,16 @@ pub fn rename_path(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 /// Copy a file, creating parent directories when necessary.
+///
+/// Refuses to overwrite an existing file so a mistyped destination cannot
+/// silently destroy it.
 pub fn copy_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    if to.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("{} already exists", to.display()),
+        ));
+    }
     if let Some(parent) = to.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -208,6 +256,25 @@ mod tests {
             .collect();
         assert!(names.iter().any(|name| name == "lib.rs"));
         assert!(!names.iter().any(|name| name == "gen.rs"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rename_and_copy_refuse_to_overwrite() {
+        let dir = std::env::temp_dir().join(format!("koda-fs-overwrite-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("a.txt");
+        let existing = dir.join("b.txt");
+        fs::write(&source, "a").unwrap();
+        fs::write(&existing, "b").unwrap();
+
+        assert!(rename_path(&source, &existing).is_err());
+        assert!(copy_file(&source, &existing).is_err());
+        // The destination is untouched.
+        assert_eq!(fs::read_to_string(&existing).unwrap(), "b");
+        assert_eq!(fs::read_to_string(&source).unwrap(), "a");
 
         fs::remove_dir_all(&dir).ok();
     }

@@ -141,8 +141,7 @@ impl Document {
         let Some(path) = self.buffer.path.clone() else {
             return Ok(false);
         };
-        let bytes = std::fs::read(&path)?;
-        let text = String::from_utf8_lossy(&bytes);
+        let text = crate::editor::buffer::read_text(&path)?;
         let cursor = self.cursor;
 
         self.buffer.replace_contents(&text);

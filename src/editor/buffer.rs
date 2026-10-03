@@ -52,6 +52,38 @@ impl Default for Buffer {
     }
 }
 
+/// The largest file Koda will load into the editor. Larger files are refused
+/// with a clear message rather than risking a long freeze and huge allocations.
+pub const MAX_OPEN_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Read a source file as UTF-8, rejecting binary and oversized files.
+///
+/// Unlike a lossy read, this never silently replaces bytes: a file that is not
+/// valid UTF-8 would otherwise be rewritten with replacement characters on the
+/// first save, corrupting it.
+pub fn read_text(path: &Path) -> std::io::Result<String> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.len() > MAX_OPEN_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "file is too large to open ({} MiB)",
+                metadata.len() / (1024 * 1024)
+            ),
+        ));
+    }
+    let bytes = std::fs::read(path)?;
+    if bytes.contains(&0) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file appears to be binary",
+        ));
+    }
+    String::from_utf8(bytes).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "file is not valid UTF-8")
+    })
+}
+
 impl Buffer {
     pub fn from_text(text: &str, path: Option<PathBuf>) -> Self {
         let rope = Rope::from_str(text);
@@ -70,10 +102,9 @@ impl Buffer {
         }
     }
 
-    /// Load a buffer from disk. Non UTF-8 bytes are replaced rather than rejected.
+    /// Load a buffer from disk, refusing binary, oversized and non-UTF-8 files.
     pub fn from_path(path: &Path) -> std::io::Result<Self> {
-        let bytes = std::fs::read(path)?;
-        let text = String::from_utf8_lossy(&bytes);
+        let text = read_text(path)?;
         Ok(Buffer::from_text(&text, Some(path.to_path_buf())))
     }
 
@@ -212,7 +243,7 @@ impl Buffer {
     }
 
     pub fn save_as(&mut self, path: &Path) -> std::io::Result<bool> {
-        std::fs::write(path, self.text())?;
+        crate::filesystem::write_atomic(path, &self.text())?;
         self.path = Some(path.to_path_buf());
         self.mark_clean();
         Ok(true)
@@ -246,5 +277,48 @@ mod tests {
         assert_eq!(buffer.line_char_len(0), 2);
         assert_eq!(buffer.line_char_len(1), 3);
         assert_eq!(buffer.line_text(0), "ab");
+    }
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("koda-buffer-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("file")
+    }
+
+    #[test]
+    fn refuses_binary_and_non_utf8_files() {
+        let binary = temp_path("binary");
+        std::fs::write(&binary, b"abc\0def").unwrap();
+        let err = Buffer::from_path(&binary)
+            .err()
+            .expect("a binary file should be refused");
+        assert!(err.to_string().contains("binary"), "{err}");
+
+        let latin1 = temp_path("latin1");
+        std::fs::write(&latin1, [0xff, 0xfe, 0x00, 0x01]).unwrap();
+        assert!(Buffer::from_path(&latin1).is_err());
+
+        let _ = std::fs::remove_dir_all(binary.parent().unwrap());
+    }
+
+    #[test]
+    fn saving_is_atomic_and_preserves_content() {
+        let path = temp_path("save");
+        std::fs::write(&path, "old\n").unwrap();
+        let mut buffer = Buffer::from_path(&path).unwrap();
+        buffer.insert(0, "new\n");
+        assert!(buffer.save().unwrap());
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new\nold\n");
+        // No temporary siblings are left behind.
+        let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".koda-"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left: {leftovers:?}");
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
