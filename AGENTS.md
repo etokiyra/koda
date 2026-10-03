@@ -220,7 +220,9 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   self-contained attempts (each a short command sequence). Koda re-probes the
   tool after every attempt rather than trusting a package manager's exit code,
   and reports a missing prerequisite (a whole absent toolchain) instead of
-  offering an install that cannot run.
+  offering an install that cannot run. Installs into the shared managed
+  directory are guarded by an advisory lock (with stale-lock recovery) so
+  concurrent Koda instances cannot corrupt the same npm prefix or virtualenv.
 - **Split editor.** The editor keeps a single active document; a split stores
   one document index per pane and `editor.active` follows the focused pane, so
   every existing editing path keeps working unchanged. Panes share the tab

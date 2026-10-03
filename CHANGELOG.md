@@ -87,6 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trusting a package manager's exit code. A tool whose whole toolchain is
   missing (for example no `go` or `npm`) is shown with the missing prerequisite
   instead of a dead install action.
+- Tool installation takes an advisory **lock** over Koda's managed tools
+  directory, so two Koda instances sharing a data directory cannot install into
+  the same npm prefix or Python virtualenv at once. A lock left by a crashed
+  instance is reclaimed after a timeout, so an interrupted install never wedges
+  provisioning.
 
 - Installation runs on the background worker with a busy indicator; Koda
   re-probes when it finishes and, if a server is now available, starts it.

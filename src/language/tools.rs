@@ -10,10 +10,15 @@
 //! tool installed by rustup or pip is found even when Koda was launched from a
 //! GUI or a non-login shell whose `PATH` omits them.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, SystemTime};
 
 use crate::language::id::LanguageId;
+
+/// A lock older than this is assumed to be left by a crashed instance.
+const STALE_INSTALL_LOCK: Duration = Duration::from_secs(15 * 60);
 
 /// A tool Koda knows how to use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -401,6 +406,58 @@ fn npm_attempts(packages: &[&str]) -> Vec<InstallAttempt> {
     attempts
 }
 
+/// A best-effort advisory lock over the managed tools directory.
+///
+/// Two Koda instances sharing a data directory must not install into the same
+/// npm prefix or Python virtualenv at once. The lock is a file created with
+/// `create_new`; a stale one (from a crashed instance) is reclaimed by age.
+struct InstallLock {
+    path: PathBuf,
+}
+
+impl InstallLock {
+    fn acquire() -> Result<Self, String> {
+        let dir = tools_dir().ok_or_else(|| "no data directory for tools".to_string())?;
+        Self::acquire_at(&dir)
+    }
+
+    fn acquire_at(dir: &Path) -> Result<Self, String> {
+        std::fs::create_dir_all(dir).map_err(|err| err.to_string())?;
+        let path = dir.join("install.lock");
+
+        // Reclaim a lock left behind by a crashed instance.
+        if let Ok(modified) = std::fs::metadata(&path).and_then(|meta| meta.modified())
+            && SystemTime::now()
+                .duration_since(modified)
+                .map(|age| age > STALE_INSTALL_LOCK)
+                .unwrap_or(false)
+        {
+            let _ = std::fs::remove_file(&path);
+        }
+
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                let _ = writeln!(file, "{}", std::process::id());
+                Ok(InstallLock { path })
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                Err("another Koda instance is installing tools — try again shortly".to_string())
+            }
+            Err(err) => Err(err.to_string()),
+        }
+    }
+}
+
+impl Drop for InstallLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 /// Install a tool by trying each strategy and verifying the result.
 ///
 /// Intended for the background worker. A strategy's commands run in order; if
@@ -408,6 +465,9 @@ fn npm_attempts(packages: &[&str]) -> Vec<InstallAttempt> {
 /// the tool — a package manager can report success without producing a binary
 /// Koda can find. Returns a short success message or the most recent
 /// actionable error.
+///
+/// A lock around the managed tools directory keeps two Koda instances from
+/// installing into the same npm prefix or Python virtualenv at once.
 pub fn install(tool: Tool) -> Result<String, String> {
     let attempts = tool.install_attempts();
     if attempts.is_empty() {
@@ -417,6 +477,7 @@ pub fn install(tool: Tool) -> Result<String, String> {
             tool.install_hint()
         ));
     }
+    let _lock = InstallLock::acquire()?;
 
     let mut last_error = None;
     for attempt in &attempts {
@@ -694,6 +755,38 @@ mod tests {
     #[test]
     fn unknown_program_is_not_located() {
         assert!(locate("koda-definitely-not-a-real-tool").is_none());
+    }
+
+    #[test]
+    fn install_lock_is_exclusive_and_reclaims_stale_locks() {
+        let dir = std::env::temp_dir().join(format!("koda-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let first = InstallLock::acquire_at(&dir).expect("first lock");
+        assert!(
+            InstallLock::acquire_at(&dir).is_err(),
+            "the lock must be exclusive"
+        );
+        drop(first);
+        assert!(
+            InstallLock::acquire_at(&dir).is_ok(),
+            "dropping the guard releases the lock"
+        );
+
+        // A stale lock from a crashed instance is reclaimed.
+        let path = dir.join("install.lock");
+        std::fs::write(&path, "99999").unwrap();
+        let file = std::fs::File::options().write(true).open(&path).unwrap();
+        file.set_modified(SystemTime::now() - STALE_INSTALL_LOCK - Duration::from_secs(60))
+            .unwrap();
+        drop(file);
+        assert!(
+            InstallLock::acquire_at(&dir).is_ok(),
+            "a stale lock is reclaimed"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

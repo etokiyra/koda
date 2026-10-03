@@ -146,6 +146,8 @@ manages under its own data directory, and `pip --user`/`pipx` under `~/.local`
 — so Koda never needs `sudo` and a system-owned prefix can never make
 provisioning fail. The Python virtualenv seeds its own `pip`, so a Python
 without the `pip` module (or one that is externally managed) still works.
+Installation is serialised with an advisory lock (with stale-lock recovery), so
+two Koda instances cannot corrupt the same managed prefix.
 
 ### Supported languages
 
