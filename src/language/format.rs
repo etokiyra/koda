@@ -12,6 +12,13 @@
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::Duration;
+
+/// The longest a formatter may run before it is killed.
+const FORMAT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The most formatter output Koda keeps; the excess is drained and discarded.
+const MAX_FORMAT_OUTPUT: usize = 8 * 1024 * 1024;
 
 /// The result of asking a provider to format a document.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,26 +92,34 @@ fn run(program: &str, args: &[&str], text: &str, tool: &str, hint: &str) -> Form
         let _ = stdin.write_all(text.as_bytes());
     }
 
-    match child.wait_with_output() {
-        Ok(output) if output.status.success() => {
-            let formatted = String::from_utf8_lossy(&output.stdout).into_owned();
-            if formatted.trim().is_empty() {
-                FormatOutcome::Failed(format!("{tool} produced no output"))
-            } else {
-                FormatOutcome::Formatted(formatted)
-            }
+    let captured =
+        match crate::process::wait_captured(&mut child, FORMAT_TIMEOUT, MAX_FORMAT_OUTPUT) {
+            Ok(captured) => captured,
+            Err(err) => return FormatOutcome::Failed(format!("{tool} failed: {err}")),
+        };
+    let Some(status) = captured.status else {
+        return FormatOutcome::Failed(format!(
+            "{tool} timed out after {}s",
+            FORMAT_TIMEOUT.as_secs()
+        ));
+    };
+
+    if status.success() {
+        let formatted = String::from_utf8_lossy(&captured.stdout).into_owned();
+        if formatted.trim().is_empty() {
+            FormatOutcome::Failed(format!("{tool} produced no output"))
+        } else {
+            FormatOutcome::Formatted(formatted)
         }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let message = stderr
-                .lines()
-                .find(|line| !line.trim().is_empty())
-                .unwrap_or("unknown error")
-                .trim()
-                .to_string();
-            FormatOutcome::Failed(format!("{tool}: {message}"))
-        }
-        Err(err) => FormatOutcome::Failed(format!("{tool} failed: {err}")),
+    } else {
+        let stderr = String::from_utf8_lossy(&captured.stderr);
+        let message = stderr
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("unknown error")
+            .trim()
+            .to_string();
+        FormatOutcome::Failed(format!("{tool}: {message}"))
     }
 }
 

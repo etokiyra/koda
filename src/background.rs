@@ -1,16 +1,13 @@
-//! A small background worker.
+//! A small background worker pool.
 //!
-//! Koda must never block the UI on work that is not the user's keystroke. This
-//! worker owns a thread and a channel pair: the app sends requests and drains
-//! results as they arrive, so expensive operations stay off the render path.
-//!
-//! Today it handles language detection and git refreshes. The same shape is
-//! where diagnostics, completion and other language intelligence will live, so
-//! the UI is already written to receive results asynchronously.
+//! Koda must never block the UI on work that is not the user's keystroke. A few
+//! worker threads share a request channel; the app sends requests and drains
+//! results as they arrive, so expensive operations stay off the render path and
+//! one slow formatter or installer cannot stall unrelated editor services.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -123,117 +120,51 @@ pub enum Event {
     },
 }
 
-/// Handle to the background thread.
+/// Handle to the background worker.
 pub struct Background {
-    requests: Sender<Request>,
+    requests: mpsc::SyncSender<Request>,
     events: Receiver<Event>,
 }
 
-impl Background {
-    /// Spawn the worker, sharing the language service with the UI thread.
-    pub fn spawn(language: Arc<LanguageService>) -> Self {
-        let (request_tx, request_rx) = mpsc::channel::<Request>();
-        let (event_tx, event_rx) = mpsc::channel::<Event>();
+/// How many background operations may run at once. A small pool keeps a slow
+/// formatter or installer from blocking detection, diagnostics and git.
+const WORKER_THREADS: usize = 3;
 
-        let _ = thread::Builder::new()
-            .name("koda-background".to_string())
-            .spawn(move || {
-                while let Ok(request) = request_rx.recv() {
-                    match request {
-                        Request::Detect { path, markers } => {
-                            let result = language.detect_file(&path, &markers);
-                            let _ = event_tx.send(Event::Detected {
-                                path,
-                                language: result.language,
-                                confidence: result.confidence,
-                            });
-                        }
-                        Request::Diagnostics {
-                            path,
-                            language: id,
-                            text,
-                            revision,
-                        } => {
-                            let diagnostics = language.provider(id).diagnostics(&text);
-                            let _ = event_tx.send(Event::Diagnostics {
-                                path,
-                                revision,
-                                diagnostics,
-                            });
-                        }
-                        Request::Format {
-                            path,
-                            language: id,
-                            text,
-                            revision,
-                        } => {
-                            let outcome = language.provider(id).format(&path, &text);
-                            let _ = event_tx.send(Event::Formatted {
-                                path,
-                                revision,
-                                outcome,
-                            });
-                        }
-                        Request::WorkspaceSymbols { root, revision } => {
-                            let symbols = language.workspace_symbols(&root, 3000);
-                            let _ = event_tx.send(Event::WorkspaceSymbols { revision, symbols });
-                        }
-                        Request::SearchProject {
-                            root,
-                            query,
-                            revision,
-                        } => {
-                            let matches = crate::search::search_project(&root, &query, 500);
-                            let _ = event_tx.send(Event::SearchResults { revision, matches });
-                        }
-                        Request::DiscoverTools => {
-                            let _ = event_tx.send(Event::Tools(ToolRegistry::discover()));
-                        }
-                        Request::InstallTool(tool) => {
-                            let result = crate::language::tools::install(tool);
-                            let _ = event_tx.send(Event::ToolInstalled { tool, result });
-                            // Re-probe so the setup view and server startup see
-                            // the new state immediately.
-                            let _ = event_tx.send(Event::Tools(ToolRegistry::discover()));
-                        }
-                        Request::RefreshGit { root } => {
-                            let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
-                        }
-                        Request::GitCommit { root, message } => {
-                            let result = crate::git::commit_all(&root, &message);
-                            let _ = event_tx.send(Event::GitCommitted { result });
-                            // Refresh so the status bar and changed-files list
-                            // reflect the new state immediately.
-                            let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
-                        }
-                        Request::GitStage { root, path, staged } => {
-                            let result = if staged {
-                                crate::git::stage(&root, &path)
-                            } else {
-                                crate::git::unstage(&root, &path)
+/// The most queued requests before automatic snapshots are dropped. Control
+/// requests still block briefly, but a flood of automatic work cannot grow the
+/// queue without bound.
+const REQUEST_QUEUE: usize = 128;
+
+impl Background {
+    /// Spawn the workers, sharing the language service with the UI thread.
+    pub fn spawn(language: Arc<LanguageService>) -> Self {
+        let (request_tx, request_rx) = mpsc::sync_channel::<Request>(REQUEST_QUEUE);
+        let (event_tx, event_rx) = mpsc::channel::<Event>();
+        let request_rx = Arc::new(Mutex::new(request_rx));
+
+        for index in 0..WORKER_THREADS {
+            let requests = Arc::clone(&request_rx);
+            let events = event_tx.clone();
+            let language = Arc::clone(&language);
+            let _ = thread::Builder::new()
+                .name(format!("koda-background-{index}"))
+                .spawn(move || {
+                    loop {
+                        // Hold the lock only while waiting, so the other workers
+                        // can run their operations concurrently.
+                        let request = {
+                            let receiver = match requests.lock() {
+                                Ok(receiver) => receiver,
+                                Err(poisoned) => poisoned.into_inner(),
                             };
-                            let _ = event_tx.send(Event::GitStaged {
-                                path,
-                                staged,
-                                result,
-                            });
-                            let _ = event_tx.send(Event::Git(GitInfo::detect(&root)));
-                        }
-                        Request::CreateProject {
-                            parent,
-                            name,
-                            language,
-                        } => {
-                            let outcome = crate::project::create::create(&parent, &name, language);
-                            let _ = event_tx.send(Event::ProjectCreated {
-                                name,
-                                language,
-                                outcome,
-                            });
-                        }
+                            receiver.recv()
+                        };
+                        let Ok(request) = request else { break };
+                        handle_request(request, &language, &events);
                     }
-                }
-            });
+                });
+        }
+        drop(event_tx);
 
         Background {
             requests: request_tx,
@@ -241,16 +172,28 @@ impl Background {
         }
     }
 
+    /// Queue a request that must not be dropped.
+    fn send(&self, request: Request) {
+        let _ = self.requests.send(request);
+    }
+
+    /// Queue an automatic request, dropping it when the queue is saturated.
+    ///
+    /// Used for diagnostics snapshots, which a later edit supersedes anyway.
+    fn try_send(&self, request: Request) {
+        let _ = self.requests.try_send(request);
+    }
+
     /// Ask for a file's language to be detected.
     pub fn detect(&self, path: PathBuf, markers: Vec<String>) {
-        let _ = self.requests.send(Request::Detect { path, markers });
+        self.send(Request::Detect { path, markers });
     }
 
     /// Ask for diagnostics on a document snapshot.
     ///
     /// `revision` lets the app discard results that arrive out of order.
     pub fn diagnose(&self, path: PathBuf, language: LanguageId, text: String, revision: u64) {
-        let _ = self.requests.send(Request::Diagnostics {
+        self.try_send(Request::Diagnostics {
             path,
             language,
             text,
@@ -260,7 +203,7 @@ impl Background {
 
     /// Ask for a document snapshot to be formatted.
     pub fn format(&self, path: PathBuf, language: LanguageId, text: String, revision: u64) {
-        let _ = self.requests.send(Request::Format {
+        self.send(Request::Format {
             path,
             language,
             text,
@@ -326,5 +269,102 @@ impl Background {
     /// Wait up to `timeout` for the next event.
     pub fn recv_timeout(&self, timeout: Duration) -> Option<Event> {
         self.events.recv_timeout(timeout).ok()
+    }
+}
+
+/// Execute one request and publish its event(s).
+fn handle_request(request: Request, language: &LanguageService, events: &Sender<Event>) {
+    match request {
+        Request::Detect { path, markers } => {
+            let result = language.detect_file(&path, &markers);
+            let _ = events.send(Event::Detected {
+                path,
+                language: result.language,
+                confidence: result.confidence,
+            });
+        }
+        Request::Diagnostics {
+            path,
+            language: id,
+            text,
+            revision,
+        } => {
+            let diagnostics = language.provider(id).diagnostics(&text);
+            let _ = events.send(Event::Diagnostics {
+                path,
+                revision,
+                diagnostics,
+            });
+        }
+        Request::Format {
+            path,
+            language: id,
+            text,
+            revision,
+        } => {
+            let outcome = language.provider(id).format(&path, &text);
+            let _ = events.send(Event::Formatted {
+                path,
+                revision,
+                outcome,
+            });
+        }
+        Request::WorkspaceSymbols { root, revision } => {
+            let symbols = language.workspace_symbols(&root, 3000);
+            let _ = events.send(Event::WorkspaceSymbols { revision, symbols });
+        }
+        Request::SearchProject {
+            root,
+            query,
+            revision,
+        } => {
+            let matches = crate::search::search_project(&root, &query, 500);
+            let _ = events.send(Event::SearchResults { revision, matches });
+        }
+        Request::DiscoverTools => {
+            let _ = events.send(Event::Tools(ToolRegistry::discover_cached()));
+        }
+        Request::InstallTool(tool) => {
+            let result = crate::language::tools::install(tool);
+            let _ = events.send(Event::ToolInstalled { tool, result });
+            // Re-probe so the setup view and server startup see the new state
+            // immediately.
+            let _ = events.send(Event::Tools(ToolRegistry::discover_cached()));
+        }
+        Request::RefreshGit { root } => {
+            let _ = events.send(Event::Git(GitInfo::detect(&root)));
+        }
+        Request::GitCommit { root, message } => {
+            let result = crate::git::commit_all(&root, &message);
+            let _ = events.send(Event::GitCommitted { result });
+            // Refresh so the status bar and changed-files list reflect the new
+            // state immediately.
+            let _ = events.send(Event::Git(GitInfo::detect(&root)));
+        }
+        Request::GitStage { root, path, staged } => {
+            let result = if staged {
+                crate::git::stage(&root, &path)
+            } else {
+                crate::git::unstage(&root, &path)
+            };
+            let _ = events.send(Event::GitStaged {
+                path,
+                staged,
+                result,
+            });
+            let _ = events.send(Event::Git(GitInfo::detect(&root)));
+        }
+        Request::CreateProject {
+            parent,
+            name,
+            language,
+        } => {
+            let outcome = crate::project::create::create(&parent, &name, language);
+            let _ = events.send(Event::ProjectCreated {
+                name,
+                language,
+                outcome,
+            });
+        }
     }
 }

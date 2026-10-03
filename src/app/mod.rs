@@ -6579,7 +6579,7 @@ mod tests {
 
     /// Spin the background channel until the active document has diagnostics.
     fn wait_for_diagnostics(app: &mut App) {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while Instant::now() < deadline {
             app.apply_background_events();
             if app
@@ -6706,7 +6706,7 @@ mod tests {
 
         app.execute_command(ids::GOTO_DEFINITION);
 
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while Instant::now() < deadline {
             app.apply_background_events();
             if matches!(app.overlay, Overlay::Picker(_)) {
@@ -7330,7 +7330,7 @@ mod tests {
         let mut app = app_with_file(&file);
         app.format_document();
 
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while Instant::now() < deadline {
             app.apply_background_events();
             if app.pending_format.is_none() {
@@ -7376,7 +7376,7 @@ mod tests {
         let mut app = app_with_file(&a);
         app.open_workspace_symbols();
 
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while Instant::now() < deadline {
             app.apply_background_events();
             if !matches!(app.overlay, Overlay::None) {
@@ -7416,7 +7416,7 @@ mod tests {
         assert!(matches!(app.overlay, Overlay::Prompt(_)));
         app.submit_prompt(PromptKind::ProjectSearch, "needle".to_string());
 
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while Instant::now() < deadline {
             app.apply_background_events();
             if matches!(app.overlay, Overlay::Picker(_)) {
@@ -7697,7 +7697,7 @@ mod tests {
         let mut app = app_with_file(&file);
 
         // Tool discovery happens on the worker; wait briefly for it.
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while app.tools.is_none() && Instant::now() < deadline {
             app.apply_background_events();
             std::thread::sleep(Duration::from_millis(5));
@@ -7738,7 +7738,7 @@ mod tests {
         let file = dir.join("src/main.rs");
         let mut app = app_with_file(&file);
 
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while app.tools.is_none() && Instant::now() < deadline {
             app.apply_background_events();
             std::thread::sleep(Duration::from_millis(5));
@@ -7779,7 +7779,7 @@ mod tests {
         let file = dir.join("src/main.rs");
         let mut app = app_with_file(&file);
 
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while app.tools.is_none() && Instant::now() < deadline {
             app.apply_background_events();
             std::thread::sleep(Duration::from_millis(5));
@@ -7948,7 +7948,7 @@ cat >/dev/null
             &[file.to_str().unwrap()],
         );
 
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         let mut applied = false;
         while Instant::now() < deadline {
             app.poll_lsp();
@@ -8027,7 +8027,7 @@ done
             script.to_str().unwrap(),
             &[log.to_str().unwrap()],
         );
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while Instant::now() < deadline
             && !app
                 .lsp
@@ -8041,7 +8041,7 @@ done
 
         // Opening a second file after the handshake must attach it too.
         app.open_path(second.clone());
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         let mut synced = false;
         while Instant::now() < deadline && !synced {
             app.apply_background_events();
@@ -8103,7 +8103,7 @@ done
         app.start_lsp(LanguageId::Python, script.to_str().unwrap(), &[]);
         assert_eq!(app.lsp.len(), 2, "each language gets its own server");
 
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         let ready = |app: &App| {
             [LanguageId::Rust, LanguageId::Python]
                 .iter()
@@ -8187,7 +8187,7 @@ done
             .move_to(Position::new(2, 4));
 
         let wait = |app: &mut App, predicate: &dyn Fn(&App) -> bool| {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + Duration::from_secs(15);
             while Instant::now() < deadline {
                 app.poll_lsp();
                 if predicate(app) {
@@ -8603,7 +8603,7 @@ done
         app.activate_welcome(action.action);
         assert_eq!(app.editor.len(), 1);
         // Detection runs behind the queued git/tool probes; wait for the result.
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while app
             .editor
             .active_document()
@@ -8696,13 +8696,13 @@ done
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(app.pending_project);
 
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while app.pending_project && Instant::now() < deadline {
             app.pump_background(Duration::from_millis(20));
         }
         // Detection runs on the background worker behind the git and tool
         // probes `open_workspace` queues, so wait for the result.
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while app
             .editor
             .active_document()

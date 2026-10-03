@@ -10,11 +10,10 @@
 //! tool installed by rustup or pip is found even when Koda was launched from a
 //! GUI or a non-login shell whose `PATH` omits them.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use crate::language::id::LanguageId;
 
@@ -691,8 +690,8 @@ fn install_work_dir() -> Option<PathBuf> {
 /// Run a program with a timeout and bounded output, reporting its first stderr
 /// line on failure.
 ///
-/// A hung package manager would otherwise stall the single background worker
-/// forever, and a verbose tool could exhaust memory through unbounded capture.
+/// A hung package manager would otherwise stall background work, and a verbose
+/// tool could exhaust memory through unbounded capture.
 fn run_command(command: &InstallCommand) -> Result<(), String> {
     use std::process::Stdio;
 
@@ -704,68 +703,17 @@ fn run_command(command: &InstallCommand) -> Result<(), String> {
         .spawn()
         .map_err(|err| format!("could not run {}: {err}", command.program))?;
 
-    // Drain both pipes on their own threads so the child can never block on a
-    // full pipe buffer while we wait for it.
-    let stdout = child
-        .stdout
-        .take()
-        .map(|pipe| thread::spawn(move || read_capped(pipe)));
-    let stderr = child
-        .stderr
-        .take()
-        .map(|pipe| thread::spawn(move || read_capped(pipe)));
-
-    let deadline = Instant::now() + COMMAND_TIMEOUT;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!(
-                        "{} timed out after {} minutes",
-                        command.program,
-                        COMMAND_TIMEOUT.as_secs() / 60
-                    ));
-                }
-                thread::sleep(Duration::from_millis(50));
-            }
-            Err(err) => return Err(format!("could not run {}: {err}", command.program)),
-        }
-    };
-
-    let stderr = stderr
-        .and_then(|handle| handle.join().ok())
-        .unwrap_or_default();
-    let _stdout = stdout
-        .and_then(|handle| handle.join().ok())
-        .unwrap_or_default();
-    if status.success() {
-        Ok(())
-    } else {
-        Err(first_stderr_line(&stderr))
+    let captured = crate::process::wait_captured(&mut child, COMMAND_TIMEOUT, MAX_TOOL_OUTPUT)
+        .map_err(|err| format!("could not run {}: {err}", command.program))?;
+    match captured.status {
+        None => Err(format!(
+            "{} timed out after {} minutes",
+            command.program,
+            COMMAND_TIMEOUT.as_secs() / 60
+        )),
+        Some(status) if status.success() => Ok(()),
+        Some(_) => Err(first_stderr_line(&captured.stderr)),
     }
-}
-
-/// Read at most [`MAX_TOOL_OUTPUT`] bytes, draining the rest so the writer never
-/// blocks.
-fn read_capped<R: Read>(mut reader: R) -> Vec<u8> {
-    let mut kept = Vec::new();
-    let mut chunk = [0u8; 8192];
-    loop {
-        match reader.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => {
-                if kept.len() < MAX_TOOL_OUTPUT {
-                    let take = (MAX_TOOL_OUTPUT - kept.len()).min(n);
-                    kept.extend_from_slice(&chunk[..take]);
-                }
-            }
-            Err(_) => break,
-        }
-    }
-    kept
 }
 
 /// Download `url` to `dest` over HTTPS, verifying a SHA-256 when one is known.
@@ -1016,6 +964,35 @@ impl ToolRegistry {
     pub fn discover() -> Self {
         ToolRegistry {
             statuses: Tool::ALL.iter().map(|&tool| probe(tool)).collect(),
+        }
+    }
+
+    /// Discovery for the background worker.
+    ///
+    /// In tests every `App` would otherwise re-probe every tool, and a parallel
+    /// test binary saturates the machine spawning thousands of `--version`
+    /// processes at once. The environment does not change during a test run, so
+    /// the first result is shared. Production always probes fresh, preserving
+    /// Koda's ability to notice a tool installed while it is running.
+    pub fn discover_cached() -> Self {
+        #[cfg(test)]
+        {
+            use std::sync::{Mutex, OnceLock};
+            static CACHE: OnceLock<Mutex<Option<ToolRegistry>>> = OnceLock::new();
+            let cache = CACHE.get_or_init(|| Mutex::new(None));
+            let mut guard = cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(registry) = guard.as_ref() {
+                return registry.clone();
+            }
+            let registry = Self::discover();
+            *guard = Some(registry.clone());
+            registry
+        }
+        #[cfg(not(test))]
+        {
+            Self::discover()
         }
     }
 
@@ -1476,13 +1453,6 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn read_capped_bounds_and_drains_output() {
-        let data = vec![b'x'; MAX_TOOL_OUTPUT * 2];
-        let kept = read_capped(std::io::Cursor::new(data));
-        assert_eq!(kept.len(), MAX_TOOL_OUTPUT);
     }
 
     #[test]
