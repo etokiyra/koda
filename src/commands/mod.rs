@@ -64,6 +64,7 @@ pub mod ids {
     pub const FOCUS_TREE: &str = "view.focusTree";
     pub const TOGGLE_HIDDEN: &str = "view.toggleHidden";
     pub const TOGGLE_INLINE_DIAGNOSTICS: &str = "view.toggleInlineDiagnostics";
+    pub const REFRESH: &str = "view.refresh";
     pub const FILTER_TREE: &str = "view.filterTree";
     pub const NEXT_TAB: &str = "view.nextTab";
     pub const PREV_TAB: &str = "view.previousTab";
@@ -328,6 +329,8 @@ impl CommandRegistry {
                 None,
             )
             .describes("Show or hide diagnostic messages at the end of each line"),
+            Command::new(REFRESH, "Refresh File Tree", "View", Some("F5"))
+                .describes("Re-read the project tree and git status"),
             Command::new(FILTER_TREE, "Filter File Tree", "View", Some("/"))
                 .describes("Fuzzy-filter the project files from the sidebar"),
             Command::new(NEXT_TAB, "Next Tab", "View", Some("Ctrl+Tab"))

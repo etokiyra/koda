@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-216%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-217%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -234,6 +234,7 @@ establishes the language context automatically.
 | `Ctrl+P` | Quick open |
 | `Ctrl+Shift+P` | Command palette |
 | `F1` | Keyboard-shortcuts cheatsheet |
+| `F5` | Refresh the file tree and git status |
 | `Ctrl+F` / `Ctrl+H` | Find / replace |
 | `Ctrl+Shift+F` | Search in the whole project |
 | `Alt+C` / `Alt+W` / `Alt+R` (in find) | Toggle case / whole word / regex |

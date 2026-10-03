@@ -320,6 +320,13 @@ impl App {
                         self.handle_paste(&text);
                         needs_redraw = true;
                     }
+                    Event::FocusGained => {
+                        // Files may have appeared or vanished while Koda was in
+                        // the background; catch up quietly.
+                        self.workspace.refresh();
+                        self.request_git_refresh();
+                        needs_redraw = true;
+                    }
                     Event::Resize(..) => needs_redraw = true,
                     _ => {}
                 }
@@ -467,6 +474,11 @@ impl App {
         if key.code == KeyCode::F(1) {
             self.completion = None;
             self.toggle_help();
+            return true;
+        }
+        if key.code == KeyCode::F(5) {
+            self.completion = None;
+            self.refresh_workspace();
             return true;
         }
         if key.code == KeyCode::F(8) {
@@ -1089,6 +1101,7 @@ impl App {
             ids::FOCUS_TREE => self.focus_tree(),
             ids::TOGGLE_HIDDEN => self.toggle_hidden(),
             ids::TOGGLE_INLINE_DIAGNOSTICS => self.toggle_inline_diagnostics(),
+            ids::REFRESH => self.refresh_workspace(),
             ids::FILTER_TREE => self.open_tree_filter(),
             ids::NEXT_TAB => self.editor.next_tab(),
             ids::PREV_TAB => self.editor.previous_tab(),
@@ -3597,6 +3610,13 @@ impl App {
         };
     }
 
+    /// Re-read the project tree and git status on demand.
+    fn refresh_workspace(&mut self) {
+        self.workspace.refresh();
+        self.request_git_refresh();
+        self.set_status("Refreshed");
+    }
+
     /// Move keyboard focus to the file tree, showing it first if needed. If the
     /// tree already has focus, return to the editor.
     fn focus_tree(&mut self) {
@@ -4028,6 +4048,31 @@ mod tests {
         assert!(!app.workspace.tree.show_hidden);
         app.execute_command(ids::TOGGLE_HIDDEN);
         assert!(app.workspace.tree.show_hidden);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn refresh_picks_up_new_files() {
+        let dir = temp_project("refresh");
+        let file = dir.join("src/main.rs");
+        let mut app = App::new(Some(&file)).unwrap();
+        assert!(
+            !app.workspace
+                .tree
+                .entries()
+                .iter()
+                .any(|entry| entry.name == "added.rs")
+        );
+
+        fs::write(dir.join("added.rs"), "pub fn added() {}\n").unwrap();
+        app.execute_command(ids::REFRESH);
+        assert!(
+            app.workspace
+                .tree
+                .entries()
+                .iter()
+                .any(|entry| entry.name == "added.rs")
+        );
         fs::remove_dir_all(&dir).ok();
     }
 

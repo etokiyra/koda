@@ -165,6 +165,8 @@ command palette already reports which are available. Filling them in is additive
 
 ## Then — polish
 
+- [x] Refresh the project tree and git status on terminal focus and on demand
+      (`F5`).
 - [x] Keyboard-shortcuts overlay (`F1`), generated from the command registry.
 - [x] Editor scroll margin (scrolloff) and a gentle welcome-mascot animation.
 - [x] Inline diagnostic messages: an optional, severity-coloured note at the end

@@ -5,21 +5,25 @@
 
 use std::io::{self, Write};
 
-use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
+use crossterm::event::{
+    DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
+};
 use crossterm::execute;
 use ratatui::DefaultTerminal;
 
-/// Initialize the terminal: raw mode, alternate screen, bracketed paste.
+/// Initialize the terminal: raw mode, alternate screen, bracketed paste and
+/// focus reporting.
 pub fn init() -> io::Result<DefaultTerminal> {
     let terminal = ratatui::try_init()?;
-    // Bracketed paste lets the terminal deliver a paste as one event.
-    let _ = execute!(io::stdout(), EnableBracketedPaste);
+    // Bracketed paste lets the terminal deliver a paste as one event; focus
+    // reporting lets Koda refresh the tree when the user returns to it.
+    let _ = execute!(io::stdout(), EnableBracketedPaste, EnableFocusChange);
     Ok(terminal)
 }
 
 /// Restore the terminal to its previous state.
 pub fn restore() {
-    let _ = execute!(io::stdout(), DisableBracketedPaste);
+    let _ = execute!(io::stdout(), DisableBracketedPaste, DisableFocusChange);
     ratatui::restore();
 }
 
