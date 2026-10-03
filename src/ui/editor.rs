@@ -16,8 +16,6 @@ use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::provider::{LanguageProvider, TokenKind};
 use crate::ui::{art, theme};
 
-const TAB_WIDTH: usize = 4;
-
 /// Render the active document, returning the screen position of the cursor when
 /// it is visible (used to anchor the completion popup).
 pub fn render(
@@ -67,8 +65,9 @@ pub fn render(
     doc.scroll_top = doc.scroll_top.min(max_top);
 
     // Horizontal scroll is driven by the cursor line, with the same margin.
+    let indent = doc.indent_width().max(1);
     let cursor_line = doc.buffer.line_text(cursor.row);
-    let cursor_layout = LineLayout::new(&cursor_line, TAB_WIDTH);
+    let cursor_layout = LineLayout::new(&cursor_line, indent);
     let cursor_col = cursor_layout.display_col(cursor.col);
     if cursor_col < doc.scroll_left + SCROLL_OFF {
         doc.scroll_left = cursor_col.saturating_sub(SCROLL_OFF);
@@ -211,7 +210,8 @@ fn render_line(
         }
     }
 
-    let layout = LineLayout::new(&text, TAB_WIDTH);
+    let indent = doc.indent_width().max(1);
+    let layout = LineLayout::new(&text, indent);
     let leading_ws = text.chars().take_while(|c| *c == ' ' || *c == '\t').count();
     let leading_display = layout.display_col(leading_ws.min(char_count));
 
@@ -247,8 +247,8 @@ fn render_line(
         let mut style =
             theme::token_style(kinds.get(original).copied().unwrap_or(TokenKind::Plain));
 
-        // Indent guides inside leading whitespace.
-        if cell < leading_display && cell > 0 && cell % TAB_WIDTH == 0 {
+        // Indent guides inside leading whitespace, one per detected level.
+        if cell < leading_display && cell > 0 && cell % indent == 0 {
             ch = '│';
             style = theme::dim();
         }

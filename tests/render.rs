@@ -100,6 +100,19 @@ fn renders_project_tree_and_rust_file() {
 }
 
 #[test]
+fn renders_indent_guides_at_the_detected_width() {
+    let dir = temp_project("indent-guides");
+    let file = dir.join("app.ts");
+    fs::write(&file, "function f() {\n  if (x) {\n    y();\n  }\n}\n").unwrap();
+    let mut app = app_with_file(&file);
+
+    let screen = draw(&mut app);
+    assert!(screen.contains('│'), "indent guide missing:\n{screen}");
+
+    cleanup(&dir);
+}
+
+#[test]
 fn renders_a_unified_diff_overlay() {
     let dir = temp_project("diff-view");
     let file = dir.join("src/main.rs");

@@ -140,8 +140,9 @@ command palette already reports which are available. Filling them in is additive
 - [ ] Multiple cursors.
 - [x] Indentation width is inferred per file (two-space JavaScript, four-space
       Rust, …) with no configuration.
-- [ ] Indentation guides and a more complete tokenizer (strings, lifetimes,
-      generics) for both providers.
+- [x] Indentation guides that follow each file's detected indentation width.
+- [ ] A more complete tokenizer (strings, lifetimes, generics) for the Rust and
+      Go providers.
 - [x] Case-sensitive and whole-word search options (`Alt+C` / `Alt+W`),
       case-insensitive by default and shown in the find bar.
 - [x] Regular-expression search in the find bar (`Alt+R`), powered by a small
