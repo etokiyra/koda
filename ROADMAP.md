@@ -144,10 +144,10 @@ command palette already reports which are available. Filling them in is additive
 - [x] Non-code language support (Markdown, JSON, TOML, YAML) for config files.
       Each has built-in highlighting; JSON/TOML/YAML also report unbalanced
       delimiters and expose their keys (and Markdown its headings) as symbols.
-- [x] Python support, built entirely on the built-in providers (highlighting,
-      diagnostics, symbols, completion, hover, navigation) so it works offline.
-      A Python language server — for rename, code actions and richer analysis —
-      remains to be added.
+- [x] Python support: built-in intelligence (highlighting, diagnostics, symbols,
+      completion, hover, navigation) that works offline, plus automatic
+      provisioning of the `pylsp` language server for rename, code actions and
+      richer analysis.
 - [x] `.gitignore`-aware file tree and quick open. A dependency-free matcher
       reads root and nested `.gitignore` files plus `.git/info/exclude`, and
       hides ignored paths from the tree, quick open, the inline filter and

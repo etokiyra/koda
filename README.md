@@ -113,8 +113,8 @@ The complexity lives inside Koda:
                               (and it stays out of your way when none exists)
 ```
 
-Missing something? Koda notices when a Rust or Go file is open without its
-language server and offers to install it, once, without blocking startup.
+Missing something? Koda notices when a Rust, Go or Python file is open without
+its language server and offers to install it, once, without blocking startup.
 **Language Setup…** in the command palette then lists every tool Koda knows
 about and installs a missing one with a single `Enter` — through the official
 channel, so provenance and integrity stay with the package manager:
@@ -123,6 +123,7 @@ channel, so provenance and integrity stay with the package manager:
 | --- | --- | --- |
 | `rust-analyzer` | Rust language server | `rustup component add rust-analyzer` |
 | `gopls` | Go language server | `go install golang.org/x/tools/gopls@latest` |
+| `pylsp` | Python language server | `pipx install python-lsp-server` (or `pip`) |
 | `rustfmt` | Rust formatting | `rustup component add rustfmt` |
 | `gofmt` | Go formatting | ships with the Go toolchain |
 
@@ -136,7 +137,7 @@ them.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | **Rust** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **Go** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
-| **Python** | built-in | built-in | built-in | built-in | built-in | built-in | — |
+| **Python** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
 | **Markdown** | built-in | — | built-in (headings) | — | — | — | — |
 | **JSON** | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — |
 | **TOML** | built-in | built-in | built-in (tables & keys) | built-in (literals) | — | — | — |
@@ -144,11 +145,11 @@ them.
 
 Prose and configuration files are first-class too. Markdown, JSON, TOML and YAML
 get syntax highlighting, structural diagnostics where they make sense, and a
-symbol outline, all offline and with no setup. **Python** is supported entirely
-by Koda's built-in intelligence for now — highlighting, diagnostics, symbols,
-completion, hover and navigation — with no language server to install; rename
-and code actions wait for one. Adding a language means implementing one trait
-and registering it — no changes to the editor or the UI.
+symbol outline, all offline and with no setup. **Python** works offline through
+Koda's built-in intelligence (highlighting, diagnostics, symbols, completion,
+hover, navigation) and gains rename and code actions when Koda installs
+`pylsp` for it. Adding a language means implementing one trait and registering
+it — no changes to the editor or the UI.
 
 ## ❯ Editing & workflow
 

@@ -21,13 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   startup and formatting work without the user fixing their environment. The
   resolved path is used to launch servers and formatters, not just to probe.
 - **Language Setup…** can now install a missing tool with one action, using
-  only the official acquisition path: `rustup component add …` for Rust tooling
-  and `go install …@latest` for `gopls`. Koda runs no bespoke downloader, so
-  provenance and integrity remain the package managers' responsibility.
+  only official acquisition paths: `rustup component add …` for Rust tooling,
+  `go install …@latest` for `gopls`, and `pipx`/`pip` for Python's
+  `python-lsp-server`. Installation tries each candidate package manager in
+  turn, so a machine without `pipx` still succeeds through `pip`. Koda runs no
+  bespoke downloader, so provenance and integrity remain the package managers'
+  responsibility.
 - Installation runs on the background worker with a busy indicator; Koda
   re-probes when it finishes and, if a server is now available, starts it.
   Failures (for example, offline) are reported verbatim and editing continues.
-- When a Rust or Go file is open and the language server is missing but
+- When a Rust, Go or Python file is open and the language server is missing but
   installable, Koda now offers to install it once per session, from the event
   loop so the prompt never blocks startup. Choosing **Not now** keeps the
   built-in intelligence and the offer stays available in **Language Setup…**.

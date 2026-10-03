@@ -20,6 +20,7 @@ use crate::language::id::LanguageId;
 pub enum Tool {
     RustAnalyzer,
     Gopls,
+    Pylsp,
     Rustfmt,
     Gofmt,
 }
@@ -33,12 +34,19 @@ pub enum ToolPurpose {
 
 impl Tool {
     /// Every tool Koda looks for, in the order it is presented.
-    pub const ALL: &'static [Tool] = &[Tool::RustAnalyzer, Tool::Gopls, Tool::Rustfmt, Tool::Gofmt];
+    pub const ALL: &'static [Tool] = &[
+        Tool::RustAnalyzer,
+        Tool::Gopls,
+        Tool::Pylsp,
+        Tool::Rustfmt,
+        Tool::Gofmt,
+    ];
 
     pub fn program(self) -> &'static str {
         match self {
             Tool::RustAnalyzer => "rust-analyzer",
             Tool::Gopls => "gopls",
+            Tool::Pylsp => "pylsp",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
         }
@@ -48,6 +56,7 @@ impl Tool {
         match self {
             Tool::RustAnalyzer => "rust-analyzer",
             Tool::Gopls => "gopls",
+            Tool::Pylsp => "pylsp",
             Tool::Rustfmt => "rustfmt",
             Tool::Gofmt => "gofmt",
         }
@@ -57,12 +66,13 @@ impl Tool {
         match self {
             Tool::RustAnalyzer | Tool::Rustfmt => LanguageId::Rust,
             Tool::Gopls | Tool::Gofmt => LanguageId::Go,
+            Tool::Pylsp => LanguageId::Python,
         }
     }
 
     pub fn purpose(self) -> ToolPurpose {
         match self {
-            Tool::RustAnalyzer | Tool::Gopls => ToolPurpose::LanguageServer,
+            Tool::RustAnalyzer | Tool::Gopls | Tool::Pylsp => ToolPurpose::LanguageServer,
             Tool::Rustfmt | Tool::Gofmt => ToolPurpose::Formatter,
         }
     }
@@ -71,7 +81,7 @@ impl Tool {
     /// flag, so it is probed with no arguments against empty stdin.
     fn version_args(self) -> &'static [&'static str] {
         match self {
-            Tool::RustAnalyzer | Tool::Rustfmt => &["--version"],
+            Tool::RustAnalyzer | Tool::Rustfmt | Tool::Pylsp => &["--version"],
             Tool::Gopls => &["version"],
             Tool::Gofmt => &[],
         }
@@ -82,6 +92,7 @@ impl Tool {
         match self {
             Tool::RustAnalyzer => "install with `rustup component add rust-analyzer`",
             Tool::Gopls => "install with `go install golang.org/x/tools/gopls@latest`",
+            Tool::Pylsp => "install with `pipx install python-lsp-server`",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
             Tool::Gofmt => "it ships with the Go toolchain",
         }
@@ -95,49 +106,77 @@ impl Tool {
             .find(|tool| tool.language() == language && tool.purpose() == purpose)
     }
 
-    /// The trusted command that installs this tool, when one exists.
+    /// Candidate install commands, most preferred first.
     ///
-    /// Koda runs only the official acquisition path — `rustup` for Rust tooling
-    /// and `go install` for Go tooling — so provenance and integrity are the
-    /// upstream tools' responsibility, not a bespoke downloader.
-    pub fn install_command(self) -> Option<(&'static str, &'static [&'static str])> {
+    /// Koda runs only official acquisition paths — `rustup`, `go install`,
+    /// `pipx`/`pip` — so provenance and integrity stay with those tools rather
+    /// than a bespoke downloader. Python tooling is offered through several
+    /// package managers because no single one is available everywhere.
+    pub fn install_commands(self) -> &'static [(&'static str, &'static [&'static str])] {
         match self {
-            Tool::RustAnalyzer => Some(("rustup", &["component", "add", "rust-analyzer"])),
-            Tool::Rustfmt => Some(("rustup", &["component", "add", "rustfmt"])),
-            Tool::Gopls => Some(("go", &["install", "golang.org/x/tools/gopls@latest"])),
+            Tool::RustAnalyzer => &[("rustup", &["component", "add", "rust-analyzer"])],
+            Tool::Rustfmt => &[("rustup", &["component", "add", "rustfmt"])],
+            Tool::Gopls => &[("go", &["install", "golang.org/x/tools/gopls@latest"])],
+            Tool::Pylsp => &[
+                ("pipx", &["install", "python-lsp-server"]),
+                (
+                    "python3",
+                    &["-m", "pip", "install", "--user", "python-lsp-server"],
+                ),
+                ("pip3", &["install", "--user", "python-lsp-server"]),
+                (
+                    "python",
+                    &["-m", "pip", "install", "--user", "python-lsp-server"],
+                ),
+            ],
             // `gofmt` ships with the Go toolchain; there is nothing to install.
-            Tool::Gofmt => None,
+            Tool::Gofmt => &[],
         }
+    }
+
+    /// The preferred install command, when one exists.
+    pub fn install_command(self) -> Option<(&'static str, &'static [&'static str])> {
+        self.install_commands().first().copied()
     }
 }
 
-/// Install a tool through its trusted package manager.
+/// Install a tool through its trusted package managers.
 ///
-/// Intended for the background worker. Returns a short success message or the
-/// first line of the tool's error, so the user sees something actionable even
-/// when the network is unavailable.
+/// Intended for the background worker. Tries each candidate command in turn and
+/// returns a short success message, or the most recent actionable error so the
+/// user sees what went wrong even when the network is unavailable.
 pub fn install(tool: Tool) -> Result<String, String> {
-    let Some((program, args)) = tool.install_command() else {
+    let commands = tool.install_commands();
+    if commands.is_empty() {
         return Err(format!(
             "{} cannot be installed automatically — {}",
             tool.label(),
             tool.install_hint()
         ));
-    };
-    match Command::new(program).args(args).output() {
-        Ok(output) if output.status.success() => Ok(format!("Installed {}", tool.label())),
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let message = stderr
-                .lines()
-                .find(|line| !line.trim().is_empty())
-                .unwrap_or("installation failed")
-                .trim()
-                .to_string();
-            Err(format!("{}: {message}", tool.label()))
-        }
-        Err(err) => Err(format!("could not run {program}: {err}")),
     }
+
+    let mut last_error = None;
+    for (program, args) in commands {
+        match Command::new(program).args(*args).output() {
+            Ok(output) if output.status.success() => {
+                return Ok(format!("Installed {}", tool.label()));
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let message = stderr
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("installation failed")
+                    .trim()
+                    .to_string();
+                last_error = Some(format!("{}: {message}", tool.label()));
+            }
+            Err(err) => {
+                last_error = Some(format!("could not run {program}: {err}"));
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| format!("could not install {}", tool.label())))
 }
 
 /// What Koda learned about one tool.
@@ -301,7 +340,10 @@ mod tests {
         for &tool in Tool::ALL {
             assert!(!tool.program().is_empty());
             assert!(!tool.install_hint().is_empty());
-            assert!(matches!(tool.language(), LanguageId::Rust | LanguageId::Go));
+            assert!(matches!(
+                tool.language(),
+                LanguageId::Rust | LanguageId::Go | LanguageId::Python
+            ));
         }
     }
 
@@ -333,6 +375,19 @@ mod tests {
             Tool::Gopls.install_command(),
             Some(("go", &["install", "golang.org/x/tools/gopls@latest"][..]))
         );
+        assert_eq!(
+            Tool::Pylsp.install_command(),
+            Some(("pipx", &["install", "python-lsp-server"][..]))
+        );
+        // Python tooling has pip fallbacks, so installation is attempted even
+        // without pipx.
+        assert!(Tool::Pylsp.install_commands().len() >= 2);
+        for tool in Tool::ALL {
+            assert_eq!(
+                tool.install_command(),
+                tool.install_commands().first().copied()
+            );
+        }
         assert_eq!(Tool::Gofmt.install_command(), None);
         // `gofmt` cannot be installed on its own.
         assert!(install(Tool::Gofmt).is_err());
