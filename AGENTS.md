@@ -476,8 +476,10 @@ Never break existing tests to make progress. Add tests for new behaviour:
 - UI composition: `tests/render.rs` using ratatui's `TestBackend`.
 - Live language servers: `tests/optional_servers.rs`, every test `#[ignore]`d and
   skipping when its tool is absent. Beyond the `initialize` handshake, the suite
-  exercises real completion and diagnostics round-trips for clangd and gopls, and
-  a SwiftPM-root handshake for `sourcekit-lsp`. Install a managed tool with
+  exercises real completion round-trips (clangd, gopls, PLS, sqls), diagnostics
+  for clangd, and a SwiftPM-root handshake for `sourcekit-lsp`. Where a server's
+  completion trigger is not reliable, the test still asserts a well-formed
+  response. Install a managed tool with
   `XDG_DATA_HOME=… cargo run --example install_check -- <tool>` first, then run
   `cargo test --test optional_servers -- --ignored --test-threads=1`.
 
