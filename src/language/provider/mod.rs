@@ -94,6 +94,8 @@ pub enum LexMode {
     Template,
     /// Inside `${ ... }`, carrying the open-brace depth.
     TemplateInterpolation(u16),
+    /// Inside an open JSX tag (`<Component` …) that has not reached `>` yet.
+    JsxTag,
 }
 
 /// Which embedded sub-language an HTML region holds.

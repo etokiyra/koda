@@ -7,9 +7,9 @@
 //! hover and within-file navigation. `typescript-language-server` can be
 //! provisioned for rename, code actions and richer, type-aware analysis.
 //!
-//! Multi-line block comments and template literals carry over between lines; a
-//! `${ … }` interpolation resumes code highlighting and returns to template text
-//! once its braces close.
+//! Multi-line block comments, template literals and JSX tags carry over between
+//! lines; a `${ … }` interpolation resumes code highlighting and returns to
+//! template text once its braces close.
 
 use crate::language::completion::{Completion, CompletionKind};
 use crate::language::data::{push_merged, scan_number, scan_quoted};
@@ -340,6 +340,13 @@ impl LanguageProvider for WebProvider {
             mode = next_mode;
         }
 
+        // Resume the attributes of a JSX tag that spanned lines.
+        if mode == LexMode::JsxTag {
+            let (next, next_mode) = scan_jsx_attributes(&chars, i, &mut spans);
+            i = next;
+            mode = next_mode;
+        }
+
         let first_nonspace = chars.iter().position(|c| !c.is_whitespace());
 
         while i < len {
@@ -480,9 +487,12 @@ impl LanguageProvider for WebProvider {
             // A `<` in expression position opens a JSX element; a comparison or
             // generic angle bracket stays an operator.
             if c == '<' && jsx_can_start(&chars, i) {
-                let end = highlight_jsx(&chars, i, &mut spans);
+                let (end, jsx_mode) = highlight_jsx(&chars, i, &mut spans);
                 if end > i {
                     i = end;
+                    if jsx_mode != LexMode::None {
+                        mode = jsx_mode;
+                    }
                     continue;
                 }
             }
@@ -736,7 +746,7 @@ fn jsx_can_start(chars: &[char], i: usize) -> bool {
 }
 
 /// Highlight a JSX tag starting at `<`, returning the index past it.
-fn highlight_jsx(chars: &[char], start: usize, spans: &mut Vec<HighlightSpan>) -> usize {
+fn highlight_jsx(chars: &[char], start: usize, spans: &mut Vec<HighlightSpan>) -> (usize, LexMode) {
     let len = chars.len();
     let mut i = start + 1;
     let closing = chars.get(i) == Some(&'/');
@@ -746,17 +756,29 @@ fn highlight_jsx(chars: &[char], start: usize, spans: &mut Vec<HighlightSpan>) -
     // A fragment `<>` or closing fragment `</>`.
     if chars.get(i) == Some(&'>') {
         push_merged(spans, HighlightSpan::new(start, i + 1, TokenKind::Operator));
-        return i + 1;
+        return (i + 1, LexMode::None);
     }
     let name_start = i;
     while i < len && (is_ident_continue(chars[i]) || matches!(chars[i], '.' | ':' | '-')) {
         i += 1;
     }
     if i == name_start {
-        return start; // Not a tag; let the caller treat `<` as an operator.
+        return (start, LexMode::None); // Not a tag; let the caller treat `<` as an operator.
     }
     push_merged(spans, HighlightSpan::new(name_start, i, TokenKind::Type));
+    scan_jsx_attributes(chars, i, spans)
+}
 
+/// Highlight JSX tag attributes from `i` until the closing `>`.
+///
+/// Returns the index reached and a carry-over mode: `JsxTag` when the tag is
+/// still open at the end of the line (its attributes continue on the next one).
+fn scan_jsx_attributes(
+    chars: &[char],
+    mut i: usize,
+    spans: &mut Vec<HighlightSpan>,
+) -> (usize, LexMode) {
+    let len = chars.len();
     while i < len && chars[i] != '>' {
         let c = chars[i];
         if c.is_whitespace() || c == '/' {
@@ -792,9 +814,9 @@ fn highlight_jsx(chars: &[char], start: usize, spans: &mut Vec<HighlightSpan>) -
     }
     if i < len {
         push_merged(spans, HighlightSpan::new(i, i + 1, TokenKind::Operator));
-        i += 1;
+        return (i + 1, LexMode::None);
     }
-    i
+    (len, LexMode::JsxTag)
 }
 
 /// The index just past the `}` matching the `{` at `start`.
@@ -965,6 +987,24 @@ mod tests {
         assert_eq!(kind_at(&spans, 1), Some(TokenKind::String)); // "world "
         assert_eq!(kind_at(&spans, 9), Some(TokenKind::Plain)); // name
         assert_eq!(kind_at(&spans, 16), Some(TokenKind::String)); // " tail`"
+    }
+
+    #[test]
+    fn carries_jsx_tags_across_lines() {
+        let provider = WebProvider::typescript();
+        let (spans, state) = provider.highlight("const el = <Panel", HighlightState::default());
+        assert_eq!(state.mode, LexMode::JsxTag);
+        assert_eq!(kind_at(&spans, 12), Some(TokenKind::Type)); // Panel
+
+        let (spans, state) = provider.highlight("  title=\"hi\"", state);
+        assert_eq!(state.mode, LexMode::JsxTag);
+        assert_eq!(kind_at(&spans, 2), Some(TokenKind::Attribute)); // title
+        assert_eq!(kind_at(&spans, 8), Some(TokenKind::String)); // "hi"
+
+        let (spans, state) = provider.highlight("  visible>", state);
+        assert_eq!(state.mode, LexMode::None);
+        assert_eq!(kind_at(&spans, 2), Some(TokenKind::Attribute)); // visible
+        assert_eq!(kind_at(&spans, 9), Some(TokenKind::Operator)); // >
     }
 
     #[test]
