@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Multi-line templates and embedded `<script>`/`<style>` highlighting
+
+- **Template literals now span lines.** The web tokenizer carries a template
+  state between lines, so a backtick string stays a string, `${ … }`
+  interpolations resume code highlighting (with brace balancing for nested
+  objects) and return to template text when they close.
+- **HTML embeds its sub-languages.** A `<script>` body is tokenized as
+  JavaScript and a `<style>` body as CSS, across lines, with the embedded
+  tokenizer's own multi-line state; the closing tag hands the rest of the line
+  back to HTML. A self-closing `<script />` has no body.
+- `HighlightState` grew a small, shared lexical vocabulary (`LexMode` for
+  templates, `Embed` for HTML regions) alongside the existing block-comment flag,
+  so the carry-over is explicit rather than provider-specific.
+
 ### Managed Go, clangd, asm-lsp and phpactor — fewer system prerequisites
 
 - **Go is fully automatic, and it unlocks three tools at once.** Koda resolves

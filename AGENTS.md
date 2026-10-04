@@ -195,8 +195,13 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
 - **Operation-based undo.** Each edit records `(start, removed, inserted,
   cursor_before, cursor_after)`. Cheap and exact.
 - **Line-based highlight cache.** Providers return `(spans, next_state)` so
-  multi-line constructs (block comments) work. The cache is invalidated from the
-  edited line down.
+  multi-line constructs work. `HighlightState` carries a block-comment flag plus a
+  small shared vocabulary — `LexMode` (template literals and their `${}`
+  interpolation) and `Embed` (an open HTML `<script>`/`<style>` region) — rather
+  than language-specific state on the editor. The HTML tokenizer delegates an
+  embedded body to the JavaScript or CSS tokenizer, which carries its own state,
+  so one line can be split between two languages. The cache is invalidated from
+  the edited line down.
 - **Lazy, `.gitignore`-aware file tree.** Directory listings are read only when
   expanded; ignored directories (`target`, `node_modules`, …) are skipped, and
   the project's `.gitignore` rules (including nested files and

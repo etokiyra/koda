@@ -272,8 +272,13 @@ command palette already reports which are available. Filling them in is additive
       Downloads verify a published checksum or digest and fail closed, and the
       glibc-only bundles are not offered on musl.
 - [x] Web tokenizer depth: regex literals (expression-position lookback) and
-      single-line JSX tags, attributes, fragments and closing tags for
+      JSX tags, attributes, fragments and closing tags for
       JavaScript/TypeScript/JSX, with generics and comparisons kept as operators.
+      Template literals carry across lines, with `${ … }` interpolation resuming
+      code and returning to template text.
+- [x] Embedded HTML regions: a `<script>` body is tokenized as JavaScript and a
+      `<style>` body as CSS, across lines, with the sub-tokenizer's own
+      multi-line state, and the closing tag returns to HTML.
 - [x] Formatting coverage: Prettier (web/HTML/CSS/JSON/YAML/Markdown),
       `clang-format` (C/C++), `shfmt` (Shell) and `perltidy` (Perl) join
       `rustfmt`/`gofmt`, each discovered automatically with an accurate reason.
