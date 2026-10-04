@@ -313,8 +313,14 @@ mod tests {
 
     #[test]
     fn rustfmt_formats_when_installed() {
-        // Skip silently when the tool is unavailable (offline/CI sandbox).
-        if Command::new("rustfmt").arg("--version").output().is_err() {
+        // Skip silently when the tool is unavailable (offline/CI sandbox). A
+        // rustup shim can exist without the component installed (a minimal
+        // toolchain profile), so require a successful run, not merely a spawn.
+        if !Command::new("rustfmt")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+        {
             return;
         }
         let path = std::env::temp_dir().join("koda-format-test.rs");

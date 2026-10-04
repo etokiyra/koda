@@ -5980,7 +5980,10 @@ mod tests {
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("Cargo.toml"), "[package]\nname = \"demo\"\n").unwrap();
         fs::write(dir.join("src/main.rs"), "fn main() {\n    let x = 1;\n}\n").unwrap();
-        dir
+        // Resolve symlinks (macOS exposes the temp dir as `/var` → `/private/var`)
+        // so the paths a test builds match what Koda stores after canonicalising
+        // the workspace root.
+        fs::canonicalize(&dir).unwrap()
     }
 
     /// Build an app and open `file`, settling detection, as tests expect a
@@ -7339,10 +7342,12 @@ mod tests {
 
     #[test]
     fn format_document_runs_the_formatter() {
-        if std::process::Command::new("rustfmt")
+        // A rustup shim can exist without the component installed (a minimal
+        // toolchain profile), so require a successful run, not merely a spawn.
+        if !std::process::Command::new("rustfmt")
             .arg("--version")
             .output()
-            .is_err()
+            .is_ok_and(|output| output.status.success())
         {
             return; // Skip when rustfmt is unavailable.
         }

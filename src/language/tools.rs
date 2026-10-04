@@ -2406,24 +2406,8 @@ fn builds_txt_checksum(body: &str, key: &str) -> Option<String> {
 /// The listing is bounded by the archive's own entry count and any failure to
 /// list is treated as unsafe, so this fails closed.
 fn ensure_archive_paths_safe(archive: &Path, zip: bool) -> Result<(), String> {
-    let mut command = install_command(if zip { "unzip" } else { "tar" });
-    if zip {
-        command.arg("-Z1");
-    } else {
-        command.arg("-tf");
-    }
-    let output = command
-        .arg(archive)
-        .output()
-        .map_err(|err| format!("could not list {}: {err}", archive.display()))?;
-    if !output.status.success() {
-        return Err(format!(
-            "could not list {}: {}",
-            archive.display(),
-            first_stderr_line(&output.stderr)
-        ));
-    }
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
+    let listing = archive_listing(archive, zip)?;
+    for line in listing.lines() {
         let entry = line.trim_end_matches('/');
         if entry.starts_with('/') || entry.starts_with('\\') {
             return Err(format!(
@@ -2439,6 +2423,59 @@ fn ensure_archive_paths_safe(archive: &Path, zip: bool) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// List an archive's entry names using whichever tool can read it.
+///
+/// Zip archives are listed with the same extractor [`zip_extractor`] selects, so
+/// a system without `unzip` is not refused by the safety check alone. A listing
+/// that cannot be produced fails closed.
+fn archive_listing(archive: &Path, zip: bool) -> Result<String, String> {
+    if !zip {
+        return listing_from(
+            install_command("tar").arg("-tf").arg(archive).output(),
+            archive,
+        );
+    }
+    let extractor = zip_extractor().ok_or_else(|| {
+        format!(
+            "no zip extractor found (looked for unzip, bsdtar and python3) to inspect {}",
+            archive.display()
+        )
+    })?;
+    zip_listing(extractor, archive)
+}
+
+/// List a zip archive's entries with a specific extractor.
+fn zip_listing(extractor: ZipExtractor, archive: &Path) -> Result<String, String> {
+    let output = match extractor {
+        ZipExtractor::Unzip => install_command("unzip").arg("-Z1").arg(archive).output(),
+        ZipExtractor::BsdTar => install_command("bsdtar").arg("-tf").arg(archive).output(),
+        ZipExtractor::Python => install_command("python3")
+            .args([
+                "-c",
+                "import sys,zipfile;print('\\n'.join(zipfile.ZipFile(sys.argv[1]).namelist()))",
+            ])
+            .arg(archive)
+            .output(),
+    };
+    listing_from(output, archive)
+}
+
+/// Return a listing command's stdout, or a failure that names the archive.
+fn listing_from(
+    output: std::io::Result<std::process::Output>,
+    archive: &Path,
+) -> Result<String, String> {
+    let output = output.map_err(|err| format!("could not list {}: {err}", archive.display()))?;
+    if !output.status.success() {
+        return Err(format!(
+            "could not list {}: {}",
+            archive.display(),
+            first_stderr_line(&output.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`.
@@ -4118,22 +4155,24 @@ mod tests {
                 "{tool:?} must not advertise a package-manager command"
             );
         }
-        let archives =
-            locate("curl").is_some() && locate("tar").is_some() && locate("unzip").is_some();
+        let archives = locate("curl").is_some() && locate("tar").is_some();
         // Perl bootstraps cpanm; it needs a system perl plus the archive tools.
         assert_eq!(
             can_install(Tool::PerlLs),
             locate("perl").is_some() && archives
         );
-        // Elixir is managed only where `bob` publishes builds.
+        // Elixir is managed only where `bob` publishes builds. Its OTP runtime
+        // is a tarball and the Elixir/ElixirLS archives are zips, so a zip
+        // extractor is required too (any of unzip, bsdtar or Python).
         assert_eq!(
             can_install(Tool::ElixirLs),
-            bob_platform().is_some() && archives
+            bob_platform().is_some() && archives && zip_extractor().is_some()
         );
-        // The Dart SDK is managed, so Koda can install it where published.
+        // The Dart SDK is managed as a zip, so Koda can install it where
+        // published and a zip extractor is available.
         assert_eq!(
             can_install(Tool::DartAnalyzer),
-            dart_sdk_asset().is_some() && locate("curl").is_some() && locate("unzip").is_some()
+            dart_sdk_asset().is_some() && locate("curl").is_some() && zip_extractor().is_some()
         );
         // Swift is managed where swift.org publishes a signed toolchain (native
         // or the portable UBI10 build with its compatibility layer), and only
@@ -4538,8 +4577,12 @@ mod tests {
                 assert!(dir.join("libxml2.so.2").exists());
             }
             Err(message) => {
+                // The first library the compatibility layer cannot resolve is
+                // named; a minimal system may lack any of them.
                 assert!(
-                    message.contains("libxml2") || message.contains("ncurses"),
+                    ["libxml2", "libncurses", "libpanel", "libform"]
+                        .iter()
+                        .any(|library| message.contains(library)),
                     "unexpected error: {message}"
                 );
             }
@@ -4806,6 +4849,15 @@ mod tests {
             if locate(tool).is_none() {
                 continue;
             }
+            // The traversal safety check must list the archive with the same
+            // extractor that unpacks it (regression: it once hardcoded `unzip`,
+            // so a system without it refused a perfectly safe archive).
+            let listed = zip_listing(extractor, &archive)
+                .unwrap_or_else(|err| panic!("{tool} listing: {err}"));
+            assert!(
+                listed.contains("pkg/bin/tool"),
+                "{tool} did not list the archive: {listed:?}"
+            );
             let out = dir.join(format!("out-{tool}"));
             extract_zip_with(extractor, &archive, &out, 1)
                 .unwrap_or_else(|err| panic!("{tool}: {err}"));
@@ -4915,8 +4967,14 @@ mod tests {
             Some(Tool::Clangd)
         );
         let attempts = Tool::Clangd.install_attempts();
-        if clangd_asset().is_none() || tools_dir().is_none() {
-            assert!(attempts.is_empty());
+        if attempts.is_empty() {
+            // No fetchable bundle: musl (the release is glibc-only), a platform
+            // clangd publishes no asset for, or no tools directory to install
+            // into. Any other reason would be a bug.
+            assert!(
+                libc_is_musl() || clangd_asset().is_none() || tools_dir().is_none(),
+                "clangd must have an install plan when its bundle is offered"
+            );
             return;
         }
         let steps = &attempts.first().expect("a clangd plan").steps;

@@ -330,7 +330,9 @@ mod tests {
         run_git(&dir, &["init", "-q"]);
         run_git(&dir, &["config", "user.email", "koda@example.com"]);
         run_git(&dir, &["config", "user.name", "Koda Test"]);
-        Some(dir)
+        // Resolve symlinks (macOS exposes the temp dir as `/var` → `/private/var`)
+        // so the paths a test builds match the repository root git reports.
+        Some(std::fs::canonicalize(&dir).unwrap())
     }
 
     fn run_git(dir: &Path, args: &[&str]) {
@@ -502,6 +504,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("koda-git-stage-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        // Resolve symlinks (macOS exposes the temp dir as `/var` → `/private/var`)
+        // so `path` matches the repository root git reports.
+        let dir = std::fs::canonicalize(&dir).unwrap();
         let git = |args: &[&str]| {
             std::process::Command::new("git")
                 .arg("-C")
