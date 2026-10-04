@@ -5419,9 +5419,15 @@ impl App {
         let Some(tools) = self.tools.as_ref() else {
             return false;
         };
-        let Some(language) = self.editor.active_document().map(|doc| doc.buffer.language) else {
-            return false;
-        };
+        // Prefer the active file's language; with no file open, use the
+        // project's detected language so opening a project is enough to be
+        // offered its tooling.
+        let language = self
+            .editor
+            .active_document()
+            .map(|doc| doc.buffer.language)
+            .filter(|language| *language != LanguageId::Unknown)
+            .unwrap_or_else(|| self.workspace.project.kind.language());
         if language == LanguageId::Unknown {
             return false;
         }
@@ -7824,6 +7830,42 @@ mod tests {
             // Dismissing must not re-offer in the same session.
             app.overlay = Overlay::None;
             assert!(!app.maybe_offer_tool_setup());
+        }
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn offers_setup_for_the_project_language_with_no_file_open() {
+        let dir = temp_project("project-offer");
+        let mut app = App::new(None).unwrap();
+        assert!(app.open_workspace(dir.clone()));
+        assert_eq!(app.workspace.project.kind.language(), LanguageId::Rust);
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while app.tools.is_none() && Instant::now() < deadline {
+            app.apply_background_events();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        let missing = app
+            .tools
+            .as_ref()
+            .is_some_and(|tools| !tools.available(Tool::RustAnalyzer));
+        let installable = crate::language::tools::can_install(Tool::RustAnalyzer);
+        let offered = app.maybe_offer_tool_setup();
+        assert_eq!(
+            offered,
+            missing && installable,
+            "opening a Rust project must offer Rust tooling without an open file"
+        );
+        if offered {
+            let Overlay::Picker(picker) = &app.overlay else {
+                panic!("expected the install prompt");
+            };
+            assert!(matches!(
+                picker.item(0).map(|item| &item.action),
+                Some(PickerAction::InstallTool(Tool::RustAnalyzer))
+            ));
         }
         fs::remove_dir_all(&dir).ok();
     }

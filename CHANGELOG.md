@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Setup is offered from the project, not only from an open file
+
+- Opening a project whose language Koda can provision now offers that language's
+  tooling even before a file is opened: the prompt falls back to the workspace's
+  detected project kind (for example a `Cargo.toml` project offers
+  `rust-analyzer`), so "open a project, start coding" also means "get set up".
+  It still asks once per language and never blocks the editor.
+
 ### Multi-line templates, JSX tags and embedded `<script>`/`<style>` highlighting
 
 - **Template literals now span lines.** The web tokenizer carries a template

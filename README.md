@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-532%20passing-9dc6ac?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-534%20passing-9dc6ac?style=flat-square">
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -121,8 +121,10 @@ The complexity lives inside Koda:
                               (and it stays out of your way when none exists)
 ```
 
-Missing something? Koda notices when a supported file is open without its
-language server and offers to install it, once, without blocking startup. Most
+Missing something? Koda notices when a project or a supported file is open
+without its language server and offers to install it, once, without blocking
+startup. Opening a `Cargo.toml` project offers Rust tooling before any file is
+opened, and the same holds for every language Koda can provision. Most
 servers are provisioned from a trusted, verified source: the **official Go
 toolchain** (which in turn provides `gopls`, `sqls` and `shfmt`), a
 **self-contained clangd bundle**, the **.NET SDK** for C#, a **checksum-verified
