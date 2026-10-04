@@ -468,6 +468,12 @@ Never break existing tests to make progress. Add tests for new behaviour:
 - Editor and buffer logic: unit tests next to the code.
 - Detection and providers: unit tests in their modules.
 - UI composition: `tests/render.rs` using ratatui's `TestBackend`.
+- Live language servers: `tests/optional_servers.rs`, every test `#[ignore]`d and
+  skipping when its tool is absent. Beyond the `initialize` handshake, the suite
+  exercises real completion and diagnostics round-trips for clangd and gopls, and
+  a SwiftPM-root handshake for `sourcekit-lsp`. Install a managed tool with
+  `XDG_DATA_HOME=… cargo run --example install_check -- <tool>` first, then run
+  `cargo test --test optional_servers -- --ignored --test-threads=1`.
 
 ---
 
