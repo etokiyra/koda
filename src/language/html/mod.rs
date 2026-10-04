@@ -442,11 +442,26 @@ fn unbalanced_tags(text: &str) -> Vec<Diagnostic> {
     let mut stack: Vec<(String, TextPos)> = Vec::new();
     let mut diagnostics = Vec::new();
     let mut in_comment = false;
+    // While inside a `<script>`/`<style>` element its body is raw text: `<` and
+    // `>` there are code, not tags.
+    let mut raw_tag: Option<String> = None;
 
     for (row, line) in text.lines().enumerate() {
         let chars: Vec<char> = line.chars().collect();
         let mut i = 0;
         while i < chars.len() {
+            if let Some(tag) = raw_tag.clone() {
+                let needle: Vec<char> = format!("</{tag}").chars().collect();
+                match find_char_seq(&chars, i, &needle) {
+                    Some(end) => {
+                        // Continue at the closing tag so it is parsed and popped.
+                        i = end - needle.len();
+                        raw_tag = None;
+                        continue;
+                    }
+                    None => break,
+                }
+            }
             if in_comment {
                 match find_char_seq(&chars, i, &['-', '-', '>']) {
                     Some(end) => {
@@ -518,6 +533,9 @@ fn unbalanced_tags(text: &str) -> Vec<Diagnostic> {
                     )),
                 }
             } else {
+                if name == "script" || name == "style" {
+                    raw_tag = Some(name.clone());
+                }
                 stack.push((name, TextPos::new(row, i)));
             }
             i = end + 1;
@@ -621,6 +639,15 @@ mod tests {
         assert_eq!(kind_at(&spans, 1), Some(TokenKind::Type)); // a
         assert_eq!(kind_at(&spans, 3), Some(TokenKind::Attribute)); // href
         assert_eq!(kind_at(&spans, 8), Some(TokenKind::String)); // "/x"
+    }
+
+    #[test]
+    fn script_bodies_do_not_confuse_tag_balance() {
+        // `<` inside a script is code, not a tag, and must not be reported.
+        let diagnostics = unbalanced_tags("<script>\nif (a < b) { x(); }\n</script>\n");
+        assert!(diagnostics.is_empty(), "unexpected: {diagnostics:?}");
+        let diagnostics = unbalanced_tags("<style>\na > b { color: red }\n</style>\n");
+        assert!(diagnostics.is_empty(), "unexpected: {diagnostics:?}");
     }
 
     #[test]

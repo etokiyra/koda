@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   JavaScript and a `<style>` body as CSS, across lines, with the embedded
   tokenizer's own multi-line state; the closing tag hands the rest of the line
   back to HTML. A self-closing `<script />` has no body.
+- **Tag-balance diagnostics ignore raw bodies.** `<` and `>` inside a
+  `<script>`/`<style>` element are code, so the HTML tag-balance check no longer
+  reports false "never closed" tags for comparisons like `a < b`.
 - `HighlightState` grew a small, shared lexical vocabulary (`LexMode` for
   templates, `Embed` for HTML regions) alongside the existing block-comment flag,
   so the carry-over is explicit rather than provider-specific.
