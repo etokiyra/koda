@@ -174,6 +174,7 @@ impl LanguageProvider for PerlProvider {
                 spans,
                 HighlightState {
                     in_block_comment: pod,
+                    ..Default::default()
                 },
             );
         }
@@ -186,6 +187,7 @@ impl LanguageProvider for PerlProvider {
                 spans,
                 HighlightState {
                     in_block_comment: !ends,
+                    ..Default::default()
                 },
             );
         }

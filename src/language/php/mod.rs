@@ -234,6 +234,7 @@ impl LanguageProvider for PhpProvider {
                 spans,
                 HighlightState {
                     in_block_comment: true,
+                    ..Default::default()
                 },
             );
         }
@@ -255,6 +256,7 @@ impl LanguageProvider for PhpProvider {
                             spans,
                             HighlightState {
                                 in_block_comment: true,
+                                ..Default::default()
                             },
                         );
                     }

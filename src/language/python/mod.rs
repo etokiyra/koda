@@ -220,6 +220,7 @@ impl LanguageProvider for PythonProvider {
                         spans,
                         HighlightState {
                             in_block_comment: true,
+                            ..Default::default()
                         },
                     );
                 }
@@ -252,6 +253,7 @@ impl LanguageProvider for PythonProvider {
                             spans,
                             HighlightState {
                                 in_block_comment: true,
+                                ..Default::default()
                             },
                         );
                     }
@@ -325,6 +327,7 @@ impl LanguageProvider for PythonProvider {
             spans,
             HighlightState {
                 in_block_comment: false,
+                ..Default::default()
             },
         )
     }

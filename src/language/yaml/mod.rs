@@ -211,6 +211,7 @@ impl LanguageProvider for YamlProvider {
             spans,
             HighlightState {
                 in_block_comment: false,
+                ..Default::default()
             },
         )
     }

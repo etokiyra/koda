@@ -286,6 +286,7 @@ impl LanguageProvider for JavaProvider {
                         spans,
                         HighlightState {
                             in_block_comment: true,
+                            ..Default::default()
                         },
                     );
                 }
@@ -313,6 +314,7 @@ impl LanguageProvider for JavaProvider {
                             spans,
                             HighlightState {
                                 in_block_comment: true,
+                                ..Default::default()
                             },
                         );
                     }

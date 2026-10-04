@@ -155,6 +155,7 @@ impl LanguageProvider for LuaProvider {
                         spans,
                         HighlightState {
                             in_block_comment: true,
+                            ..Default::default()
                         },
                     );
                 }
@@ -179,6 +180,7 @@ impl LanguageProvider for LuaProvider {
                                 spans,
                                 HighlightState {
                                     in_block_comment: true,
+                                    ..Default::default()
                                 },
                             );
                         }

@@ -11,9 +11,12 @@ use crate::language::diagnostics::{Diagnostic, Severity, TextPos};
 use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
 use crate::language::provider::{
-    Capability, HighlightSpan, HighlightState, LanguageProvider, TokenKind,
+    Capability, Embed, HighlightSpan, HighlightState, LanguageProvider, TokenKind,
 };
 use crate::language::symbols::{Symbol, SymbolKind};
+
+use crate::language::css::CssProvider;
+use crate::language::web::WebProvider;
 
 use std::path::Path;
 
@@ -128,6 +131,12 @@ impl LanguageProvider for HtmlProvider {
     }
 
     fn highlight(&self, line: &str, state: HighlightState) -> (Vec<HighlightSpan>, HighlightState) {
+        // Inside an open `<script>`/`<style>` the line belongs to the embedded
+        // language, not HTML.
+        if state.embed != Embed::None {
+            return self.highlight_embedded(line, state);
+        }
+
         let chars: Vec<char> = line.chars().collect();
         let len = chars.len();
         let mut spans = Vec::new();
@@ -148,6 +157,7 @@ impl LanguageProvider for HtmlProvider {
                         spans,
                         HighlightState {
                             in_block_comment: true,
+                            ..Default::default()
                         },
                     );
                 }
@@ -167,6 +177,7 @@ impl LanguageProvider for HtmlProvider {
                             spans,
                             HighlightState {
                                 in_block_comment: true,
+                                ..Default::default()
                             },
                         );
                     }
@@ -174,7 +185,29 @@ impl LanguageProvider for HtmlProvider {
                 continue;
             }
             if chars[i] == '<' {
-                i = highlight_tag(&chars, i, &mut spans);
+                let embed = open_embed(&chars, i);
+                let end = highlight_tag(&chars, i, &mut spans);
+                if let Some(kind) = embed {
+                    // Hand the rest of the line to the embedded tokenizer.
+                    let rest: String = chars[end..].iter().collect();
+                    let (embedded, next) = self.highlight_embedded(
+                        &rest,
+                        HighlightState {
+                            embed: kind,
+                            ..Default::default()
+                        },
+                    );
+                    for span in embedded {
+                        push(
+                            &mut spans,
+                            end + span.range.start,
+                            end + span.range.end,
+                            span.kind,
+                        );
+                    }
+                    return (spans, next);
+                }
+                i = end;
                 continue;
             }
             if chars[i] == '&'
@@ -193,6 +226,97 @@ impl LanguageProvider for HtmlProvider {
 
         (spans, HighlightState::default())
     }
+}
+
+impl HtmlProvider {
+    /// Tokenize a line inside an open `<script>`/`<style>` element.
+    ///
+    /// The embedded body is handed to the JavaScript or CSS tokenizer, which
+    /// carries its own state between lines. The closing tag ends the region and
+    /// the rest of the line is parsed as HTML again.
+    fn highlight_embedded(
+        &self,
+        line: &str,
+        state: HighlightState,
+    ) -> (Vec<HighlightSpan>, HighlightState) {
+        let (kind, close) = match state.embed {
+            Embed::Script => (Embed::Script, "</script"),
+            Embed::Style => (Embed::Style, "</style"),
+            Embed::None => return (Vec::new(), state),
+        };
+        let lower = line.to_ascii_lowercase();
+        let split = lower.find(close);
+        let body = match split {
+            Some(at) => &line[..at],
+            None => line,
+        };
+        let sub_state = HighlightState {
+            in_block_comment: state.in_block_comment,
+            mode: state.mode,
+            embed: Embed::None,
+        };
+        let (mut spans, embedded) = match kind {
+            Embed::Script => WebProvider::javascript().highlight(body, sub_state),
+            Embed::Style => CssProvider.highlight(body, sub_state),
+            Embed::None => unreachable!(),
+        };
+        match split {
+            None => (
+                spans,
+                HighlightState {
+                    in_block_comment: embedded.in_block_comment,
+                    mode: embedded.mode,
+                    embed: kind,
+                },
+            ),
+            Some(at) => {
+                // Re-parse the closing tag and anything after it as HTML. The
+                // byte offset is converted to characters for the span shift.
+                let offset = line[..at].chars().count();
+                let (tail, tail_state) = self.highlight(&line[at..], HighlightState::default());
+                for span in tail {
+                    push(
+                        &mut spans,
+                        offset + span.range.start,
+                        offset + span.range.end,
+                        span.kind,
+                    );
+                }
+                (spans, tail_state)
+            }
+        }
+    }
+}
+
+/// Whether `<` at `start` opens a `<script>` or `<style>` element, unless it is
+/// a closing tag or self-closing.
+fn open_embed(chars: &[char], start: usize) -> Option<Embed> {
+    let mut i = start + 1;
+    if chars.get(i) == Some(&'/') {
+        return None;
+    }
+    let name_start = i;
+    while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '-' || chars[i] == ':') {
+        i += 1;
+    }
+    let name: String = chars[name_start..i]
+        .iter()
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let embed = match name.as_str() {
+        "script" => Embed::Script,
+        "style" => Embed::Style,
+        _ => return None,
+    };
+    // A self-closing `<script .../>` has no body.
+    let mut j = i;
+    while j < chars.len() && chars[j] != '>' {
+        j += 1;
+    }
+    if j > i && chars[j - 1] == '/' {
+        return None;
+    }
+    Some(embed)
 }
 
 fn push(spans: &mut Vec<HighlightSpan>, start: usize, end: usize, kind: TokenKind) {
@@ -426,6 +550,54 @@ fn find_char_seq(chars: &[char], from: usize, needle: &[char]) -> Option<usize> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn kind_at(spans: &[HighlightSpan], col: usize) -> Option<TokenKind> {
+        spans
+            .iter()
+            .find(|span| span.range.contains(&col))
+            .map(|span| span.kind)
+    }
+
+    #[test]
+    fn embedded_script_is_tokenized_as_javascript() {
+        let provider = HtmlProvider;
+        // A `<script>` body opens on one line and continues on the next.
+        let (spans, state) = provider.highlight("<script>const x = 1;", HighlightState::default());
+        assert_eq!(state.embed, Embed::Script);
+        assert_eq!(kind_at(&spans, 0), Some(TokenKind::Keyword)); // <
+        assert_eq!(kind_at(&spans, 8), Some(TokenKind::Keyword)); // const
+        assert_eq!(kind_at(&spans, 18), Some(TokenKind::Number)); // 1
+
+        // The next line is JavaScript until `</script>`.
+        let (spans, state) = provider.highlight("let y = `a", state);
+        assert_eq!(state.embed, Embed::Script);
+        assert_eq!(state.mode, crate::language::provider::LexMode::Template);
+        assert_eq!(kind_at(&spans, 0), Some(TokenKind::Keyword)); // let
+    }
+
+    #[test]
+    fn embedded_style_closes_and_html_resumes() {
+        let provider = HtmlProvider;
+        let (spans, state) = provider.highlight(
+            "<style>.a { color: red; }</style>",
+            HighlightState::default(),
+        );
+        assert_eq!(state.embed, Embed::None);
+        assert_eq!(kind_at(&spans, 1), Some(TokenKind::Type)); // style
+        assert!(
+            spans
+                .iter()
+                .any(|span| span.range.start >= 25 && span.range.start < 33),
+            "the closing tag must be highlighted as HTML: {spans:?}"
+        );
+    }
+
+    #[test]
+    fn self_closing_script_has_no_body() {
+        let provider = HtmlProvider;
+        let (_, state) = provider.highlight("<script src=\"a.js\" />", HighlightState::default());
+        assert_eq!(state.embed, Embed::None);
+    }
 
     #[test]
     fn descriptor_claims_html() {

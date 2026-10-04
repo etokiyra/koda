@@ -228,6 +228,7 @@ impl LanguageProvider for KotlinProvider {
                         spans,
                         HighlightState {
                             in_block_comment: true,
+                            ..Default::default()
                         },
                     );
                 }
@@ -254,6 +255,7 @@ impl LanguageProvider for KotlinProvider {
                             spans,
                             HighlightState {
                                 in_block_comment: true,
+                                ..Default::default()
                             },
                         );
                     }

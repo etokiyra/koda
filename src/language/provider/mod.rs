@@ -80,10 +80,40 @@ impl HighlightSpan {
     }
 }
 
-/// Carry-over state for multi-line constructs such as block comments.
+/// Lexical carry-over for a construct that spans lines, beyond a block comment.
+///
+/// A small, shared vocabulary rather than a language-specific type: the web
+/// tokenizer uses `Template`/`TemplateInterpolation`, and the HTML tokenizer uses
+/// [`Embed`] for an open `<script>`/`<style>` body. Providers that need none of
+/// it leave the fields at their defaults.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LexMode {
+    #[default]
+    None,
+    /// Inside a backtick template literal, outside any `${}`.
+    Template,
+    /// Inside `${ ... }`, carrying the open-brace depth.
+    TemplateInterpolation(u16),
+}
+
+/// Which embedded sub-language an HTML region holds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Embed {
+    #[default]
+    None,
+    /// Inside a `<script>` element: tokenize as JavaScript.
+    Script,
+    /// Inside a `<style>` element: tokenize as CSS.
+    Style,
+}
+
+/// Carry-over state for multi-line constructs such as block comments, template
+/// literals and embedded HTML regions.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HighlightState {
     pub in_block_comment: bool,
+    pub mode: LexMode,
+    pub embed: Embed,
 }
 
 /// The contract every language implementation fulfils.

@@ -149,6 +149,7 @@ impl LanguageProvider for RubyProvider {
                 spans,
                 HighlightState {
                     in_block_comment: true,
+                    ..Default::default()
                 },
             );
         }
@@ -160,6 +161,7 @@ impl LanguageProvider for RubyProvider {
                 spans,
                 HighlightState {
                     in_block_comment: true,
+                    ..Default::default()
                 },
             );
         }

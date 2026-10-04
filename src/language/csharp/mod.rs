@@ -297,6 +297,7 @@ impl LanguageProvider for CSharpProvider {
                         spans,
                         HighlightState {
                             in_block_comment: true,
+                            ..Default::default()
                         },
                     );
                 }
@@ -336,6 +337,7 @@ impl LanguageProvider for CSharpProvider {
                             spans,
                             HighlightState {
                                 in_block_comment: true,
+                                ..Default::default()
                             },
                         );
                     }

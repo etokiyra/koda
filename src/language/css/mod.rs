@@ -235,6 +235,7 @@ impl LanguageProvider for CssProvider {
                         spans,
                         HighlightState {
                             in_block_comment: true,
+                            ..Default::default()
                         },
                     );
                 }
@@ -258,6 +259,7 @@ impl LanguageProvider for CssProvider {
                             spans,
                             HighlightState {
                                 in_block_comment: true,
+                                ..Default::default()
                             },
                         );
                     }

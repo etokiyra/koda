@@ -7,9 +7,9 @@
 //! hover and within-file navigation. `typescript-language-server` can be
 //! provisioned for rename, code actions and richer, type-aware analysis.
 //!
-//! Multi-line block comments carry over between lines; a template literal that
-//! spans lines is highlighted only up to the end of the line it starts on,
-//! which keeps the highlighter stateless beyond the existing comment flag.
+//! Multi-line block comments and template literals carry over between lines; a
+//! `${ … }` interpolation resumes code highlighting and returns to template text
+//! once its braces close.
 
 use crate::language::completion::{Completion, CompletionKind};
 use crate::language::data::{push_merged, scan_number, scan_quoted};
@@ -18,7 +18,7 @@ use crate::language::diagnostics::Diagnostic;
 use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
 use crate::language::provider::{
-    Capability, HighlightSpan, HighlightState, LanguageProvider, TokenKind,
+    Capability, HighlightSpan, HighlightState, LanguageProvider, LexMode, TokenKind,
 };
 use crate::language::symbols::{Symbol, SymbolKind};
 
@@ -306,27 +306,73 @@ impl LanguageProvider for WebProvider {
         let len = chars.len();
         let mut spans = Vec::new();
         let mut i = 0;
+        let mut mode = state.mode;
+        let mut in_block_comment = state.in_block_comment;
 
         // Finish a block comment carried over from the previous line.
-        if state.in_block_comment {
+        if in_block_comment {
             match find_block_end(&chars, 0) {
                 Some(end) => {
                     push_merged(&mut spans, HighlightSpan::new(0, end, TokenKind::Comment));
                     i = end;
+                    in_block_comment = false;
                 }
                 None => {
                     if len > 0 {
                         push_merged(&mut spans, HighlightSpan::new(0, len, TokenKind::Comment));
                     }
-                    return (spans, HighlightState::default());
+                    return (
+                        spans,
+                        HighlightState {
+                            in_block_comment: true,
+                            mode,
+                            embed: state.embed,
+                        },
+                    );
                 }
             }
+        }
+
+        // Resume template text carried over from the previous line.
+        if mode == LexMode::Template {
+            let (next, next_mode) = scan_template_text(&chars, i, &mut spans);
+            i = next;
+            mode = next_mode;
         }
 
         let first_nonspace = chars.iter().position(|c| !c.is_whitespace());
 
         while i < len {
             let c = chars[i];
+
+            // Inside `${ ... }` the braces must be balanced so template text can
+            // resume once the interpolation closes.
+            if let LexMode::TemplateInterpolation(depth) = mode {
+                if c == '{' {
+                    push_merged(
+                        &mut spans,
+                        HighlightSpan::new(i, i + 1, TokenKind::Operator),
+                    );
+                    mode = LexMode::TemplateInterpolation(depth.saturating_add(1));
+                    i += 1;
+                    continue;
+                }
+                if c == '}' {
+                    push_merged(
+                        &mut spans,
+                        HighlightSpan::new(i, i + 1, TokenKind::Operator),
+                    );
+                    i += 1;
+                    if depth <= 1 {
+                        let (next, next_mode) = scan_template_text(&chars, i, &mut spans);
+                        i = next;
+                        mode = next_mode;
+                    } else {
+                        mode = LexMode::TemplateInterpolation(depth - 1);
+                    }
+                    continue;
+                }
+            }
 
             if c == '/' && chars.get(i + 1) == Some(&'/') {
                 push_merged(&mut spans, HighlightSpan::new(i, len, TokenKind::Comment));
@@ -345,6 +391,8 @@ impl LanguageProvider for WebProvider {
                             spans,
                             HighlightState {
                                 in_block_comment: true,
+                                mode,
+                                embed: state.embed,
                             },
                         );
                     }
@@ -371,9 +419,17 @@ impl LanguageProvider for WebProvider {
             }
 
             if c == '`' {
-                let end = scan_template(&chars, i);
-                push_merged(&mut spans, HighlightSpan::new(i, end, TokenKind::String));
+                let saved = mode;
+                let (end, returned) = scan_template(&chars, i, &mut spans);
                 i = end;
+                // A nested template that closes on this line restores the
+                // enclosing interpolation; otherwise the returned mode carries.
+                mode = match (saved, returned) {
+                    (LexMode::TemplateInterpolation(depth), LexMode::None) => {
+                        LexMode::TemplateInterpolation(depth)
+                    }
+                    _ => returned,
+                };
                 continue;
             }
 
@@ -440,7 +496,14 @@ impl LanguageProvider for WebProvider {
             i += 1;
         }
 
-        (spans, HighlightState::default())
+        (
+            spans,
+            HighlightState {
+                in_block_comment,
+                mode,
+                embed: state.embed,
+            },
+        )
     }
 }
 
@@ -494,19 +557,44 @@ fn find_block_end(chars: &[char], from: usize) -> Option<usize> {
     None
 }
 
-/// End of a template literal starting at `start` (the opening backtick).
+/// Scan a template literal starting at `start` (the opening backtick).
 ///
-/// Escaped backticks are honoured; the literal is assumed to end on the line.
-fn scan_template(chars: &[char], start: usize) -> usize {
-    let mut i = start + 1;
-    while i < chars.len() {
+/// Emits the template text and `${` boundaries, and returns the index reached
+/// with the carry-over mode: `Template` (or an interpolation) when the literal is
+/// still open at the end of the line, otherwise `None`.
+fn scan_template(chars: &[char], start: usize, spans: &mut Vec<HighlightSpan>) -> (usize, LexMode) {
+    push_merged(
+        spans,
+        HighlightSpan::new(start, start + 1, TokenKind::String),
+    );
+    scan_template_text(chars, start + 1, spans)
+}
+
+/// Scan template text from `i` until the closing backtick or a `${`.
+fn scan_template_text(
+    chars: &[char],
+    mut i: usize,
+    spans: &mut Vec<HighlightSpan>,
+) -> (usize, LexMode) {
+    let len = chars.len();
+    let start = i;
+    while i < len {
         match chars[i] {
-            '\\' => i += 2,
-            '`' => return i + 1,
+            '\\' => i = (i + 2).min(len),
+            '`' => {
+                push_merged(spans, HighlightSpan::new(start, i + 1, TokenKind::String));
+                return (i + 1, LexMode::None);
+            }
+            '$' if chars.get(i + 1) == Some(&'{') => {
+                push_merged(spans, HighlightSpan::new(start, i, TokenKind::String));
+                push_merged(spans, HighlightSpan::new(i, i + 2, TokenKind::Operator));
+                return (i + 2, LexMode::TemplateInterpolation(1));
+            }
             _ => i += 1,
         }
     }
-    chars.len()
+    push_merged(spans, HighlightSpan::new(start, len, TokenKind::String));
+    (len, LexMode::Template)
 }
 
 /// The word ending immediately before `end` (skipping whitespace), if any.
@@ -861,6 +949,42 @@ mod tests {
                 .iter()
                 .any(|span| span.kind == TokenKind::Comment && span.range.contains(&0))
         );
+    }
+
+    #[test]
+    fn carries_template_literals_and_interpolation_across_lines() {
+        let provider = WebProvider::typescript();
+        // A template opened on one line stays a string on the next.
+        let (spans, state) = provider.highlight("const s = `hello", HighlightState::default());
+        assert_eq!(state.mode, LexMode::Template);
+        assert_eq!(kind_at(&spans, 10), Some(TokenKind::String));
+
+        // `${name}` resumes code, and the text after `}` is a string again.
+        let (spans, state) = provider.highlight("world ${name} tail`", state);
+        assert_eq!(state.mode, LexMode::None);
+        assert_eq!(kind_at(&spans, 1), Some(TokenKind::String)); // "world "
+        assert_eq!(kind_at(&spans, 9), Some(TokenKind::Plain)); // name
+        assert_eq!(kind_at(&spans, 16), Some(TokenKind::String)); // " tail`"
+    }
+
+    #[test]
+    fn an_open_interpolation_carries_its_depth() {
+        let provider = WebProvider::typescript();
+        let (_, state) = provider.highlight("`a ${b", HighlightState::default());
+        assert_eq!(state.mode, LexMode::TemplateInterpolation(1));
+        // The closing brace returns to template text, which needs a backtick.
+        let (spans, state) = provider.highlight("} c`", state);
+        assert_eq!(state.mode, LexMode::None);
+        assert_eq!(kind_at(&spans, 0), Some(TokenKind::Operator)); // }
+        assert_eq!(kind_at(&spans, 2), Some(TokenKind::String)); // c`
+    }
+
+    #[test]
+    fn interpolation_braces_are_balanced() {
+        let provider = WebProvider::typescript();
+        // A nested `{}` inside the interpolation must not close it early.
+        let (_, state) = provider.highlight("`a ${ ({x: 1}) } b`", HighlightState::default());
+        assert_eq!(state.mode, LexMode::None);
     }
 
     #[test]
