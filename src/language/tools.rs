@@ -2512,18 +2512,54 @@ fn move_directory_contents(from: &Path, to: &Path) -> Result<(), String> {
 
 /// SHA-256 of a file, using whichever tool the platform provides.
 fn file_sha256(path: &Path) -> Result<String, String> {
+    // `sha256sum` (coreutils, busybox) and `shasum` (macOS) print the hex first.
     for (program, args) in [("sha256sum", &[][..]), ("shasum", &["-a", "256"][..])] {
         if let Ok(output) = install_command(program).args(args).arg(path).output()
             && output.status.success()
             && let Some(hash) = String::from_utf8_lossy(&output.stdout)
                 .split_whitespace()
                 .next()
-            && !hash.is_empty()
+            && is_sha256_hex(hash)
         {
             return Ok(hash.to_string());
         }
     }
-    Err("no SHA-256 tool found (looked for sha256sum and shasum)".to_string())
+    // `openssl dgst -sha256` prints `SHA256(name)= <hex>`.
+    if let Ok(output) = install_command("openssl")
+        .args(["dgst", "-sha256"])
+        .arg(path)
+        .output()
+        && output.status.success()
+        && let Some(hash) = String::from_utf8_lossy(&output.stdout)
+            .split('=')
+            .nth(1)
+            .map(str::trim)
+        && is_sha256_hex(hash)
+    {
+        return Ok(hash.to_string());
+    }
+    // A Python interpreter, present on many minimal systems without coreutils.
+    if let Ok(output) = install_command("python3")
+        .args([
+            "-c",
+            "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())",
+        ])
+        .arg(path)
+        .output()
+        && output.status.success()
+        && let Some(hash) = String::from_utf8_lossy(&output.stdout)
+            .split_whitespace()
+            .next()
+        && is_sha256_hex(hash)
+    {
+        return Ok(hash.to_string());
+    }
+    Err("no SHA-256 tool found (looked for sha256sum, shasum, openssl and python3)".to_string())
+}
+
+/// Whether `value` is a 64-character lowercase-or-uppercase hex SHA-256.
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Render a byte count for a download warning (`1.1 GB`, `240 MB`).
@@ -4177,6 +4213,26 @@ mod tests {
         // Unsupported distribution or architecture is reported, never guessed.
         assert_eq!(swift_platform("endeavouros", "arch", "", "x86_64"), None);
         assert_eq!(swift_platform("ubuntu", "", "24.04", "riscv64"), None);
+    }
+
+    #[test]
+    fn file_sha256_matches_a_known_digest() {
+        let path = std::env::temp_dir().join(format!("koda-sha-{}", std::process::id()));
+        std::fs::write(&path, b"abc").unwrap();
+        let hash = file_sha256(&path).expect("a SHA-256 tool");
+        assert_eq!(
+            hash.to_lowercase(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn sha256_hex_is_validated() {
+        assert!(is_sha256_hex(&"a".repeat(64)));
+        assert!(is_sha256_hex(&"A".repeat(64)));
+        assert!(!is_sha256_hex("abc"));
+        assert!(!is_sha256_hex(&"z".repeat(64)));
     }
 
     #[test]

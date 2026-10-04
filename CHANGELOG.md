@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Portable checksum verification
+
+- Managed downloads verify with `sha256sum` (coreutils/busybox) or `shasum`
+  (macOS) as before, and now also fall back to `openssl dgst -sha256` or a
+  Python interpreter when neither is present, so verification still works on
+  minimal systems. A hash that is not 64 hex characters is rejected.
+
 ### Setup is offered from the project, not only from an open file
 
 - Opening a project whose language Koda can provision now offers that language's

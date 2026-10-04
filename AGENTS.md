@@ -264,7 +264,10 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   `MIX_HOME`/`HEX_HOME`. Each install is bounded, locked and re-probed by launching
   the **real server**, and a verified download that still cannot run (a missing
   shared library, a broken launcher) reports the real reason instead of a generic
-  failure.
+  failure. Hashing goes through whichever tool the system has — `sha256sum`,
+  `shasum`, `openssl dgst -sha256` or a Python interpreter — and a value that is
+  not 64 hex characters is rejected, so a malformed tool output cannot pass
+  verification.
 - **Platform support is resolved, never guessed.** `swift_platform` and
   `bob_platform` map the running distribution from `/etc/os-release` (including
   `ID_LIKE` derivatives) to the exact upstream artifact. A distribution upstream
