@@ -275,7 +275,8 @@ command palette already reports which are available. Filling them in is additive
       JSX tags, attributes, fragments and closing tags for
       JavaScript/TypeScript/JSX, with generics and comparisons kept as operators.
       Template literals carry across lines, with `${ … }` interpolation resuming
-      code and returning to template text.
+      code and returning to template text, and JSX tag attributes continue onto
+      the next line until the tag closes.
 - [x] Embedded HTML regions: a `<script>` body is tokenized as JavaScript and a
       `<style>` body as CSS, across lines, with the sub-tokenizer's own
       multi-line state, and the closing tag returns to HTML.

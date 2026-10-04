@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Multi-line templates and embedded `<script>`/`<style>` highlighting
+### Multi-line templates, JSX tags and embedded `<script>`/`<style>` highlighting
 
 - **Template literals now span lines.** The web tokenizer carries a template
   state between lines, so a backtick string stays a string, `${ … }`
   interpolations resume code highlighting (with brace balancing for nested
   objects) and return to template text when they close.
+- **JSX tags span lines.** An open `<Component` whose attributes continue on the
+  next line keeps its attribute highlighting until the closing `>`, carried by a
+  `JsxTag` lexical mode.
 - **HTML embeds its sub-languages.** A `<script>` body is tokenized as
   JavaScript and a `<style>` body as CSS, across lines, with the embedded
   tokenizer's own multi-line state; the closing tag hands the rest of the line
