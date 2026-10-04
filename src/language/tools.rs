@@ -440,7 +440,7 @@ impl Tool {
             }
             Tool::HtmlLs | Tool::CssLs => "install with npm — Koda provisions Node.js if missing",
             Tool::Rustfmt => "install with `rustup component add rustfmt`",
-            Tool::Gofmt => "it ships with the Go toolchain",
+            Tool::Gofmt => "Koda can install the official Go toolchain, which includes gofmt",
             Tool::Prettier => "install with npm — Koda provisions Node.js if missing",
             Tool::ClangFormat => "it ships with the Clang/LLVM toolchain",
             Tool::Shfmt => "install it with `go install mvdan.cc/sh/v3/cmd/shfmt@latest`",
@@ -465,7 +465,7 @@ impl Tool {
             // headers, is about 120 MB per platform.
             Tool::Clangd if clangd_asset().is_some() && !libc_is_musl() => Some(120_000_000),
             // Go's official archive is about 70 MB.
-            Tool::Gopls | Tool::Sqls if go_platform().is_some() => Some(70_000_000),
+            Tool::Gopls | Tool::Sqls | Tool::Gofmt if go_platform().is_some() => Some(70_000_000),
             _ => None,
         }
     }
@@ -698,8 +698,8 @@ impl Tool {
             Tool::Jdtls => jdtls_attempts(),
             Tool::OmniSharp => omnisharp_attempts(),
             Tool::HtmlLs | Tool::CssLs => npm_attempts(&["vscode-langservers-extracted"]),
-            // `gofmt` ships with the Go toolchain; there is nothing to install.
-            Tool::Gofmt => Vec::new(),
+            // `gofmt` ships with Go, so Koda provisions the toolchain.
+            Tool::Gofmt => go_toolchain_attempts(),
             Tool::Prettier => npm_attempts(&["prettier"]),
             Tool::Shfmt => go_attempts(&["mvdan.cc/sh/v3/cmd/shfmt"]),
             // `clang-format` and `perltidy` ship with their toolchains.
@@ -975,26 +975,38 @@ fn rustup_bootstrap_with(final_command: InstallCommand) -> Option<InstallAttempt
 fn go_attempts(packages: &[&str]) -> Vec<InstallAttempt> {
     let install = go_install_command(packages);
     let mut attempts = vec![InstallAttempt::one("go install", install.clone())];
-    if go_platform().is_some()
-        && let (Some(downloads), Some(dest)) = (downloads_dir(), go_dir())
-    {
-        let archive = downloads.join("go.tar.gz");
-        attempts.push(InstallAttempt::managed(
-            "the official Go toolchain",
-            vec![
-                InstallStep::GoToolchain {
-                    dest: archive.clone(),
-                },
-                InstallStep::Extract {
-                    archive,
-                    dest,
-                    strip: 1,
-                },
-                InstallStep::Run(install),
-            ],
-        ));
+    if let Some(managed) = managed_go_attempt(Some(install)) {
+        attempts.push(managed);
     }
     attempts
+}
+
+/// Download the official Go toolchain (and optionally run a final command with
+/// it), when Koda can provision Go on this platform.
+fn managed_go_attempt(final_command: Option<InstallCommand>) -> Option<InstallAttempt> {
+    go_platform()?;
+    let downloads = downloads_dir()?;
+    let dest = go_dir()?;
+    let archive = downloads.join("go.tar.gz");
+    let mut steps = vec![
+        InstallStep::GoToolchain {
+            dest: archive.clone(),
+        },
+        InstallStep::Extract {
+            archive,
+            dest,
+            strip: 1,
+        },
+    ];
+    if let Some(command) = final_command {
+        steps.push(InstallStep::Run(command));
+    }
+    Some(InstallAttempt::managed("the official Go toolchain", steps))
+}
+
+/// Install the Go toolchain alone; `gofmt` ships with it.
+fn go_toolchain_attempts() -> Vec<InstallAttempt> {
+    managed_go_attempt(None).into_iter().collect()
 }
 
 /// The `go install` command for a set of packages, with a Koda-private
@@ -4981,8 +4993,18 @@ mod tests {
         // even without pipx or a working `pip`.
         assert!(Tool::Pylsp.install_attempts().len() >= 2);
         assert_eq!(Tool::Gofmt.install_command(), None);
-        // `gofmt` cannot be installed on its own.
-        assert!(install(Tool::Gofmt).is_err());
+        // `gofmt` ships with Go, so its plan provisions the Go toolchain.
+        if go_platform().is_some() && tools_dir().is_some() {
+            assert!(
+                Tool::Gofmt.install_attempts().iter().any(|attempt| attempt
+                    .steps
+                    .iter()
+                    .any(|step| matches!(step, InstallStep::GoToolchain { .. }))),
+                "gofmt must be installable through the Go toolchain"
+            );
+        } else {
+            assert!(Tool::Gofmt.install_attempts().is_empty());
+        }
     }
 
     #[test]

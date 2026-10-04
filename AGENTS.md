@@ -298,8 +298,10 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   official Go toolchain is one managed component that unlocks `gopls`, `sqls` and
   `shfmt`: `go_attempts` first tries the user's `go`, then a managed Go archive,
   and every `go install` writes to a Koda-private `GOPATH`/`GOBIN`, so nothing
-  lands in `~/go`. The same "try the ambient tool, then provision a self-contained
-  one" shape covers `cargo`/`rustup` for `asm-lsp`. Downloads verify the checksum
+  lands in `~/go`. `gofmt` has no `go install` step — it ships with Go — so its
+  plan is the toolchain archive alone. The same "try the ambient tool, then
+  provision a self-contained one" shape covers `cargo`/`rustup` for `asm-lsp`.
+  Downloads verify the checksum
   the source actually publishes (`go.dev/dl` JSON, GitHub asset digests) and fail
   closed.
 - **Prefer a small, self-contained upstream bundle over a system toolchain.**

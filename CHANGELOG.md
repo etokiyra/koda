@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Go formatting is provisioned too
+
+- `gofmt` had no install plan because it "ships with Go". Now that Koda manages
+  the official Go toolchain, `gofmt`'s plan provisions it, so Go formatting works
+  on a system with no Go at all, with the same ~70 MB size estimate as the other
+  Go tools.
+
 ### Archive extraction refuses path traversal
 
 - Before unpacking a downloaded archive, Koda lists its entries and refuses any

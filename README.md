@@ -164,7 +164,7 @@ channel, so provenance and integrity stay with the package manager:
 | `vscode-html-language-server` | HTML language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
 | `vscode-css-language-server` | CSS language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
 | `rustfmt` | Rust formatting | `rustup component add rustfmt` |
-| `gofmt` | Go formatting | ships with the Go toolchain |
+| `gofmt` | Go formatting | the managed Go toolchain (installed if missing) |
 | `prettier` | Web/HTML/CSS/JSON/YAML/Markdown formatting | `npm install -g prettier` (Koda-managed Node/prefix) |
 | `clang-format` | C/C++ formatting | ships with the Clang/LLVM toolchain |
 | `shfmt` | Shell formatting | `go install`, with the official Go toolchain provisioned if missing |

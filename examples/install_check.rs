@@ -25,6 +25,7 @@ fn main() {
         Some("gopls") => koda::language::tools::Tool::Gopls,
         Some("shfmt") => koda::language::tools::Tool::Shfmt,
         Some("clangd") => koda::language::tools::Tool::Clangd,
+        Some("gofmt") => koda::language::tools::Tool::Gofmt,
         Some("phpactor") => koda::language::tools::Tool::Phpactor,
         Some("ruby") => koda::language::tools::Tool::RubyLs,
         other => {
