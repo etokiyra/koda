@@ -240,12 +240,13 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
 - **Verified install attempts.** A tool's provisioning is an ordered list of
   self-contained steps — run a command, download an archive (optionally
   verifying a published SHA-256), fetch and verify an Adoptium JDK, or extract.
-  Koda re-probes the tool after every attempt rather than trusting a package
-  manager's exit code, and reports a missing prerequisite (a whole absent
-  toolchain) instead of offering an install that cannot run. Installs into the
-  shared managed directory are guarded by an advisory lock (with stale-lock
-  recovery) so concurrent Koda instances cannot corrupt the same npm prefix or
-  virtualenv.
+  Extraction lists the archive first and refuses absolute or `..` paths, failing
+  closed if it cannot list it. Koda re-probes the tool after every attempt rather
+  than trusting a package manager's exit code, and reports a missing prerequisite
+  (a whole absent toolchain) instead of offering an install that cannot run.
+  Installs into the shared managed directory are guarded by an advisory lock
+  (with stale-lock recovery) so concurrent Koda instances cannot corrupt the same
+  npm prefix or virtualenv.
 - **Managed toolchains.** Some language servers need a whole toolchain, so Koda
   provisions one under its own data directory and launches the server with it:
   the .NET SDK for OmniSharp (`DOTNET_ROOT`), a checksum-verified Eclipse Adoptium

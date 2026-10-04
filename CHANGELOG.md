@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Archive extraction refuses path traversal
+
+- Before unpacking a downloaded archive, Koda lists its entries and refuses any
+  absolute path or `..` component, failing closed if the listing itself fails.
+  GNU `tar` and Info-ZIP `unzip` already sanitize these, but a minimal system's
+  tools may not, and a downloaded archive is untrusted input. Tests cover both a
+  traversal archive (refused) and a normal one (extracted).
+
 ### Portable checksum verification
 
 - Managed downloads verify with `sha256sum` (coreutils/busybox) or `shasum`

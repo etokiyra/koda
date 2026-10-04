@@ -2387,6 +2387,48 @@ fn builds_txt_checksum(body: &str, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Refuse an archive whose entries could escape the extraction directory.
+///
+/// GNU `tar` and Info-ZIP `unzip` sanitize `..` and absolute paths, but a
+/// minimal system's tools may not, and a downloaded archive is untrusted input.
+/// The listing is bounded by the archive's own entry count and any failure to
+/// list is treated as unsafe, so this fails closed.
+fn ensure_archive_paths_safe(archive: &Path, zip: bool) -> Result<(), String> {
+    let mut command = install_command(if zip { "unzip" } else { "tar" });
+    if zip {
+        command.arg("-Z1");
+    } else {
+        command.arg("-tf");
+    }
+    let output = command
+        .arg(archive)
+        .output()
+        .map_err(|err| format!("could not list {}: {err}", archive.display()))?;
+    if !output.status.success() {
+        return Err(format!(
+            "could not list {}: {}",
+            archive.display(),
+            first_stderr_line(&output.stderr)
+        ));
+    }
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let entry = line.trim_end_matches('/');
+        if entry.starts_with('/') || entry.starts_with('\\') {
+            return Err(format!(
+                "{} contains an absolute path: {entry}",
+                archive.display()
+            ));
+        }
+        if entry.split(['/', '\\']).any(|part| part == "..") {
+            return Err(format!(
+                "{} contains a parent path: {entry}",
+                archive.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Extract a `.tar.gz`/`.tar.xz`/`.zip` archive into `dest`.
 ///
 /// `tar` supports `--strip-components`; `unzip` does not, so a stripped zip is
@@ -2396,6 +2438,8 @@ fn extract(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
     std::fs::create_dir_all(dest)
         .map_err(|err| format!("could not create {}: {err}", dest.display()))?;
     let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
+    // Refuse an archive that could write outside `dest` before extracting it.
+    ensure_archive_paths_safe(archive, zip)?;
 
     if !zip {
         let mut command = install_command("tar");
@@ -4609,6 +4653,59 @@ mod tests {
     #[test]
     fn unknown_program_is_not_located() {
         assert!(locate("koda-definitely-not-a-real-tool").is_none());
+    }
+
+    #[test]
+    fn extract_rejects_parent_paths() {
+        if locate("tar").is_none() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("koda-traverse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("inner")).unwrap();
+        std::fs::write(dir.join("inner/file.txt"), "x").unwrap();
+        let built = std::process::Command::new("tar")
+            .current_dir(dir.join("inner"))
+            .args([
+                "-cf",
+                "../evil.tar",
+                "--transform",
+                "s,^,../escaped/,",
+                "file.txt",
+            ])
+            .status();
+        if !built.map(|status| status.success()).unwrap_or(false) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let error = extract(&dir.join("evil.tar"), &dir.join("out"), 1).unwrap_err();
+        assert!(
+            error.contains("parent path"),
+            "expected a traversal refusal, got: {error}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extract_accepts_a_normal_archive() {
+        if locate("tar").is_none() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("koda-extract-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("pkg/bin")).unwrap();
+        std::fs::write(dir.join("pkg/bin/tool"), "#!/bin/sh\n").unwrap();
+        let built = std::process::Command::new("tar")
+            .current_dir(&dir)
+            .args(["-czf", "pkg.tar.gz", "pkg"])
+            .status();
+        if !built.map(|status| status.success()).unwrap_or(false) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        extract(&dir.join("pkg.tar.gz"), &dir.join("out"), 1).expect("a safe archive extracts");
+        assert!(dir.join("out/bin/tool").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
