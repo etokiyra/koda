@@ -402,7 +402,7 @@ automatically, and nothing you passed on the command line is thrown away.
 ```text
               ✦         ·          ✧        ☾
            ·        ✧         ✦        ·
-                 ✧        /\___/\              ✦
+                 ✧        /\_/\              ✦
                          ( ･ω･ )
                           > ω <
            ·  ·  ·  ~~~~~~~~~~~~~~  ·  ·
