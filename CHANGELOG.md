@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GNU `tar` and Info-ZIP `unzip` already sanitize these, but a minimal system's
   tools may not, and a downloaded archive is untrusted input. Tests cover both a
   traversal archive (refused) and a normal one (extracted).
+- Zip archives now unpack with `unzip`, `bsdtar` (libarchive) or a Python
+  interpreter, whichever is present, so zip-based bundles (clangd, Kotlin,
+  ElixirLS, Node on Windows) stay installable on minimal systems without
+  `unzip`. Tests exercise all three extractors.
 
 ### Portable checksum verification
 

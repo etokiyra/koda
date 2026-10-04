@@ -241,9 +241,11 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   self-contained steps — run a command, download an archive (optionally
   verifying a published SHA-256), fetch and verify an Adoptium JDK, or extract.
   Extraction lists the archive first and refuses absolute or `..` paths, failing
-  closed if it cannot list it. Koda re-probes the tool after every attempt rather
-  than trusting a package manager's exit code, and reports a missing prerequisite
-  (a whole absent toolchain) instead of offering an install that cannot run.
+  closed if it cannot list it, and unpacks a zip with `unzip`, `bsdtar` or a
+  Python interpreter so it does not depend on one distribution's tooling. Koda
+  re-probes the tool after every attempt rather than trusting a package
+  manager's exit code, and reports a missing prerequisite (a whole absent
+  toolchain) instead of offering an install that cannot run.
   Installs into the shared managed directory are guarded by an advisory lock
   (with stale-lock recovery) so concurrent Koda instances cannot corrupt the same
   npm prefix or virtualenv.

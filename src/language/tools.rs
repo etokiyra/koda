@@ -1709,11 +1709,11 @@ fn node_provisionable() -> bool {
         return false;
     };
     let archive_tool = if asset.ends_with(".zip") {
-        locate("unzip")
+        zip_extractor().is_some()
     } else {
-        locate("tar")
+        locate("tar").is_some()
     };
-    locate("curl").is_some() && archive_tool.is_some()
+    locate("curl").is_some() && archive_tool
 }
 
 /// Download and verify the Node.js runtime archive.
@@ -2458,39 +2458,93 @@ fn extract(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
         };
     }
 
-    if strip == 0 {
-        let output = install_command("unzip")
-            .arg("-q")
-            .arg("-o")
-            .arg(archive)
-            .arg("-d")
-            .arg(dest)
-            .output();
-        return match output {
+    extract_zip(archive, dest, strip)
+}
+
+/// Which tool Koda uses to unpack a zip archive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ZipExtractor {
+    Unzip,
+    BsdTar,
+    Python,
+}
+
+/// The first available zip extractor: Info-ZIP `unzip`, then `bsdtar` (libarchive,
+/// the macOS default), then a Python interpreter. This keeps zip-based bundles
+/// installable on minimal systems without `unzip`.
+fn zip_extractor() -> Option<ZipExtractor> {
+    if locate("unzip").is_some() {
+        Some(ZipExtractor::Unzip)
+    } else if locate("bsdtar").is_some() {
+        Some(ZipExtractor::BsdTar)
+    } else if locate("python3").is_some() {
+        Some(ZipExtractor::Python)
+    } else {
+        None
+    }
+}
+
+/// Extract a zip archive, using whichever extractor is available.
+fn extract_zip(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
+    let extractor = zip_extractor().ok_or_else(|| {
+        format!(
+            "no zip extractor found (looked for unzip, bsdtar and python3) to unpack {}",
+            archive.display()
+        )
+    })?;
+    extract_zip_with(extractor, archive, dest, strip)
+}
+
+/// Extract a zip archive with a specific extractor.
+fn extract_zip_with(
+    extractor: ZipExtractor,
+    archive: &Path,
+    dest: &Path,
+    strip: usize,
+) -> Result<(), String> {
+    std::fs::create_dir_all(dest)
+        .map_err(|err| format!("could not create {}: {err}", dest.display()))?;
+    if extractor == ZipExtractor::BsdTar {
+        // libarchive understands `--strip-components` for zip archives.
+        let mut command = install_command("bsdtar");
+        command.arg("-xf").arg(archive).arg("-C").arg(dest);
+        if strip > 0 {
+            command.arg(format!("--strip-components={strip}"));
+        }
+        return match command.output() {
             Ok(output) if output.status.success() => Ok(()),
             Ok(output) => Err(format!(
                 "could not extract {}: {}",
                 archive.display(),
                 first_stderr_line(&output.stderr)
             )),
-            Err(err) => Err(format!("could not run the archive tool: {err}")),
+            Err(err) => Err(format!("could not run bsdtar: {err}")),
         };
     }
 
+    // `unzip` and Python have no `--strip-components`, so unpack into a scratch
+    // directory and move the wanted level up by hand.
     let scratch = dest.with_extension("koda-extract");
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::create_dir_all(&scratch)
         .map_err(|err| format!("could not create {}: {err}", scratch.display()))?;
-
     let result = (|| {
-        let output = install_command("unzip")
-            .arg("-q")
-            .arg("-o")
-            .arg(archive)
-            .arg("-d")
-            .arg(&scratch)
-            .output()
-            .map_err(|err| format!("could not run the archive tool: {err}"))?;
+        let output = match extractor {
+            ZipExtractor::Unzip => install_command("unzip")
+                .args(["-q", "-o"])
+                .arg(archive)
+                .arg("-d")
+                .arg(&scratch)
+                .output()
+                .map_err(|err| format!("could not run unzip: {err}"))?,
+            ZipExtractor::Python => install_command("python3")
+                .args(["-m", "zipfile", "-e"])
+                .arg(archive)
+                .arg(&scratch)
+                .output()
+                .map_err(|err| format!("could not run python3: {err}"))?,
+            ZipExtractor::BsdTar => unreachable!(),
+        };
         if !output.status.success() {
             return Err(format!(
                 "could not extract {}: {}",
@@ -2498,7 +2552,6 @@ fn extract(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
                 first_stderr_line(&output.stderr)
             ));
         }
-        // Descend the `strip` wrapping directories.
         let mut root = scratch.clone();
         for _ in 0..strip {
             root = single_child_directory(&root).ok_or_else(|| {
@@ -2510,7 +2563,6 @@ fn extract(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
         }
         move_directory_contents(&root, dest)
     })();
-
     let _ = std::fs::remove_dir_all(&scratch);
     result
 }
@@ -2698,7 +2750,12 @@ fn step_available(step: &InstallStep) -> bool {
         InstallStep::DownloadGpg { .. } => locate("curl").is_some() && locate("gpg").is_some(),
         InstallStep::Extract { archive, .. } => {
             let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
-            locate(if zip { "unzip" } else { "tar" }).is_some()
+            if zip {
+                // Any of `unzip`, `bsdtar` or Python can unpack a zip.
+                zip_extractor().is_some()
+            } else {
+                locate("tar").is_some()
+            }
         }
     }
 }
@@ -4705,6 +4762,47 @@ mod tests {
         }
         extract(&dir.join("pkg.tar.gz"), &dir.join("out"), 1).expect("a safe archive extracts");
         assert!(dir.join("out/bin/tool").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extract_zip_works_with_every_available_extractor() {
+        if locate("python3").is_none() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("koda-zip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("pkg/bin")).unwrap();
+        std::fs::write(dir.join("pkg/bin/tool"), "x").unwrap();
+        let archive = dir.join("pkg.zip");
+        let built = std::process::Command::new("python3")
+            .current_dir(&dir)
+            .args([
+                "-c",
+                "import zipfile;z=zipfile.ZipFile('pkg.zip','w');z.write('pkg/bin/tool','pkg/bin/tool')",
+            ])
+            .status();
+        if !built.map(|status| status.success()).unwrap_or(false) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        for (extractor, tool) in [
+            (ZipExtractor::Unzip, "unzip"),
+            (ZipExtractor::BsdTar, "bsdtar"),
+            (ZipExtractor::Python, "python3"),
+        ] {
+            if locate(tool).is_none() {
+                continue;
+            }
+            let out = dir.join(format!("out-{tool}"));
+            extract_zip_with(extractor, &archive, &out, 1)
+                .unwrap_or_else(|err| panic!("{tool}: {err}"));
+            assert!(out.join("bin/tool").is_file(), "{tool} did not extract");
+        }
+        // The public entry point picks a working extractor automatically.
+        let out = dir.join("out-auto");
+        extract(&archive, &out, 1).expect("zip extracts");
+        assert!(out.join("bin/tool").is_file());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
