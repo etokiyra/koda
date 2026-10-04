@@ -39,3 +39,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: Library tests
         run: cargo test --lib -- --test-threads=1
+
+  # musl libc: the glibc-only clangd/asm-lsp bundles must not be offered and the
+  # static Go toolchain must remain available. A container image is the cheapest
+  # reproducible musl environment.
+  musl:
+    name: Library tests (Alpine Linux, musl)
+    runs-on: ubuntu-latest
+    container: alpine:latest
+    steps:
+      - name: Install tooling
+        run: apk add --no-cache git curl bash build-base
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal
+      - uses: actions/checkout@v4
+      - name: Library tests
+        run: |
+          . "$HOME/.cargo/env"
+          cargo test --lib -- --test-threads=1

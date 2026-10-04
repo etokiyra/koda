@@ -475,6 +475,12 @@ Never break existing tests to make progress. Add tests for new behaviour:
   `XDG_DATA_HOME=… cargo run --example install_check -- <tool>` first, then run
   `cargo test --test optional_servers -- --ignored --test-threads=1`.
 
+`.github/workflows/ci.yml` runs the gates on Ubuntu and macOS, the library tests
+in an Arch Linux container (a rolling, non-Ubuntu glibc distribution), and the
+library tests on Alpine (musl), where the glibc-only bundles must be withheld.
+A job's presence is not evidence it passed; check the run before claiming a
+platform is verified.
+
 ---
 
 ## 6. Rules for AI sessions

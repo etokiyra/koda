@@ -3335,16 +3335,20 @@ pub fn elixir_env() -> Vec<(String, String)> {
 
 /// Whether this host uses musl rather than glibc.
 ///
-/// musl systems (Alpine) cannot run the glibc-targeted precompiled runtimes, so
-/// Koda reports them as unsupported instead of downloading a build that fails.
+/// musl systems (Alpine, Void musl) cannot run the glibc-targeted precompiled
+/// runtimes, so Koda reports them as unsupported instead of downloading a build
+/// that fails.
 pub fn libc_is_musl() -> bool {
-    if std::path::Path::new("/etc/alpine-release").exists() {
-        return true;
-    }
-    // The musl dynamic loader is installed under its own soname.
-    ["/lib/ld-musl-x86_64.so.1", "/lib/ld-musl-aarch64.so.1"]
+    let alpine = std::path::Path::new("/etc/alpine-release").exists();
+    let musl_loader = ["/lib/ld-musl-x86_64.so.1", "/lib/ld-musl-aarch64.so.1"]
         .iter()
-        .any(|loader| std::path::Path::new(loader).exists())
+        .any(|loader| std::path::Path::new(loader).exists());
+    musl_from_markers(alpine, musl_loader)
+}
+
+/// The musl decision from its two markers, so the logic is unit-testable.
+fn musl_from_markers(alpine_release: bool, musl_loader: bool) -> bool {
+    alpine_release || musl_loader
 }
 
 /// The OmniSharp release asset for this platform, if one exists.
@@ -4173,6 +4177,13 @@ mod tests {
         // Unsupported distribution or architecture is reported, never guessed.
         assert_eq!(swift_platform("endeavouros", "arch", "", "x86_64"), None);
         assert_eq!(swift_platform("ubuntu", "", "24.04", "riscv64"), None);
+    }
+
+    #[test]
+    fn musl_is_detected_from_either_marker() {
+        assert!(musl_from_markers(true, false));
+        assert!(musl_from_markers(false, true));
+        assert!(!musl_from_markers(false, false));
     }
 
     #[test]
