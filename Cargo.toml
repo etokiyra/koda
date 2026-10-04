@@ -3,7 +3,7 @@ name = "koda"
 version = "0.1.0"
 edition = "2024"
 description = "A modern, lightweight, terminal-native IDE"
-license = "GPL-3.0-only"
+license = "MPL-2.0"
 default-run = "koda"
 
 [lib]

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Relicensed under the Mozilla Public License 2.0
+
+- Koda is now licensed under the **Mozilla Public License 2.0** (previously
+  declared GPLv3; originally MIT). The full text is in [`LICENSE`](LICENSE).
+  MPL-2.0 is a file-level copyleft licence: modifications to Koda's own source
+  files must remain open, while Koda can be combined with differently licensed
+  code.
+
 ### Go formatting is provisioned too
 
 - `gofmt` had no install plan because it "ships with Go". Now that Koda manages
