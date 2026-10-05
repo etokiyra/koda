@@ -2933,24 +2933,33 @@ fn listing_from(
 /// unpacked into a scratch directory and the leading path components are moved
 /// up by hand.
 fn extract(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
-    std::fs::create_dir_all(dest)
-        .map_err(|err| format!("could not create {}: {err}", dest.display()))?;
-    // The archive's own size is a real lower bound for the unpacked tree; there
-    // is no separate extracted-size estimate, so do not invent one.
-    if let Ok(metadata) = std::fs::metadata(archive) {
-        ensure_disk_space(dest, metadata.len())?;
-    }
-    let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
-    // Refuse an archive that could write outside `dest` before extracting it.
-    ensure_archive_paths_safe(archive, zip)?;
+    // Unpack into a staging directory beside the destination, then promote it in
+    // one same-filesystem rename. A failed extraction leaves the previous
+    // installation untouched, and a failed promotion restores it.
+    let staging = temp_sibling(dest)?;
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging)
+        .map_err(|err| format!("could not create {}: {err}", staging.display()))?;
 
-    if !zip {
+    let result = (|| {
+        // The archive's own size is a real lower bound for the unpacked tree;
+        // there is no separate extracted-size estimate, so do not invent one.
+        if let Ok(metadata) = std::fs::metadata(archive) {
+            ensure_disk_space(&staging, metadata.len())?;
+        }
+        let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
+        // Refuse an archive that could write outside the staging directory.
+        ensure_archive_paths_safe(archive, zip)?;
+
+        if zip {
+            return extract_zip(archive, &staging, strip);
+        }
         let mut command = install_command("tar");
-        command.arg("-xf").arg(archive).arg("-C").arg(dest);
+        command.arg("-xf").arg(archive).arg("-C").arg(&staging);
         if strip > 0 {
             command.arg(format!("--strip-components={strip}"));
         }
-        return match command.output() {
+        match command.output() {
             Ok(output) if output.status.success() => Ok(()),
             Ok(output) => Err(format!(
                 "could not extract {}: {}",
@@ -2958,10 +2967,47 @@ fn extract(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
                 first_stderr_line(&output.stderr)
             )),
             Err(err) => Err(format!("could not run the archive tool: {err}")),
-        };
-    }
+        }
+    })();
 
-    extract_zip(archive, dest, strip)
+    if let Err(err) = result {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(err);
+    }
+    promote_directory(&staging, dest)
+}
+
+/// Move a staged directory into its final location without destroying the
+/// previous installation if the move fails.
+///
+/// The existing directory is renamed aside first, then restored if the promotion
+/// fails. On success the backup is removed.
+fn promote_directory(staging: &Path, dest: &Path) -> Result<(), String> {
+    let backup = temp_sibling(dest)?;
+    let _ = std::fs::remove_dir_all(&backup);
+    let had_old = dest.exists();
+    if had_old {
+        std::fs::rename(dest, &backup).map_err(|err| {
+            let _ = std::fs::remove_dir_all(staging);
+            format!("could not set aside the existing {}: {err}", dest.display())
+        })?;
+    }
+    match std::fs::rename(staging, dest) {
+        Ok(()) => {
+            if had_old {
+                let _ = std::fs::remove_dir_all(&backup);
+            }
+            Ok(())
+        }
+        Err(err) => {
+            if had_old {
+                // Put the known-good installation back.
+                let _ = std::fs::rename(&backup, dest);
+            }
+            let _ = std::fs::remove_dir_all(staging);
+            Err(format!("could not install into {}: {err}", dest.display()))
+        }
+    }
 }
 
 /// Which tool Koda uses to unpack a zip archive.
@@ -5854,6 +5900,83 @@ mod tests {
         assert!(
             result.is_err(),
             "a truncated archive must not extract successfully"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_extraction_preserves_the_existing_installation() {
+        if locate("tar").is_none() {
+            return;
+        }
+        let dir = cache_test_dir("extract-preserve");
+        std::fs::create_dir_all(dir.join("dest")).unwrap();
+        std::fs::write(dir.join("dest/keep"), "known-good").unwrap();
+        let archive = dir.join("bad.tar.gz");
+        std::fs::write(&archive, b"not a real gzip archive").unwrap();
+
+        assert!(extract(&archive, &dir.join("dest"), 0).is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("dest/keep")).unwrap(),
+            "known-good",
+            "a failed extraction must not touch the existing installation"
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".koda-"))
+            .map(|entry| entry.file_name())
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "staging must be cleaned up: {leftovers:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_successful_extraction_replaces_the_installation() {
+        if locate("tar").is_none() {
+            return;
+        }
+        let dir = cache_test_dir("extract-replace");
+        std::fs::create_dir_all(dir.join("pkg/bin")).unwrap();
+        std::fs::write(dir.join("pkg/bin/tool"), "#!/bin/sh\n").unwrap();
+        let built = std::process::Command::new("tar")
+            .current_dir(&dir)
+            .args(["-czf", "pkg.tar.gz", "pkg"])
+            .status();
+        if !built.map(|status| status.success()).unwrap_or(false) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let dest = dir.join("dest");
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("old"), "v1").unwrap();
+
+        extract(&dir.join("pkg.tar.gz"), &dest, 1).expect("a safe archive extracts");
+        assert!(dest.join("bin/tool").is_file());
+        assert!(
+            !dest.join("old").exists(),
+            "the promoted tree replaces the previous installation"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_promotion_restores_the_previous_installation() {
+        let dir = cache_test_dir("promote-restore");
+        let dest = dir.join("dest");
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("keep"), "known-good").unwrap();
+        // A staging directory that does not exist makes the promote rename fail.
+        let missing = dir.join(".missing-staging");
+        let error = promote_directory(&missing, &dest).unwrap_err();
+        assert!(error.contains("could not install into"), "{error}");
+        assert_eq!(
+            std::fs::read_to_string(dest.join("keep")).unwrap(),
+            "known-good",
+            "a failed promotion must restore the previous installation"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
