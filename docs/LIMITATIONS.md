@@ -104,4 +104,4 @@ describes the current state.
 - **Linux and macOS are supported.** CI builds and tests on Linux (glibc), in
   an Arch Linux container and on Alpine (musl), and on macOS. A job's presence
   is not proof it passed; see the "Platform and verification" matrix in the
-  [README](../README.md#-platform-and-verification) for what was observed.
+  [README](../README.md#platform-and-verification) for what was observed.
