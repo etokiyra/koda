@@ -2431,6 +2431,17 @@ fn download_gpg(url: &str, dest: &Path, signature_url: &str, keys_url: &str) -> 
     std::fs::create_dir_all(&downloads)
         .map_err(|err| format!("could not create {}: {err}", downloads.display()))?;
 
+    // Offline reuse: if the archive, its signature and the keys are all already
+    // present, verify them before making any network request. The signature is
+    // kept after a successful install precisely so this path works offline.
+    if dest.is_file()
+        && signature.is_file()
+        && keys.is_file()
+        && verify_signature(&home, &keys, &signature, dest).is_ok()
+    {
+        return Ok(());
+    }
+
     // Fetch the keys and the signature first, then the archive, so a failure
     // never leaves a large unverified file on disk.
     download(keys_url, &keys, None)?;
@@ -2438,7 +2449,6 @@ fn download_gpg(url: &str, dest: &Path, signature_url: &str, keys_url: &str) -> 
     // Reuse an archive that already verifies, so re-running an install (or
     // recovering from a network failure) does not re-download a large toolchain.
     if dest.is_file() && verify_signature(&home, &keys, &signature, dest).is_ok() {
-        let _ = std::fs::remove_file(&signature);
         return Ok(());
     }
     // A stale or partial file cannot be trusted; start the download fresh.
@@ -2446,7 +2456,6 @@ fn download_gpg(url: &str, dest: &Path, signature_url: &str, keys_url: &str) -> 
     download(url, dest, None)?;
 
     let result = verify_signature(&home, &keys, &signature, dest);
-    let _ = std::fs::remove_file(&signature);
     if result.is_err() {
         // Never keep an archive whose provenance could not be proven.
         let _ = std::fs::remove_file(dest);
