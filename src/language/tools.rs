@@ -820,11 +820,15 @@ impl InstallCommand {
 pub enum InstallStep {
     /// Run a program with arguments.
     Run(InstallCommand),
-    /// Download `url` to `dest` over HTTPS, verifying `sha256` when known.
+    /// Download `url` to `dest` over HTTPS, verifying `sha256`.
+    ///
+    /// The digest is required: there is no way to construct this step without
+    /// verification, so a new managed download must supply one (or use a step
+    /// that verifies by another mechanism, such as [`InstallStep::GithubRelease`]).
     Download {
         url: String,
         dest: PathBuf,
-        sha256: Option<String>,
+        sha256: String,
     },
     /// Download and verify an Erlang/OTP or Elixir build from `builds.hex.pm`,
     /// whose SHA-256 the same service publishes in `builds.txt`. The archive
@@ -1519,7 +1523,7 @@ pub fn install(tool: Tool) -> Result<String, String> {
 fn run_step(step: &InstallStep) -> Result<(), String> {
     match step {
         InstallStep::Run(command) => run_command(command),
-        InstallStep::Download { url, dest, sha256 } => download(url, dest, sha256.as_deref()),
+        InstallStep::Download { url, dest, sha256 } => download(url, dest, Some(sha256)),
         InstallStep::BobBuild { package, dest } => bob_build(*package, dest),
         InstallStep::AdoptiumJdk { release, dest } => adoptium_jdk(release, dest),
         InstallStep::DotnetSdk { dest } => dotnet_sdk(dest),
@@ -3848,7 +3852,7 @@ fn jdtls_attempts() -> Vec<InstallAttempt> {
             InstallStep::Download {
                 url: jdtls_url,
                 dest: jdtls_archive.clone(),
-                sha256: Some(JDTLS_SHA256.to_string()),
+                sha256: JDTLS_SHA256.to_string(),
             },
             InstallStep::Extract {
                 archive: jdtls_archive,
@@ -3938,7 +3942,7 @@ fn kotlin_ls_attempts() -> Vec<InstallAttempt> {
             InstallStep::Download {
                 url,
                 dest: ls_archive.clone(),
-                sha256: Some(KOTLIN_LS_SHA256.to_string()),
+                sha256: KOTLIN_LS_SHA256.to_string(),
             },
             // The distribution's archive root is `server/`.
             InstallStep::Extract {
@@ -3989,7 +3993,7 @@ fn perl_module_attempts(package: &str) -> Vec<InstallAttempt> {
             InstallStep::Download {
                 url,
                 dest: archive.clone(),
-                sha256: Some(CPANM_SHA256.to_string()),
+                sha256: CPANM_SHA256.to_string(),
             },
             InstallStep::Extract {
                 archive,
@@ -4334,6 +4338,154 @@ mod tests {
                     .iter()
                     .any(|step| matches!(step, InstallStep::Extract { .. }))
             );
+        }
+    }
+
+    /// Package arguments of an `npm install` command, skipping flags and the
+    /// values of the flags that take one.
+    fn npm_packages(args: &[String]) -> Vec<&str> {
+        let mut packages = Vec::new();
+        let mut i = 0;
+        while i < args.len() {
+            let arg = args[i].as_str();
+            if arg == "--prefix" || arg == "--cache" {
+                i += 2;
+                continue;
+            }
+            if arg == "install" || arg.starts_with('-') {
+                i += 1;
+                continue;
+            }
+            packages.push(arg);
+            i += 1;
+        }
+        packages
+    }
+
+    /// Assert a `Run` step names an exact version for every package-manager
+    /// install. Delegating managers that Koda cannot pin (`rustup component add`,
+    /// `mix local.hex`/`local.rebar`) are intentionally not matched.
+    fn assert_run_is_pinned(tool: Tool, command: &InstallCommand) {
+        let args: Vec<&str> = command.args.iter().map(String::as_str).collect();
+        for arg in &args {
+            assert!(
+                !arg.contains("@latest") && *arg != "latest",
+                "{tool:?} uses a floating install input: {command:?}"
+            );
+        }
+        match command.program.as_str() {
+            "go" => {
+                if args.first() == Some(&"install") {
+                    for spec in &args[1..] {
+                        assert!(
+                            spec.contains('@'),
+                            "{tool:?} must pin its go install input: {command:?}"
+                        );
+                    }
+                }
+            }
+            "npm" => {
+                for package in npm_packages(&command.args) {
+                    assert!(
+                        package.contains('@'),
+                        "{tool:?} must pin its npm input: {command:?}"
+                    );
+                }
+            }
+            "pipx" | "uv" | "pip" | "pip3" => {
+                assert!(
+                    args.iter().any(|arg| arg.contains("==")),
+                    "{tool:?} must pin its pip input: {command:?}"
+                );
+            }
+            "python" | "python3" => {
+                if args.contains(&"pip") {
+                    assert!(
+                        args.iter().any(|arg| arg.contains("==")),
+                        "{tool:?} must pin its pip input: {command:?}"
+                    );
+                }
+            }
+            "gem" => assert!(
+                args.contains(&"--version"),
+                "{tool:?} must pin its gem input: {command:?}"
+            ),
+            "cargo" => {
+                if args.first() == Some(&"install") {
+                    assert!(
+                        args.contains(&"--version"),
+                        "{tool:?} must pin its cargo input: {command:?}"
+                    );
+                }
+            }
+            "perl" if args.iter().any(|arg| arg.ends_with("cpanm")) => {
+                let spec = args.last().copied().unwrap_or("");
+                assert!(
+                    spec.contains('@'),
+                    "{tool:?} must pin its cpan input: {command:?}"
+                );
+            }
+            _ => {}
+        }
+    }
+
+    /// Every managed install input is either exactly versioned or verified.
+    ///
+    /// This iterates the real installer plans, so adding a new managed installer
+    /// without a pinned version or a digest fails here (and a plain `Download`
+    /// without a digest cannot even be constructed).
+    #[test]
+    fn every_managed_install_is_pinned_and_verified() {
+        for &tool in Tool::ALL {
+            for attempt in tool.install_attempts() {
+                assert!(!attempt.via.is_empty(), "{tool:?} has an unnamed strategy");
+                for step in &attempt.steps {
+                    match step {
+                        InstallStep::Download { url, sha256, .. } => {
+                            assert!(
+                                !url.contains("latest"),
+                                "{tool:?} downloads a floating URL: {url}"
+                            );
+                            assert!(
+                                is_sha256_hex(sha256),
+                                "{tool:?} has an invalid SHA-256 for {url}"
+                            );
+                        }
+                        InstallStep::GithubRelease {
+                            repo, tag, asset, ..
+                        } => {
+                            assert!(!repo.is_empty() && !asset.is_empty());
+                            assert!(
+                                !tag.is_empty() && tag != "latest",
+                                "{tool:?} uses a floating GitHub tag: {tag}"
+                            );
+                        }
+                        InstallStep::DownloadGpg {
+                            url,
+                            signature_url,
+                            keys_url,
+                            ..
+                        } => {
+                            assert!(!url.contains("latest"));
+                            assert!(!signature_url.is_empty() && !keys_url.is_empty());
+                        }
+                        InstallStep::Run(command) => assert_run_is_pinned(tool, command),
+                        // These verify internally (a checksum, signature or
+                        // digest read from upstream metadata) or touch no
+                        // download at all.
+                        InstallStep::BobBuild { .. }
+                        | InstallStep::AdoptiumJdk { .. }
+                        | InstallStep::DotnetSdk { .. }
+                        | InstallStep::NodeRuntime { .. }
+                        | InstallStep::DartSdk { .. }
+                        | InstallStep::RustupInit { .. }
+                        | InstallStep::GoToolchain { .. }
+                        | InstallStep::SwiftCompat { .. }
+                        | InstallStep::MakeExecutable { .. }
+                        | InstallStep::Extract { .. } => {}
+                    }
+                }
+            }
         }
     }
 
