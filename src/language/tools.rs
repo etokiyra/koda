@@ -104,6 +104,14 @@ const JDTLS_SHA256: &str = "338e7e73d61836651ba2453919a0d34fa763eb4e7c0334209230
 /// The OmniSharp release Koda provisions, pinned to an exact tag.
 const OMNISHARP_VERSION: &str = "v2.0.0";
 
+/// The exact .NET SDK version Koda provisions for OmniSharp.
+///
+/// Microsoft publishes a SHA-512 for every SDK archive in the channel's
+/// `releases.json`, so a pinned version can be verified without the moving
+/// `dotnet-install.sh` script.
+const DOTNET_SDK_VERSION: &str = "10.0.401";
+const DOTNET_CHANNEL: &str = "10.0";
+
 /// The longest a single install command may run before it is killed. Package
 /// managers can legitimately take a while on a slow link, but a hung process
 /// must never wedge the background worker forever.
@@ -790,6 +798,10 @@ pub enum InstallStep {
     /// Download and verify an Eclipse Adoptium JDK, whose checksum Adoptium
     /// publishes in the same JSON document that carries the link.
     AdoptiumJdk { feature: u32, dest: PathBuf },
+    /// Download and verify the pinned .NET SDK for OmniSharp, whose SHA-512
+    /// Microsoft publishes in the channel's `releases.json`. The archive still
+    /// needs an [`InstallStep::Extract`].
+    DotnetSdk { dest: PathBuf },
     /// Download and verify a Koda-managed Node.js runtime, whose checksum the
     /// Node.js project publishes in `SHASUMS256.txt`. The archive still needs
     /// an [`InstallStep::Extract`].
@@ -1458,6 +1470,7 @@ fn run_step(step: &InstallStep) -> Result<(), String> {
         InstallStep::Download { url, dest, sha256 } => download(url, dest, sha256.as_deref()),
         InstallStep::BobBuild { package, dest } => bob_build(*package, dest),
         InstallStep::AdoptiumJdk { feature, dest } => adoptium_jdk(*feature, dest),
+        InstallStep::DotnetSdk { dest } => dotnet_sdk(dest),
         InstallStep::NodeRuntime { dest } => node_runtime(dest),
         InstallStep::DartSdk { dest } => dart_sdk(dest),
         InstallStep::DownloadGpg {
@@ -1587,6 +1600,30 @@ fn run_command(command: &InstallCommand) -> Result<(), String> {
 
 /// Download `url` to `dest` over HTTPS, verifying a SHA-256 when one is known.
 fn download(url: &str, dest: &Path, sha256: Option<&str>) -> Result<(), String> {
+    curl_download(url, dest)?;
+    if let Some(expected) = sha256 {
+        verify_hash(dest, expected, HashKind::Sha256)?;
+    }
+    Ok(())
+}
+
+/// Download `url` to `dest` over HTTPS, verifying a SHA-512.
+fn download_sha512(url: &str, dest: &Path, sha512: &str) -> Result<(), String> {
+    curl_download(url, dest)?;
+    verify_hash(dest, sha512, HashKind::Sha512)
+}
+
+/// Which digest algorithm a verification uses.
+#[derive(Clone, Copy)]
+enum HashKind {
+    Sha256,
+    Sha512,
+}
+
+/// Fetch `url` to `dest` with the shared, bounded curl invocation.
+///
+/// No verification happens here; callers must run [`verify_hash`] on the result.
+fn curl_download(url: &str, dest: &Path) -> Result<(), String> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|err| format!("could not create {}: {err}", parent.display()))?;
@@ -1623,6 +1660,7 @@ fn download(url: &str, dest: &Path, sha256: Option<&str>) -> Result<(), String> 
         "--speed-time",
         "60",
     ]);
+    apply_proxy(&mut command);
     command
         .arg("--max-filesize")
         .arg(MAX_DOWNLOAD_BYTES.to_string())
@@ -1638,17 +1676,50 @@ fn download(url: &str, dest: &Path, sha256: Option<&str>) -> Result<(), String> 
             first_stderr_line(&output.stderr)
         ));
     }
-    if let Some(expected) = sha256 {
-        let actual = file_sha256(dest)?;
-        if !actual.eq_ignore_ascii_case(expected) {
-            let _ = std::fs::remove_file(dest);
-            return Err(format!(
-                "checksum mismatch for {} (expected {expected}, got {actual})",
-                dest.display()
-            ));
-        }
+    Ok(())
+}
+
+/// Verify `dest` against `expected`, removing the file on any mismatch.
+///
+/// Fails closed: a wrong or truncated download is deleted before the caller can
+/// use it, so a corrupt archive can never become an installed tool.
+fn verify_hash(dest: &Path, expected: &str, kind: HashKind) -> Result<(), String> {
+    let actual = match kind {
+        HashKind::Sha256 => file_sha256(dest)?,
+        HashKind::Sha512 => file_sha512(dest)?,
+    };
+    if !actual.eq_ignore_ascii_case(expected) {
+        let _ = std::fs::remove_file(dest);
+        return Err(format!(
+            "checksum mismatch for {} (expected {expected}, got {actual})",
+            dest.display()
+        ));
     }
     Ok(())
+}
+
+/// Forward a standard proxy environment variable to `curl`.
+///
+/// `curl` honours these itself, but passing them explicitly keeps Koda's
+/// intent visible and testable. `HTTPS_PROXY`/`https_proxy` win for our
+/// all-HTTPS downloads, then `ALL_PROXY`, then `HTTP_PROXY` (some proxies serve
+/// HTTPS tunnelling through the plain proxy variable).
+fn apply_proxy(command: &mut Command) {
+    for key in [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    ] {
+        if let Some(value) = std::env::var_os(key)
+            && !value.is_empty()
+        {
+            command.arg("--proxy").arg(value);
+            return;
+        }
+    }
 }
 
 /// Fetch and verify the latest Eclipse Adoptium JDK for `feature`.
@@ -1717,6 +1788,77 @@ fn adoptium_platform() -> Option<(&'static str, &'static str)> {
         _ => return None,
     };
     Some((os, arch))
+}
+
+/// The Runtime Identifier (RID) of the .NET SDK archive for this platform.
+fn dotnet_platform() -> Option<&'static str> {
+    Some(match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "linux-x64",
+        ("linux", "aarch64") => "linux-arm64",
+        ("macos", "x86_64") => "osx-x64",
+        ("macos", "aarch64") => "osx-arm64",
+        _ => return None,
+    })
+}
+
+/// Download and verify the pinned .NET SDK that OmniSharp runs on.
+///
+/// Microsoft publishes each channel's `releases.json` with a SHA-512 for every
+/// SDK archive, so Koda downloads the versioned archive directly instead of
+/// fetching and running the moving, unverified `dotnet-install.sh` script. The
+/// pinned SDK version must be present in the channel or the install fails
+/// closed rather than silently moving to another version.
+fn dotnet_sdk(dest: &Path) -> Result<(), String> {
+    let rid = dotnet_platform().ok_or_else(|| {
+        "no .NET SDK is published for this platform; install the .NET SDK manually".to_string()
+    })?;
+    let body = curl_text(&format!(
+        "https://builds.dotnet.microsoft.com/dotnet/release-metadata/{DOTNET_CHANNEL}/releases.json"
+    ))
+    .map_err(|err| format!("could not query the .NET release metadata: {err}"))?;
+    let releases: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|err| format!("could not parse the .NET release metadata: {err}"))?;
+    let sdk = releases
+        .get("releases")
+        .and_then(|value| value.as_array())
+        .and_then(|releases| {
+            releases.iter().find(|release| {
+                release
+                    .pointer("/sdk/version")
+                    .and_then(|version| version.as_str())
+                    == Some(DOTNET_SDK_VERSION)
+            })
+        })
+        .and_then(|release| release.get("sdk"))
+        .ok_or_else(|| {
+            format!(".NET SDK {DOTNET_SDK_VERSION} is not in the {DOTNET_CHANNEL} channel")
+        })?;
+    let file = sdk
+        .get("files")
+        .and_then(|value| value.as_array())
+        .and_then(|files| {
+            files.iter().find(|file| {
+                file.get("rid").and_then(|rid| rid.as_str()) == Some(rid)
+                    && file
+                        .get("name")
+                        .and_then(|name| name.as_str())
+                        .is_some_and(|name| name.ends_with(".tar.gz"))
+            })
+        })
+        .ok_or_else(|| format!("the .NET SDK has no {rid} archive"))?;
+    let url = file
+        .get("url")
+        .and_then(|url| url.as_str())
+        .ok_or_else(|| "the .NET SDK archive had no URL".to_string())?;
+    // Fail closed: a .NET SDK runs OmniSharp, so never install it unverified.
+    let hash = file
+        .get("hash")
+        .and_then(|hash| hash.as_str())
+        .filter(|hash| is_sha512_hex(hash))
+        .ok_or_else(|| {
+            "the .NET SDK archive had no SHA-512; refusing an unverified SDK".to_string()
+        })?;
+    download_sha512(url, dest, hash)
 }
 
 /// The Node.js distribution archive for this platform, or `None` when the
@@ -1879,7 +2021,9 @@ fn curl_text(url: &str) -> Result<String, String> {
             "-H",
             "Accept: application/vnd.github+json",
             "--max-filesize",
-            "1048576",
+            // The .NET release metadata is ~1 MB and grows with each patch, so
+            // leave headroom while keeping the body bounded.
+            "4194304",
         ])
         .arg(url)
         .output()
@@ -2726,6 +2870,57 @@ fn is_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit())
 }
 
+/// Whether `value` is a 128-character lowercase-or-uppercase hex SHA-512.
+fn is_sha512_hex(value: &str) -> bool {
+    value.len() == 128 && value.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Compute a file's SHA-512 with whichever hashing tool the system provides.
+///
+/// Same fail-closed fallback chain as [`file_sha256`].
+fn file_sha512(path: &Path) -> Result<String, String> {
+    for (program, args) in [("sha512sum", &[][..]), ("shasum", &["-a", "512"][..])] {
+        if let Ok(output) = install_command(program).args(args).arg(path).output()
+            && output.status.success()
+            && let Some(hash) = String::from_utf8_lossy(&output.stdout)
+                .split_whitespace()
+                .next()
+            && is_sha512_hex(hash)
+        {
+            return Ok(hash.to_string());
+        }
+    }
+    if let Ok(output) = install_command("openssl")
+        .args(["dgst", "-sha512"])
+        .arg(path)
+        .output()
+        && output.status.success()
+        && let Some(hash) = String::from_utf8_lossy(&output.stdout)
+            .split('=')
+            .nth(1)
+            .map(str::trim)
+        && is_sha512_hex(hash)
+    {
+        return Ok(hash.to_string());
+    }
+    if let Ok(output) = install_command("python3")
+        .args([
+            "-c",
+            "import hashlib,sys;print(hashlib.sha512(open(sys.argv[1],'rb').read()).hexdigest())",
+        ])
+        .arg(path)
+        .output()
+        && output.status.success()
+        && let Some(hash) = String::from_utf8_lossy(&output.stdout)
+            .split_whitespace()
+            .next()
+        && is_sha512_hex(hash)
+    {
+        return Ok(hash.to_string());
+    }
+    Err("no SHA-512 tool found (looked for sha512sum, shasum, openssl and python3)".to_string())
+}
+
 /// Render a byte count for a download warning (`1.1 GB`, `240 MB`).
 pub fn human_bytes(bytes: u64) -> String {
     const MB: u64 = 1_000_000;
@@ -2801,6 +2996,7 @@ fn step_available(step: &InstallStep) -> bool {
         }
         InstallStep::Download { .. }
         | InstallStep::AdoptiumJdk { .. }
+        | InstallStep::DotnetSdk { .. }
         | InstallStep::NodeRuntime { .. }
         | InstallStep::DartSdk { .. }
         | InstallStep::GithubRelease { .. } => locate("curl").is_some(),
@@ -3953,32 +4149,24 @@ fn omnisharp_attempts() -> Vec<InstallAttempt> {
     let Some(asset) = omnisharp_asset() else {
         return Vec::new();
     };
-    let (Some(tools), Some(dotnet), Some(downloads), Some(dest)) =
-        (tools_dir(), dotnet_dir(), downloads_dir(), omnisharp_dir())
+    let (Some(dotnet), Some(downloads), Some(dest)) =
+        (dotnet_dir(), downloads_dir(), omnisharp_dir())
     else {
         return Vec::new();
     };
-    let installer = tools.join("dotnet-install.sh");
+    let dotnet_archive = downloads.join("dotnet-sdk.tar.gz");
     let archive = downloads.join("omnisharp.tar.gz");
     vec![InstallAttempt::managed(
         "the .NET SDK and OmniSharp",
         vec![
-            InstallStep::Download {
-                url: "https://dot.net/v1/dotnet-install.sh".to_string(),
-                dest: installer.clone(),
-                sha256: None,
+            InstallStep::DotnetSdk {
+                dest: dotnet_archive.clone(),
             },
-            InstallStep::Run(InstallCommand::with_args(
-                "sh",
-                vec![
-                    installer.to_string_lossy().into_owned(),
-                    "--channel".into(),
-                    "10.0".into(),
-                    "--install-dir".into(),
-                    dotnet.to_string_lossy().into_owned(),
-                    "--no-path".into(),
-                ],
-            )),
+            InstallStep::Extract {
+                archive: dotnet_archive,
+                dest: dotnet,
+                strip: 0,
+            },
             InstallStep::GithubRelease {
                 repo: "OmniSharp/omnisharp-roslyn".to_string(),
                 tag: OMNISHARP_VERSION.to_string(),
@@ -4081,7 +4269,12 @@ mod tests {
             assert!(
                 steps
                     .iter()
-                    .any(|step| matches!(step, InstallStep::Download { .. }))
+                    .any(|step| matches!(step, InstallStep::DotnetSdk { .. }))
+            );
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| matches!(step, InstallStep::GithubRelease { .. }))
             );
             assert!(
                 steps
