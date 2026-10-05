@@ -3202,6 +3202,71 @@ impl ToolStatus {
             self.tool.install_hint().to_string()
         }
     }
+
+    /// Whether Koda owns this install (it lives under Koda's tools directory).
+    ///
+    /// Only a managed tool may be updated or removed by Koda; a user's own
+    /// `rust-analyzer`, `clangd` or `gem` install is never touched.
+    pub fn is_managed(&self) -> bool {
+        self.path.as_deref().is_some_and(is_managed_path)
+    }
+
+    /// The on-disk size of the Koda-managed component, when Koda owns the
+    /// install. User/system installs return `None`.
+    pub fn managed_size(&self) -> Option<u64> {
+        let dir = managed_component(self.path.as_deref()?)?;
+        directory_size(&dir)
+    }
+
+    /// The managed component directory Koda would remove for this tool.
+    pub fn managed_dir(&self) -> Option<PathBuf> {
+        managed_component(self.path.as_deref()?)
+    }
+}
+
+/// Whether `path` was installed by Koda under its own tools directory.
+pub fn is_managed_path(path: &Path) -> bool {
+    tools_dir().is_some_and(|tools| path.starts_with(tools))
+}
+
+/// The Koda-managed component directory containing `path`: the first path
+/// segment under the tools directory.
+pub fn managed_component(path: &Path) -> Option<PathBuf> {
+    let tools = tools_dir()?;
+    let relative = path.strip_prefix(&tools).ok()?;
+    let first = relative.components().next()?;
+    Some(tools.join(first))
+}
+
+/// The total size of the files under `dir`, bounded so a large tree cannot stall
+/// the worker. Returns `None` only when `dir` cannot be walked at all.
+pub fn directory_size(dir: &Path) -> Option<u64> {
+    // A cap on visited entries keeps a pathological tree predictable; a managed
+    // component is never expected to approach it.
+    const MAX_ENTRIES: usize = 50_000;
+    let mut total = 0u64;
+    let mut seen = 0usize;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            seen += 1;
+            if seen > MAX_ENTRIES {
+                return Some(total);
+            }
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if metadata.is_dir() {
+                stack.push(entry.path());
+            } else {
+                total = total.saturating_add(metadata.len());
+            }
+        }
+    }
+    Some(total)
 }
 
 /// The result of probing every known tool.
@@ -5327,6 +5392,63 @@ mod tests {
         ensure_disk_space(&dir, 0).expect("zero bytes always fits");
         let error = ensure_disk_space(&dir, u64::MAX).expect_err("an impossible request must fail");
         assert!(error.contains("free disk space"), "{error}");
+    }
+
+    #[test]
+    fn managed_paths_and_sizes_are_recognised() {
+        let Some(tools) = tools_dir() else {
+            return;
+        };
+        assert!(is_managed_path(&tools.join("clangd/bin/clangd")));
+        assert!(!is_managed_path(Path::new("/usr/bin/clangd")));
+        assert_eq!(
+            managed_component(&tools.join("clangd/bin/clangd")),
+            Some(tools.join("clangd"))
+        );
+    }
+
+    #[test]
+    fn only_managed_installs_are_updateable_or_removable() {
+        let Some(tools) = tools_dir() else {
+            return;
+        };
+        let managed = ToolStatus {
+            tool: Tool::Clangd,
+            available: true,
+            version: Some("clangd 23".to_string()),
+            path: Some(tools.join("clangd/bin/clangd")),
+            error: None,
+        };
+        assert!(managed.is_managed());
+        assert_eq!(managed.managed_dir(), Some(tools.join("clangd")));
+        assert_eq!(
+            managed.managed_size(),
+            directory_size(&tools.join("clangd"))
+        );
+
+        let external = ToolStatus {
+            tool: Tool::Clangd,
+            available: true,
+            version: None,
+            path: Some(PathBuf::from("/usr/bin/clangd")),
+            error: None,
+        };
+        assert!(
+            !external.is_managed(),
+            "a system install must never be removed"
+        );
+        assert_eq!(external.managed_dir(), None);
+    }
+
+    #[test]
+    fn directory_size_sums_files_recursively() {
+        let dir = std::env::temp_dir().join(format!("koda-size-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("a/b")).unwrap();
+        std::fs::write(dir.join("x"), vec![0u8; 10]).unwrap();
+        std::fs::write(dir.join("a/b/y"), vec![0u8; 32]).unwrap();
+        assert_eq!(directory_size(&dir), Some(42));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

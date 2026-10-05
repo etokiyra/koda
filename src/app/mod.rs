@@ -1870,6 +1870,9 @@ impl App {
             PickerAction::RevealLsp { path, position } => self.reveal_lsp(path, position),
             PickerAction::Info(message) => self.set_status(message),
             PickerAction::InstallTool(tool) => self.install_tool(tool),
+            PickerAction::ToolActions(tool) => self.tool_actions(tool),
+            PickerAction::UpdateTool(tool) => self.install_tool(tool),
+            PickerAction::RemoveTool(tool) => self.remove_tool(tool),
             PickerAction::ApplyCodeAction(index) => self.apply_code_action(index),
             PickerAction::DeletePath(path) => self.delete_path(&path),
             PickerAction::ShowDiff { path, staged } => self.show_diff(path, Some(staged)),
@@ -5482,8 +5485,27 @@ impl App {
             };
             let label = format!("{}  ·  {} {purpose}", tool.label(), tool.language().name());
             let item = if status.available {
-                let detail = status.summary();
-                PickerItem::new(label, detail.clone(), PickerAction::Info(detail))
+                // A managed tool shows its version and on-disk size, and can be
+                // updated or removed. A user/system install is read-only.
+                let detail = match status.managed_size() {
+                    Some(bytes) => format!(
+                        "{} · {}{}",
+                        status.summary(),
+                        crate::language::tools::human_bytes(bytes),
+                        if status.is_managed() {
+                            " · Koda-managed"
+                        } else {
+                            ""
+                        }
+                    ),
+                    None => status.summary(),
+                };
+                if status.is_managed() {
+                    PickerItem::new(label, detail, PickerAction::ToolActions(tool))
+                        .shortcut("Enter")
+                } else {
+                    PickerItem::new(label, detail.clone(), PickerAction::Info(detail))
+                }
             } else if crate::language::tools::can_install(tool) {
                 let hint = tool.setup_reason();
                 PickerItem::new(label, hint, PickerAction::InstallTool(tool)).shortcut("Enter")
@@ -5499,6 +5521,92 @@ impl App {
         let mut picker = Picker::new("Language Setup", "Language tools…", items);
         picker.refilter();
         self.overlay = Overlay::Picker(picker);
+    }
+
+    /// Offer Update and Remove for a Koda-managed tool.
+    fn tool_actions(&mut self, tool: Tool) {
+        let Some(status) = self
+            .tools
+            .as_ref()
+            .and_then(|tools| tools.status(tool))
+            .cloned()
+        else {
+            self.set_status("Tool status is unavailable");
+            return;
+        };
+        if !status.is_managed() {
+            self.set_status(format!("{} is not managed by Koda", tool.label()));
+            return;
+        }
+        let size = status
+            .managed_size()
+            .map(|bytes| format!(" ({})", crate::language::tools::human_bytes(bytes)))
+            .unwrap_or_default();
+        let update = PickerItem::new(
+            format!("Update {}", tool.label()),
+            format!("Reinstall Koda's pinned version{size}"),
+            PickerAction::UpdateTool(tool),
+        )
+        .shortcut("Enter");
+        let remove = PickerItem::new(
+            format!("Remove {}", tool.label()),
+            format!("Delete Koda's managed files{size}"),
+            PickerAction::RemoveTool(tool),
+        );
+        let cancel = PickerItem::new(
+            "Cancel",
+            "Change nothing",
+            PickerAction::Info("Nothing changed".to_string()),
+        );
+        let mut picker = Picker::new(
+            format!("{} (Koda-managed)", tool.label()),
+            "Choose…",
+            vec![update, remove, cancel],
+        );
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+    }
+
+    /// Remove a Koda-managed tool's files.
+    ///
+    /// Refuses to touch anything Koda does not own, and never removes the shared
+    /// tools root itself. A `discover` afterwards refreshes the setup view.
+    fn remove_tool(&mut self, tool: Tool) {
+        if self.pending_install.is_some() {
+            self.set_status("An install is already running");
+            return;
+        }
+        let Some(status) = self
+            .tools
+            .as_ref()
+            .and_then(|tools| tools.status(tool))
+            .cloned()
+        else {
+            self.set_status("Tool status is unavailable");
+            return;
+        };
+        if !status.is_managed() {
+            self.set_error(format!(
+                "{} is not managed by Koda — not removing it",
+                tool.label()
+            ));
+            return;
+        }
+        let Some(dir) = status.managed_dir() else {
+            self.set_error(format!("Could not locate {}'s files", tool.label()));
+            return;
+        };
+        if crate::language::tools::tools_dir().is_some_and(|root| dir == root) {
+            self.set_error("Refusing to remove the shared tools directory");
+            return;
+        }
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => {
+                self.push_toast(ToastKind::Info, format!("Removed {}", tool.label()));
+                self.background.discover_tools();
+            }
+            Err(err) => self.set_error(format!("Could not remove {}: {err}", tool.label())),
+        }
     }
 
     fn open_quick_open(&mut self) {

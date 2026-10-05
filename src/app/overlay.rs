@@ -26,6 +26,12 @@ pub enum PickerAction {
     Info(String),
     /// Install an external tool through its trusted package manager.
     InstallTool(crate::language::tools::Tool),
+    /// Open the update/remove choices for a Koda-managed tool.
+    ToolActions(crate::language::tools::Tool),
+    /// Reinstall a Koda-managed tool at Koda's pinned version.
+    UpdateTool(crate::language::tools::Tool),
+    /// Remove a Koda-managed tool's files (never a user/system install).
+    RemoveTool(crate::language::tools::Tool),
     /// Apply the code action at an index in the last response.
     ApplyCodeAction(usize),
     /// Delete a file or directory after confirmation.
