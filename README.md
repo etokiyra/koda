@@ -362,6 +362,48 @@ small set of tools; each is used only when the feature needs it:
 Editing, built-in language intelligence and local search work with no external
 tool at all.
 
+### Platform and verification
+
+How each language was verified in the project-health audit. **`live`** means a
+real language-server handshake (plus a completion or diagnostics round-trip where
+noted) was run on that platform; **`tests`** means the built-in provider is
+covered by the unit and render suite; **`skipped`** means the runtime or server
+could not be installed here; **`untested`** means it was not exercised. CI is
+configured for Linux (glibc), an Arch Linux container and Alpine (musl), and
+macOS, but this audit did **not** observe a CI run, so those jobs are not counted
+as verification. **Windows is not supported.**
+
+| Language | Linux glibc (this host) | Linux musl | macOS | Windows |
+| --- | --- | --- | --- | --- |
+| Rust | tests | untested | untested | — |
+| Go | live (`gopls` handshake + completion) | untested | untested | — |
+| Python | tests | untested | untested | — |
+| TypeScript / JavaScript | tests | untested | untested | — |
+| C / C++ | live (`clangd` handshake + completion + diagnostics) | untested | untested | — |
+| Java | tests (jdtls installed, not live-run) | untested | untested | — |
+| C# | tests (OmniSharp installed, not live-run) | untested | untested | — |
+| PHP | skipped (no PHP runtime) | untested | untested | — |
+| Kotlin | live (`kotlin-language-server` handshake) | untested | untested | — |
+| Lua | live (`lua-language-server` handshake) | untested | untested | — |
+| Ruby | skipped (no Ruby or `gem`) | untested | untested | — |
+| SQL | live (`sqls` handshake + completion) | untested | untested | — |
+| Assembly | live (`asm-lsp` handshake) | untested | untested | — |
+| Dart | live (`dart language-server` handshake) | untested | untested | — |
+| Elixir | live (`ElixirLS` handshake) | untested | untested | — |
+| Swift | skipped (needs `libxml2.so.2`, see below) | untested | untested | — |
+| Perl | live (`PLS` handshake + completion; `Perl::LanguageServer` skipped) | untested | untested | — |
+| HTML / CSS | live (both handshakes) | untested | untested | — |
+| Markdown / JSON / TOML / YAML | tests (offline only) | untested | untested | — |
+
+The Linux-glibc column was measured on the audit host (x86_64, Arch-based
+EndeavourOS). The CI `uname -s && uname -m` step records the runner platform in
+the workflow log, but no CI run was observed for this audit, so the macOS cells
+remain unverified until that log is checked. Provisioning on musl is deliberately
+limited — the glibc-only clangd and asm-lsp bundles are withheld there — and is
+covered by the Alpine library-test job, not a live server. Swift was skipped
+because this host lacks `libxml2.so.2` (Arch: `libxml2-legacy`); Koda reports that
+package rather than downloading a toolchain that cannot run.
+
 ## ❯ Usage
 
 ```bash

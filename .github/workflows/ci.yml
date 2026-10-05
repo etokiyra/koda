@@ -14,6 +14,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Record the runner platform
+        run: uname -s && uname -m
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
