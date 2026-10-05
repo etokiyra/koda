@@ -1661,19 +1661,69 @@ fn run_command(command: &InstallCommand) -> Result<(), String> {
     }
 }
 
-/// Download `url` to `dest` over HTTPS, verifying a SHA-256 when one is known.
+/// Download `url` to `dest`, verifying a SHA-256 when one is known.
+///
+/// A verified artifact is reused from Koda's cache when present, so a reinstall
+/// or repair needs no network. The destination is replaced atomically only after
+/// verification, so a failed download never clobbers a known-good file.
 fn download(url: &str, dest: &Path, sha256: Option<&str>) -> Result<(), String> {
-    curl_download(url, dest)?;
-    if let Some(expected) = sha256 {
-        verify_hash(dest, expected, HashKind::Sha256)?;
+    match sha256 {
+        Some(expected) => download_verified(
+            url,
+            dest,
+            expected,
+            HashKind::Sha256,
+            cache_dir().as_deref(),
+        ),
+        // Unverified material (a signing key or a detached signature) is still
+        // written atomically so a failed fetch cannot corrupt an existing copy.
+        None => {
+            let tmp = temp_sibling(dest)?;
+            curl_download(url, &tmp)?;
+            atomic_replace(&tmp, dest)
+        }
     }
-    Ok(())
 }
 
-/// Download `url` to `dest` over HTTPS, verifying a SHA-512.
+/// Download `url` to `dest`, verifying a SHA-512.
 fn download_sha512(url: &str, dest: &Path, sha512: &str) -> Result<(), String> {
-    curl_download(url, dest)?;
-    verify_hash(dest, sha512, HashKind::Sha512)
+    download_verified(url, dest, sha512, HashKind::Sha512, cache_dir().as_deref())
+}
+
+/// Download and verify, reusing a verified cache entry when one exists.
+///
+/// Cache identity is the expected digest itself, never the filename, and a
+/// cached file is verified again before it is used — a corrupt entry is removed
+/// and the download retried. A freshly downloaded file is cached only after it
+/// has passed verification.
+fn download_verified(
+    url: &str,
+    dest: &Path,
+    expected: &str,
+    kind: HashKind,
+    cache: Option<&Path>,
+) -> Result<(), String> {
+    if let Some(dir) = cache
+        && let Some(cached) = cache_lookup(dir, expected, kind)?
+    {
+        return link_or_copy(&cached, dest);
+    }
+
+    let tmp = temp_sibling(dest)?;
+    let result = (|| {
+        curl_download(url, &tmp)?;
+        verify_hash(&tmp, expected, kind)
+    })();
+    if let Err(err) = result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err);
+    }
+    // Only a verified artifact enters the cache, and a cache failure never
+    // fails the install it is accelerating.
+    if let Some(dir) = cache {
+        let _ = cache_store(dir, expected, &tmp, kind);
+    }
+    atomic_replace(&tmp, dest)
 }
 
 /// Which digest algorithm a verification uses.
@@ -1681,6 +1731,15 @@ fn download_sha512(url: &str, dest: &Path, sha512: &str) -> Result<(), String> {
 enum HashKind {
     Sha256,
     Sha512,
+}
+
+impl HashKind {
+    fn label(self) -> &'static str {
+        match self {
+            HashKind::Sha256 => "sha256",
+            HashKind::Sha512 => "sha512",
+        }
+    }
 }
 
 /// Fetch `url` to `dest` with the shared, bounded curl invocation.
@@ -1767,6 +1826,101 @@ fn verify_hash(dest: &Path, expected: &str, kind: HashKind) -> Result<(), String
         ));
     }
     Ok(())
+}
+
+/// Koda's cache of verified provisioning artifacts.
+///
+/// A sibling of the managed tools directory, keyed by the artifact's own digest
+/// so two different artifacts can never collide and a cached entry is always
+/// re-verified before use.
+fn cache_dir() -> Option<PathBuf> {
+    tools_dir().map(|dir| dir.join("cache"))
+}
+
+/// The cache file name for an expected digest: `<algorithm>-<hex>`.
+fn cache_key(expected: &str, kind: HashKind) -> String {
+    format!("{}-{}", kind.label(), expected.to_ascii_lowercase())
+}
+
+/// Return a verified cache entry for `expected`, removing a corrupt one.
+///
+/// "Exists in the cache" is never trusted: the digest is recomputed and
+/// compared before the path is returned.
+fn cache_lookup(dir: &Path, expected: &str, kind: HashKind) -> Result<Option<PathBuf>, String> {
+    let path = dir.join(cache_key(expected, kind));
+    if !path.is_file() {
+        return Ok(None);
+    }
+    match verify_hash(&path, expected, kind) {
+        Ok(()) => Ok(Some(path)),
+        Err(_) => {
+            // A wrong or truncated entry is discarded, never used.
+            let _ = std::fs::remove_file(&path);
+            Ok(None)
+        }
+    }
+}
+
+/// Store a verified artifact under its digest, atomically and best-effort.
+fn cache_store(dir: &Path, expected: &str, source: &Path, kind: HashKind) -> Result<(), String> {
+    std::fs::create_dir_all(dir)
+        .map_err(|err| format!("could not create {}: {err}", dir.display()))?;
+    let dest = dir.join(cache_key(expected, kind));
+    if dest.is_file() {
+        return Ok(());
+    }
+    let tmp = temp_sibling(&dest)?;
+    if std::fs::hard_link(source, &tmp).is_err() {
+        std::fs::copy(source, &tmp)
+            .map_err(|err| format!("could not cache the download: {err}"))?;
+    }
+    atomic_replace(&tmp, &dest)
+}
+
+/// Place `src` at `dest` without destroying `dest` if the move fails.
+///
+/// Prefers a hard link (the cache and the managed tools share a filesystem), so
+/// a cached artifact costs no extra disk; falls back to a copy.
+fn link_or_copy(src: &Path, dest: &Path) -> Result<(), String> {
+    let tmp = temp_sibling(dest)?;
+    if std::fs::hard_link(src, &tmp).is_err() {
+        std::fs::copy(src, &tmp)
+            .map_err(|err| format!("could not use the cached artifact: {err}"))?;
+    }
+    atomic_replace(&tmp, dest)
+}
+
+/// A unique sibling path for a temporary file or directory beside `path`.
+fn temp_sibling(path: &Path) -> Result<PathBuf, String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("no parent directory for {}", path.display()))?;
+    std::fs::create_dir_all(parent)
+        .map_err(|err| format!("could not create {}: {err}", parent.display()))?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "artifact".to_string());
+    let unique = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|since| since.as_nanos())
+        .unwrap_or(0);
+    Ok(parent.join(format!(".{name}.koda-{}-{unique}", std::process::id())))
+}
+
+/// Move `src` over `dest` in one step, creating `dest`'s parent if needed.
+fn atomic_replace(src: &Path, dest: &Path) -> Result<(), String> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("could not create {}: {err}", parent.display()))?;
+    }
+    std::fs::rename(src, dest).map_err(|err| {
+        format!(
+            "could not move {} into place at {}: {err}",
+            src.display(),
+            dest.display()
+        )
+    })
 }
 
 /// The proxy to pass to `curl`, chosen from the standard environment variables.
@@ -5479,6 +5633,149 @@ mod tests {
         // An empty value is not a proxy.
         let env = |key: &str| (key == "HTTPS_PROXY").then(String::new);
         assert_eq!(proxy_from_env(env), None);
+    }
+
+    fn cache_test_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("koda-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn cache_hit_avoids_the_network() {
+        let dir = cache_test_dir("cache-hit");
+        let cache = dir.join("cache");
+        let payload = dir.join("payload.tar.gz");
+        std::fs::write(&payload, b"payload contents").unwrap();
+        let Ok(sha) = file_sha256(&payload) else {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        };
+        cache_store(&cache, &sha, &payload, HashKind::Sha256).unwrap();
+
+        // A URL that cannot be fetched: only the verified cache can satisfy this.
+        let dest = dir.join("download.tar.gz");
+        download_verified(
+            "file:///definitely/missing",
+            &dest,
+            &sha,
+            HashKind::Sha256,
+            Some(&cache),
+        )
+        .expect("a verified cache entry is used without the network");
+        assert_eq!(std::fs::read(&dest).unwrap(), b"payload contents");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_miss_downloads_then_caches() {
+        let dir = cache_test_dir("cache-miss");
+        let cache = dir.join("cache");
+        let source = dir.join("source");
+        std::fs::write(&source, b"fresh contents").unwrap();
+        let sha = file_sha256(&source).unwrap();
+        let dest = dir.join("download");
+        download_verified(
+            &format!("file://{}", source.display()),
+            &dest,
+            &sha,
+            HashKind::Sha256,
+            Some(&cache),
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"fresh contents");
+        // The verified artifact is cached under its digest for next time.
+        assert!(
+            cache_lookup(&cache, &sha, HashKind::Sha256)
+                .unwrap()
+                .is_some()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_corrupt_cache_entry_is_rejected_and_replaced() {
+        let dir = cache_test_dir("cache-corrupt");
+        let cache = dir.join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        let source = dir.join("source");
+        std::fs::write(&source, b"real contents").unwrap();
+        let sha = file_sha256(&source).unwrap();
+        // A file at the right key with the wrong contents must not be trusted.
+        std::fs::write(cache.join(cache_key(&sha, HashKind::Sha256)), b"tampered").unwrap();
+        assert!(
+            cache_lookup(&cache, &sha, HashKind::Sha256)
+                .unwrap()
+                .is_none()
+        );
+
+        let dest = dir.join("download");
+        download_verified(
+            &format!("file://{}", source.display()),
+            &dest,
+            &sha,
+            HashKind::Sha256,
+            Some(&cache),
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"real contents");
+        let cached = cache_lookup(&cache, &sha, HashKind::Sha256)
+            .unwrap()
+            .unwrap();
+        assert!(verify_hash(&cached, &sha, HashKind::Sha256).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_mismatched_download_is_never_cached() {
+        let dir = cache_test_dir("cache-mismatch");
+        let cache = dir.join("cache");
+        let source = dir.join("source");
+        std::fs::write(&source, b"real contents").unwrap();
+        let dest = dir.join("download");
+        let wrong = "ab".repeat(32);
+        let error = download_verified(
+            &format!("file://{}", source.display()),
+            &dest,
+            &wrong,
+            HashKind::Sha256,
+            Some(&cache),
+        )
+        .unwrap_err();
+        assert!(error.contains("checksum mismatch"), "{error}");
+        assert!(!dest.exists());
+        assert!(
+            !cache.is_dir() || std::fs::read_dir(&cache).unwrap().next().is_none(),
+            "an unverified file must never enter the cache"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_download_leaves_no_cache_entry() {
+        let dir = cache_test_dir("cache-failed");
+        let cache = dir.join("cache");
+        let sha = "cd".repeat(32);
+        let dest = dir.join("download");
+        let error = download_verified(
+            "file:///definitely/missing",
+            &dest,
+            &sha,
+            HashKind::Sha256,
+            Some(&cache),
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("could not copy") || error.contains("download failed"),
+            "{error}"
+        );
+        assert!(!dest.exists());
+        assert!(
+            !cache.is_dir() || std::fs::read_dir(&cache).unwrap().next().is_none(),
+            "a failed download must not create a trusted cache entry"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
