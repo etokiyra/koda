@@ -19,6 +19,7 @@ mod panes;
 mod search;
 mod session;
 mod status;
+mod view;
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
@@ -617,48 +618,6 @@ impl App {
     // Session persistence
     // ----------------------------------------------------------------------
 
-    fn toggle_hidden(&mut self) {
-        self.workspace.tree.toggle_hidden();
-        let state = if self.workspace.tree.show_hidden {
-            "shown"
-        } else {
-            "hidden"
-        };
-        self.set_status(format!("Dotfiles {state}"));
-    }
-
-    /// Toggle the inline diagnostic messages at the end of each line.
-    fn toggle_inline_diagnostics(&mut self) {
-        self.inline_diagnostics = !self.inline_diagnostics;
-        let state = if self.inline_diagnostics {
-            "shown"
-        } else {
-            "hidden"
-        };
-        self.set_status(format!("Inline diagnostics {state}"));
-    }
-
-    /// Turn soft wrap on or off. The wrap width itself is recomputed by the
-    /// renderer on the next frame.
-    fn toggle_wrap(&mut self) {
-        self.wrap = !self.wrap;
-        if let Some(doc) = self.editor.active_document_mut() {
-            doc.preferred_col = None;
-            doc.scroll_left = 0;
-            doc.scroll_subline = 0;
-        }
-        let state = if self.wrap { "on" } else { "off" };
-        self.set_status(format!("Soft wrap {state}"));
-    }
-
-    fn open_tree_filter(&mut self) {
-        if !self.tree_visible {
-            self.tree_visible = true;
-        }
-        self.focus = Focus::FileTree;
-        self.tree_filter = Some(TreeFilter::new(self.workspace.root()));
-    }
-
     // ----------------------------------------------------------------------
     // Diagnostics
     // ----------------------------------------------------------------------
@@ -666,50 +625,6 @@ impl App {
     // ----------------------------------------------------------------------
     // Language server
     // ----------------------------------------------------------------------
-
-    /// Open `path` and place the cursor at `position`, centred in the viewport.
-    fn reveal(&mut self, path: PathBuf, position: Position) {
-        self.open_path(path);
-        self.jump_to(position);
-    }
-
-    /// Like [`reveal`], but `position` is LSP-encoded and is converted using the
-    /// opened document's text before the cursor moves.
-    fn reveal_lsp(&mut self, path: PathBuf, position: Position) {
-        self.open_path(path);
-        let position = self.lsp_position_to_char(position);
-        self.jump_to(position);
-    }
-
-    /// Centre `position` in the viewport and move the cursor there.
-    fn jump_to(&mut self, position: Position) {
-        let center = self.viewport_height / 2;
-        self.with_doc(|doc| {
-            doc.move_to(position);
-            doc.scroll_top = position.row.saturating_sub(center);
-        });
-    }
-
-    /// Wait up to `timeout` for startup background work to settle.
-    ///
-    /// Exposed so embedders (and tests) can drive pending detection and git
-    /// work deterministically before rendering.
-    pub fn pump_background(&mut self, timeout: Duration) {
-        let deadline = Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-            match self.background.recv_timeout(remaining) {
-                Some(event) => {
-                    self.apply_background_event(event);
-                }
-                None => break,
-            }
-        }
-        self.apply_background_events();
-    }
 
     // ----------------------------------------------------------------------
     // Search
@@ -722,15 +637,6 @@ impl App {
     // ----------------------------------------------------------------------
     // Misc
     // ----------------------------------------------------------------------
-
-    fn request_quit(&mut self) {
-        if self.editor.has_unsaved() && !self.quit_armed {
-            self.quit_armed = true;
-            self.set_error("Unsaved changes — Ctrl+S to save, Ctrl+Q again to quit");
-            return;
-        }
-        self.should_quit = true;
-    }
 }
 
 /// A sibling copy path that does not yet exist: `name copy.ext`,

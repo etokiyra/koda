@@ -272,4 +272,24 @@ impl App {
             }
         }
     }
+    /// Wait up to `timeout` for startup background work to settle.
+    ///
+    /// Exposed so embedders (and tests) can drive pending detection and git
+    /// work deterministically before rendering.
+    pub fn pump_background(&mut self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match self.background.recv_timeout(remaining) {
+                Some(event) => {
+                    self.apply_background_event(event);
+                }
+                None => break,
+            }
+        }
+        self.apply_background_events();
+    }
 }
