@@ -410,4 +410,152 @@ impl App {
     pub(super) fn start_lsp(&mut self, language: LanguageId, program: &str, args: &[&str]) {
         self.start_lsp_with_env(language, program, args, &[]);
     }
+    /// The position encoding the server for `language` negotiated, or the
+    /// protocol default when there is no server.
+    pub(super) fn lsp_encoding(&self, language: LanguageId) -> PositionEncoding {
+        self.lsp
+            .get(&language)
+            .and_then(|job| job.server.as_ref())
+            .map(Server::position_encoding)
+            .unwrap_or_default()
+    }
+
+    /// The language of the active document, when a ready server serves it.
+    pub(super) fn lsp_language(&self) -> Option<LanguageId> {
+        let doc = self.editor.active_document()?;
+        let language = doc.buffer.language;
+        let server = self.lsp.get(&language)?.server.as_ref()?;
+        server.is_ready().then_some(language)
+    }
+
+    /// Whether the active document's ready server advertises `kind`.
+    pub(super) fn lsp_supports(&self, kind: RequestKind) -> bool {
+        self.lsp_language()
+            .and_then(|language| self.lsp.get(&language))
+            .and_then(|job| job.server.as_ref())
+            .is_some_and(|server| server.supports(kind))
+    }
+
+    /// A mutable handle to the ready server for the active document.
+    pub(super) fn active_server_mut(&mut self) -> Option<&mut Server> {
+        let language = self.lsp_language()?;
+        self.lsp.get_mut(&language)?.server.as_mut()
+    }
+
+    /// The active language's ready server that supports `kind`, or any ready
+    /// server that does, for workspace-wide requests.
+    pub(super) fn ready_server_for(&self, kind: RequestKind) -> Option<LanguageId> {
+        let supports = |language: &LanguageId| {
+            self.lsp
+                .get(language)
+                .and_then(|job| job.server.as_ref())
+                .is_some_and(|server| server.is_ready() && server.supports(kind))
+        };
+        let preferred = self.editor.active_document().map(|doc| doc.buffer.language);
+        preferred
+            .filter(supports)
+            .or_else(|| self.lsp.keys().copied().find(supports))
+    }
+
+    /// Convert a Koda character column to the LSP `character` offset the
+    /// document's server expects, using the line's actual text.
+    pub(super) fn lsp_col(
+        &self,
+        language: LanguageId,
+        path: &Path,
+        row: usize,
+        col: usize,
+    ) -> usize {
+        let encoding = self.lsp_encoding(language);
+        let line = self
+            .editor
+            .documents
+            .iter()
+            .find(|doc| same_file(doc.buffer.path.as_deref(), path))
+            .map(|doc| doc.buffer.line_text(row))
+            .unwrap_or_default();
+        convert::char_to_lsp(&line, col, encoding)
+    }
+
+    /// The active document's `(path, line, col)` when a ready server owns it.
+    pub(super) fn lsp_target(&self) -> Option<(PathBuf, usize, usize)> {
+        let language = self.lsp_language()?;
+        let doc = self.editor.active_document()?;
+        let server = self.lsp.get(&language)?.server.as_ref()?;
+        let path = doc.buffer.path.clone()?;
+        if !server.has_open_document(&path) {
+            return None;
+        }
+        let cursor = doc.clamped_cursor();
+        Some((path, cursor.row, cursor.col))
+    }
+
+    /// Convert an LSP-encoded position from a server into a Koda character
+    /// position, using the open document's line text.
+    pub(super) fn lsp_position_to_char(&self, position: Position) -> Position {
+        let Some(doc) = self.editor.active_document() else {
+            return position;
+        };
+        let encoding = self.lsp_encoding(doc.buffer.language);
+        let line = doc.buffer.line_text(position.row);
+        Position::new(
+            position.row,
+            convert::lsp_to_char(&line, position.col, encoding),
+        )
+    }
+
+    /// Whether `path` is the active document.
+    pub(super) fn active_document_is(&self, path: &Path) -> bool {
+        self.editor
+            .active_document()
+            .is_some_and(|doc| same_file(doc.buffer.path.as_deref(), path))
+    }
+
+    /// Forget the in-flight request bookkeeping for one feature.
+    pub(super) fn clear_lsp_pending_for(&mut self, kind: RequestKind) {
+        match kind {
+            RequestKind::Completion => self.completion_request = None,
+            RequestKind::Hover => self.hover_request = None,
+            RequestKind::SignatureHelp => self.signature_request = None,
+            RequestKind::Definition => self.pending_definition = None,
+            RequestKind::References => self.pending_references = None,
+            RequestKind::Rename => self.pending_rename_request = None,
+            RequestKind::CodeActions => self.pending_code_action_request = None,
+            RequestKind::Formatting => self.pending_lsp_format = None,
+            RequestKind::WorkspaceSymbols => self.ws_lsp_pending = false,
+        }
+    }
+
+    /// The active document's target when a ready server that supports `kind`
+    /// owns it. Falls back to `None` so built-in intelligence takes over.
+    pub(super) fn lsp_target_for(&self, kind: RequestKind) -> Option<(PathBuf, usize, usize)> {
+        if !self.lsp_supports(kind) {
+            return None;
+        }
+        self.lsp_target()
+    }
+
+    /// Forget every in-flight language-server request, e.g. after a crash or a
+    /// restart, so stale callbacks cannot touch the new connection's state.
+    pub(super) fn clear_lsp_pending(&mut self) {
+        self.completion_request = None;
+        self.hover_request = None;
+        self.signature_request = None;
+        self.pending_definition = None;
+        self.pending_references = None;
+        self.pending_rename_request = None;
+        self.pending_code_action_request = None;
+        self.pending_lsp_format = None;
+        self.pending_code_actions_context = None;
+        self.ws_lsp_pending = false;
+    }
+
+    /// The buffer version of the document at `path`, if it is open.
+    pub(super) fn document_version(&self, path: &Path) -> Option<u64> {
+        self.editor
+            .documents
+            .iter()
+            .find(|doc| same_file(doc.buffer.path.as_deref(), path))
+            .map(|doc| doc.buffer.version)
+    }
 }
