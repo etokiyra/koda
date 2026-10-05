@@ -12,8 +12,24 @@ src/
 ├── main.rs                 # CLI entry point (thin)
 ├── lib.rs                  # module tree
 ├── app/
-│   ├── mod.rs              # App state, event loop, command dispatch
-│   └── overlay.rs          # picker/prompt/search state + fuzzy matching
+│   ├── mod.rs              # App state, constructor, event loop, small helpers
+│   ├── background.rs       # applying worker events, external-change polling
+│   ├── commands.rs         # command dispatch, palette, language setup, prompts
+│   ├── completion.rs       # completion popup + hover
+│   ├── diagnostics.rs      # diagnostics polling, navigation, list
+│   ├── editor.rs           # cursor moves, clipboard, comment, matching bracket
+│   ├── files.rs            # save/close/revert and file create/rename/copy/delete
+│   ├── git.rs              # diff, changed files, staging, commit
+│   ├── keys.rs             # key dispatch (global, editor, tree, overlay, search)
+│   ├── language.rs         # navigation, symbols, rename, code actions, formatting
+│   ├── lsp.rs              # server lifecycle + response handling
+│   ├── overlay.rs          # picker/prompt/search state + fuzzy matching
+│   ├── panes.rs            # split panes and tabs
+│   ├── search.rs           # find/replace
+│   ├── session.rs          # session persistence, workspace + welcome actions
+│   ├── status.rs           # statusline messages and toasts
+│   ├── tests.rs            # the app-level integration tests
+│   └── view.rs             # tree/diagnostic/wrap toggles and reveal
 ├── background.rs           # worker pool for detection, LSP, git, formatting
 ├── commands/mod.rs         # command registry (ids, titles, shortcuts)
 ├── editor/

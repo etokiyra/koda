@@ -70,7 +70,7 @@ Adding a language means implementing `LanguageProvider` and registering it in
 - Prefer clear, small modules over giant files. **No source file may exceed 800
   lines.** New code must not push a file past the limit; if a file is already
   over, see the `src/app/mod.rs` split in
-  [DECISIONS.md](docs/DECISIONS.md#proposed-splitting-srcappmodrs).
+  [DECISIONS.md](docs/DECISIONS.md#splitting-srcappmodrs).
 - Use `Result`/`Option` and propagate errors; do not `unwrap()` on user input or
   filesystem operations (tests and proven invariants are fine).
 - Comments explain *why*, not *what*. Stale comments are worse than none.

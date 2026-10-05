@@ -20,12 +20,7 @@ editor foundation  →  project/language detection  →  language intelligence
 
 ## Now
 
-- [ ] **Split `src/app/mod.rs`** (8876 lines) into focused modules, mechanical
-      moves only, one extraction per commit, no behaviour change. The proposed
-      split is in
-      [docs/DECISIONS.md](docs/DECISIONS.md#proposed-splitting-srcappmodrs).
-      *Acceptance:* no source file exceeds 800 lines and the full test suite
-      passes after every commit.
+_Nothing in progress. Shipped work is in [CHANGELOG.md](CHANGELOG.md)._
 
 ## Next
 

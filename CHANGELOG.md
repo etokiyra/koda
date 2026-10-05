@@ -88,6 +88,10 @@ starts working.
   Rust bootstrap downloads and verifies a pinned `rustup-init` binary instead of
   the moving `sh.rustup.rs` script; the Go toolchain and the Adoptium JDKs are
   pinned by version; and every package-manager install names an exact version.
+- **Internal:** `src/app/mod.rs` (8876 lines) was split into focused modules
+  under `src/app/` (mechanical extraction, no behaviour change), so every
+  production app file is under 800 lines. See
+  [DECISIONS.md](docs/DECISIONS.md#splitting-srcappmodrs).
 
 ### Fixed
 

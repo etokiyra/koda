@@ -302,33 +302,40 @@ this file, and add or change a test.
 
 ---
 
-## Proposed: splitting `src/app/mod.rs`
+## Splitting `src/app/mod.rs`
 
-`src/app/mod.rs` is 8876 lines: an ~5.5k-line `impl App`, ~130 lines of helpers,
-and a ~2.9k-line `#[cfg(test)]` module. It is the only file far over the 800-line
-rule and the hardest to navigate. The plan is **mechanical moves only**, one
-extraction per commit, with no behaviour change and the full test suite green
-after every commit.
+`src/app/mod.rs` was 8876 lines of state, an `impl App` and its tests. It has
+been split into sibling modules under `src/app/` by **mechanical extraction
+only** — one extraction per commit, no behaviour change, the full suite green
+after every commit. A child module of `app` sees `App`'s private fields, so each
+module holds its own `impl App` block; extracted methods are `pub(super)` so the
+event loop and sibling modules can call them.
 
-Rust privacy makes this safe: a child module of `app` can see `App`'s private
-fields, so an `impl App` block may live in `src/app/<name>.rs` and still read
-the state it needs.
+The originally proposed module set was realised (tests, git, lsp, diagnostics,
+session, files, keys, language, commands). Because the proposal's own estimates
+for `keys.rs`/`language.rs` exceeded the 800-line rule and it omitted the editing,
+pane, search, status and background-event code, the production code was
+distributed a little further so every production file is under 800 lines:
 
-| Order | New module | Moves out of `mod.rs` | Approx. lines |
-| --- | --- | --- | --- |
-| 1 | `app/tests.rs` | the whole `#[cfg(test)] mod tests` | ~2905 |
-| 2 | `app/git.rs` | `show_diff`, `diff_active_file`, `commit_changes`, changed-files/stage dispatch | ~230 |
-| 3 | `app/lsp.rs` | server lifecycle (`maybe_start_lsp` … `lsp_ready`) and `handle_lsp_response` | ~1200 |
-| 4 | `app/diagnostics.rs` | diagnostics polling/dispatch, navigation, list | ~350 |
-| 5 | `app/session.rs` | `capture_session`/`restore_session`/`save_session`, workspace open/close, welcome actions | ~500 |
-| 6 | `app/files.rs` | file operations and save/save-as/revert | ~450 |
-| 7 | `app/keys.rs` | `handle_key`, `handle_global_key`, editor/tree/overlay/search/completion key handlers | ~1200 |
-| 8 | `app/language.rs` | completion, hover, symbols, rename, code actions | ~1100 |
-| 9 | `app/commands.rs` | `execute_command`, `run_picker_action`, `submit_prompt`, palette, language setup | ~700 |
+| Module | Contents | Lines |
+| --- | --- | --- |
+| `mod.rs` | state types, constructor, event loop, small helpers | 775 |
+| `background.rs` | worker-event application, external-change polling, pumping | 295 |
+| `commands.rs` | command dispatch, palette, language setup, prompts, quick open | 708 |
+| `completion.rs` | completion popup and hover | 360 |
+| `diagnostics.rs` | diagnostics polling, navigation and list | 187 |
+| `editor.rs` | cursor moves, clipboard/kill-ring, comment, matching bracket | 222 |
+| `files.rs` | save/close/revert and file create/rename/copy/delete | 356 |
+| `git.rs` | diff, changed files, staging, commit | 171 |
+| `keys.rs` | key dispatch (global, editor, tree, overlay, search, completion) | 763 |
+| `language.rs` | navigation, symbols, rename, code actions, formatting | 618 |
+| `lsp.rs` | server lifecycle and response handling | 769 |
+| `panes.rs` | split panes and tabs | 170 |
+| `search.rs` | find/replace | 202 |
+| `session.rs` | session persistence, workspace and welcome actions | 396 |
+| `status.rs` | statusline messages and toasts | 103 |
+| `view.rs` | tree/diagnostic/wrap toggles and reveal | 79 |
 
-After the sequence, `app/mod.rs` should hold only the state types, the
-constructor, the event loop and small helpers — comfortably under 800 lines.
-Each step must keep `cargo test` at 539 passing (or more) and `cargo clippy
---all-targets` clean.
-
-**This proposal needs the maintainer's OK before any extraction begins.**
+`app/tests.rs` (2901 lines) is the deliberately single test module moved whole
+from `mod.rs`; the production modules are all under 800. `app/overlay.rs`
+(833 lines) predates this work and is not part of the split.
