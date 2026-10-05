@@ -422,7 +422,7 @@ fn statusline_uses_mellow_panel_background() {
     let has_panel = (0..buffer.area.width).any(|x| {
         buffer
             .cell((x, y))
-            .is_some_and(|cell| cell.bg == theme::PANEL_BG)
+            .is_some_and(|cell| cell.bg == theme::panel_bg())
     });
     assert!(
         has_panel,
@@ -505,7 +505,7 @@ fn soft_wrap_renders_secondary_cursors() {
         (0..buffer.area.width).any(|x| {
             buffer
                 .cell((x, y))
-                .is_some_and(|cell| cell.bg == theme::MULTI_CURSOR)
+                .is_some_and(|cell| cell.bg == theme::multi_cursor())
         })
     });
     assert!(
@@ -552,7 +552,7 @@ fn multi_cursor_carets_are_visible() {
         (0..buffer.area.width).any(|x| {
             buffer
                 .cell((x, y))
-                .is_some_and(|cell| cell.bg == theme::MULTI_CURSOR)
+                .is_some_and(|cell| cell.bg == theme::multi_cursor())
         })
     });
     assert!(
@@ -583,7 +583,8 @@ fn bracket_match_is_highlighted() {
     let highlighted = (0..buffer.area.height).any(|y| {
         (0..buffer.area.width).any(|x| {
             buffer.cell((x, y)).is_some_and(|cell| {
-                cell.fg == theme::BRACKET_MATCH && cell.modifier.contains(Modifier::UNDERLINED)
+                cell.fg == theme::bracket_match_color()
+                    && cell.modifier.contains(Modifier::UNDERLINED)
             })
         })
     });
@@ -912,5 +913,61 @@ fn command_palette_shows_a_no_matches_state() {
         screen.contains("no matches"),
         "an empty filter should explain itself:\n{screen}"
     );
+    cleanup(&dir);
+}
+
+/// Render and collect each cell's `(foreground, background)` so a theme change
+/// can be observed without a terminal.
+fn render_colors(app: &mut App) -> Vec<(Color, Color)> {
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| koda::ui::render(frame, app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let mut colors = Vec::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            if let Some(cell) = buffer.cell((x, y)) {
+                colors.push((cell.fg, cell.bg));
+            }
+        }
+    }
+    colors
+}
+
+#[test]
+fn switching_themes_changes_rendered_colours() {
+    use koda::settings::ThemeId;
+    let dir = temp_project("theme-switch");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+
+    theme::set_theme(ThemeId::Mellow);
+    let mellow = render_colors(&mut app);
+    theme::set_theme(ThemeId::Midnight);
+    let midnight = render_colors(&mut app);
+    theme::set_theme(ThemeId::Daylight);
+    let daylight = render_colors(&mut app);
+    theme::set_theme(ThemeId::Mellow);
+
+    assert_ne!(
+        mellow, midnight,
+        "a theme swap must change the rendered colours"
+    );
+    assert_ne!(midnight, daylight);
+    assert_ne!(mellow, daylight);
+    cleanup(&dir);
+}
+
+#[test]
+fn every_bundled_theme_renders_without_panicking() {
+    use koda::settings::ThemeId;
+    let dir = temp_project("theme-render");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+    for id in ThemeId::ALL {
+        theme::set_theme(id);
+        let _ = draw(&mut app);
+    }
+    theme::set_theme(ThemeId::Mellow);
     cleanup(&dir);
 }

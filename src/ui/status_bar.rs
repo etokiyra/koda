@@ -19,7 +19,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let on_panel = Style::default().bg(theme::PANEL_BG);
+    let on_panel = Style::default().bg(theme::panel_bg());
     let mut spans: Vec<Span> = Vec::new();
 
     let document = app.editor.active_document();
@@ -27,16 +27,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if let Some(doc) = document {
         let language = doc.buffer.language;
         let pill_style = if language == LanguageId::Unknown {
-            theme::pill(theme::MUTED, theme::PANEL_BG)
+            theme::pill(theme::muted_color(), theme::panel_bg())
         } else {
-            theme::pill(theme::ACCENT_SOFT, theme::PANEL_BG)
+            theme::pill(theme::accent_soft(), theme::panel_bg())
         };
         spans.push(Span::styled(format!(" {} ", language.name()), pill_style));
 
         if doc.is_dirty() {
             spans.push(Span::styled(
                 " ●",
-                Style::default().fg(theme::STAR).bg(theme::PANEL_BG),
+                Style::default()
+                    .fg(theme::star_color())
+                    .bg(theme::panel_bg()),
             ));
         }
 
@@ -49,7 +51,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             };
             spans.push(Span::styled(
                 label,
-                Style::default().fg(theme::ACCENT).bg(theme::PANEL_BG),
+                Style::default()
+                    .fg(theme::accent_color())
+                    .bg(theme::panel_bg()),
             ));
         }
 
@@ -57,7 +61,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         if doc.has_multiple_cursors() {
             spans.push(Span::styled(
                 format!("  {} {} cursors", art::POINTER, doc.cursors.len() + 1),
-                Style::default().fg(theme::MULTI_CURSOR).bg(theme::PANEL_BG),
+                Style::default()
+                    .fg(theme::multi_cursor())
+                    .bg(theme::panel_bg()),
             ));
         }
 
@@ -66,13 +72,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         if errors > 0 {
             spans.push(Span::styled(
                 format!("  {errors}✖"),
-                Style::default().fg(theme::ERROR).bg(theme::PANEL_BG),
+                Style::default()
+                    .fg(theme::error_color())
+                    .bg(theme::panel_bg()),
             ));
         }
         if warnings > 0 {
             spans.push(Span::styled(
                 format!("  {warnings}⚠"),
-                Style::default().fg(theme::WARN).bg(theme::PANEL_BG),
+                Style::default()
+                    .fg(theme::warn_color())
+                    .bg(theme::panel_bg()),
             ));
         }
 
@@ -82,20 +92,24 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             spans.push(Span::styled(" ", on_panel));
             spans.push(Span::styled(
                 format!("{} {branch}", art::MOON),
-                Style::default().fg(theme::ACCENT).bg(theme::PANEL_BG),
+                Style::default()
+                    .fg(theme::accent_color())
+                    .bg(theme::panel_bg()),
             ));
             let changed = app.workspace.git.files.len();
             if changed > 0 {
                 spans.push(Span::styled(
                     format!(" {changed}±"),
-                    Style::default().fg(theme::WARN).bg(theme::PANEL_BG),
+                    Style::default()
+                        .fg(theme::warn_color())
+                        .bg(theme::panel_bg()),
                 ));
             }
         }
     } else {
         spans.push(Span::styled(
             " ✦ koda ready ",
-            theme::pill(theme::MUTED, theme::PANEL_BG),
+            theme::pill(theme::muted_color(), theme::panel_bg()),
         ));
     }
 
@@ -104,7 +118,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled("  ", on_panel));
         spans.push(Span::styled(
             format!("{} lsp", art::SPARK),
-            Style::default().fg(theme::SUCCESS).bg(theme::PANEL_BG),
+            Style::default()
+                .fg(theme::success_color())
+                .bg(theme::panel_bg()),
         ));
     }
 
@@ -113,7 +129,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled("  ", on_panel));
         spans.push(Span::styled(
             format!("{} {label}…", art::spinner(app.anim_phase)),
-            Style::default().fg(theme::ACCENT).bg(theme::PANEL_BG),
+            Style::default()
+                .fg(theme::accent_color())
+                .bg(theme::panel_bg()),
         ));
     }
 
@@ -144,9 +162,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Some(message) => Some((
             message.to_string(),
             if app.status.error {
-                theme::ERROR
+                theme::error_color()
             } else {
-                theme::ACCENT
+                theme::accent_color()
             },
         )),
         None => document
@@ -170,11 +188,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         if budget > 1 {
             spans.push(Span::styled(
                 "  ·  ",
-                Style::default().fg(theme::FAINT).bg(theme::PANEL_BG),
+                Style::default().fg(theme::faint()).bg(theme::panel_bg()),
             ));
             spans.push(Span::styled(
                 truncate(&text, budget),
-                Style::default().fg(color).bg(theme::PANEL_BG),
+                Style::default().fg(color).bg(theme::panel_bg()),
             ));
         }
     }
@@ -185,7 +203,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if let Some(right) = right {
         spans.push(Span::styled(
             right,
-            Style::default().fg(theme::ACCENT_SOFT).bg(theme::PANEL_BG),
+            Style::default()
+                .fg(theme::accent_soft())
+                .bg(theme::panel_bg()),
         ));
     }
 
@@ -203,9 +223,9 @@ fn truncate(text: &str, max: usize) -> String {
 
 fn severity_color(severity: Severity) -> Color {
     match severity {
-        Severity::Error => theme::ERROR,
-        Severity::Warning => theme::WARN,
-        Severity::Info => theme::INFO,
-        Severity::Hint => theme::HINT,
+        Severity::Error => theme::error_color(),
+        Severity::Warning => theme::warn_color(),
+        Severity::Info => theme::info_color(),
+        Severity::Hint => theme::hint_color(),
     }
 }

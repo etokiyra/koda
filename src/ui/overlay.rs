@@ -34,7 +34,7 @@ pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
     // when the filter matches nothing.
     let height = rows.max(6).min(area.height);
     let rect = centered(area, width, height);
-    let on_panel = Style::default().bg(theme::PANEL_BG);
+    let on_panel = Style::default().bg(theme::panel_bg());
 
     frame.render_widget(Clear, rect);
     let block = Block::bordered()
@@ -174,7 +174,7 @@ pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
 
         let mut line = Line::from(spans).style(on_panel);
         if selected {
-            line = line.style(Style::default().bg(theme::MENU_SELECTED_BG));
+            line = line.style(Style::default().bg(theme::menu_selected_bg()));
         }
         lines.push(line);
     }
@@ -275,7 +275,7 @@ fn render_picker_footer(frame: &mut Frame, area: Option<Rect>, extra: Option<&st
     spans.push(Span::styled(" Esc close ", theme::dim()));
     let line = Line::from(spans);
     frame.render_widget(
-        Paragraph::new(line).style(Style::default().bg(theme::PANEL_BG)),
+        Paragraph::new(line).style(Style::default().bg(theme::panel_bg())),
         area,
     );
 }
@@ -321,7 +321,7 @@ pub fn render_completion(
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme::accent())
-        .style(Style::default().bg(theme::PANEL_BG))
+        .style(Style::default().bg(theme::panel_bg()))
         .title(Line::from(vec![
             Span::styled("✦ ", theme::star()),
             Span::styled("complete", theme::accent_bold()),
@@ -362,14 +362,14 @@ pub fn render_completion(
             Span::styled(format!("{} ", item.kind.glyph()), kind_style),
             Span::styled(item.label.clone(), label_style),
         ])
-        .style(Style::default().bg(theme::PANEL_BG));
+        .style(Style::default().bg(theme::panel_bg()));
         if selected {
-            line = line.style(Style::default().bg(theme::MENU_SELECTED_BG));
+            line = line.style(Style::default().bg(theme::menu_selected_bg()));
         }
         lines.push(line);
     }
     frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(theme::PANEL_BG)),
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(theme::panel_bg())),
         inner,
     );
 }
@@ -409,7 +409,7 @@ pub fn render_hover(frame: &mut Frame, area: Rect, hover: &HoverState, anchor: O
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme::accent())
-        .style(Style::default().bg(theme::PANEL_BG))
+        .style(Style::default().bg(theme::panel_bg()))
         .title(Line::from(vec![
             Span::styled("✦ ", theme::star()),
             Span::styled(hover.title.clone(), theme::accent_bold()),
@@ -427,7 +427,7 @@ pub fn render_hover(frame: &mut Frame, area: Rect, hover: &HoverState, anchor: O
         .map(|line| Line::from(Span::styled(line.clone(), theme::text())))
         .collect();
     frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(theme::PANEL_BG)),
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(theme::panel_bg())),
         inner,
     );
 }
@@ -454,7 +454,7 @@ pub fn render_help(
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme::accent())
-        .style(Style::default().bg(theme::PANEL_BG))
+        .style(Style::default().bg(theme::panel_bg()))
         .title(Line::from(vec![
             Span::styled("✦ ", theme::star()),
             Span::styled("keyboard shortcuts", theme::accent_bold()),
@@ -471,7 +471,7 @@ pub fn render_help(
     let scroll = help.scroll.min(max_scroll);
     let slice: Vec<Line> = content.into_iter().skip(scroll).take(visible).collect();
     frame.render_widget(
-        Paragraph::new(Text::from(slice)).style(Style::default().bg(theme::PANEL_BG)),
+        Paragraph::new(Text::from(slice)).style(Style::default().bg(theme::panel_bg())),
         inner,
     );
 }
@@ -489,7 +489,7 @@ pub fn render_signature(
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let on_panel = Style::default().bg(theme::PANEL_BG);
+    let on_panel = Style::default().bg(theme::panel_bg());
 
     // The label with the active parameter emphasised.
     let (before, parameter, after) =
@@ -600,7 +600,7 @@ pub fn render_diff(frame: &mut Frame, area: Rect, diff: &DiffState) {
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme::accent())
-        .style(Style::default().bg(theme::PANEL_BG))
+        .style(Style::default().bg(theme::panel_bg()))
         .title(Line::from(vec![
             Span::styled("✦ ", theme::star()),
             Span::styled(diff.title.clone(), theme::accent_bold()),
@@ -623,11 +623,11 @@ pub fn render_diff(frame: &mut Frame, area: Rect, diff: &DiffState) {
         .take(visible)
         .map(|line| {
             let style = match line.kind {
-                DiffLineKind::Add => Style::default().fg(theme::SUCCESS),
-                DiffLineKind::Remove => Style::default().fg(theme::ERROR),
-                DiffLineKind::Hunk => Style::default().fg(theme::ACCENT),
-                DiffLineKind::Header => Style::default().fg(theme::MUTED),
-                DiffLineKind::Context => Style::default().fg(theme::TEXT),
+                DiffLineKind::Add => Style::default().fg(theme::success_color()),
+                DiffLineKind::Remove => Style::default().fg(theme::error_color()),
+                DiffLineKind::Hunk => Style::default().fg(theme::accent_color()),
+                DiffLineKind::Header => Style::default().fg(theme::muted_color()),
+                DiffLineKind::Context => Style::default().fg(theme::text_color()),
             };
             Line::from(Span::styled(format!(" {} ", line.text), style))
         })
@@ -637,7 +637,7 @@ pub fn render_diff(frame: &mut Frame, area: Rect, diff: &DiffState) {
         ..inner
     };
     frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(theme::PANEL_BG)),
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(theme::panel_bg())),
         content_area,
     );
 
@@ -655,7 +655,7 @@ pub fn render_diff(frame: &mut Frame, area: Rect, diff: &DiffState) {
         ..inner
     };
     frame.render_widget(
-        Paragraph::new(footer).style(Style::default().bg(theme::PANEL_BG)),
+        Paragraph::new(footer).style(Style::default().bg(theme::panel_bg())),
         footer_area,
     );
 }
@@ -734,7 +734,7 @@ pub fn render_prompt(frame: &mut Frame, area: Rect, prompt: &Prompt) {
     // A little extra height buys a hint row; small terminals keep it minimal.
     let height = if area.height >= 6 { 4 } else { 3 };
     let rect = centered(area, width, height);
-    let on_panel = Style::default().bg(theme::PANEL_BG);
+    let on_panel = Style::default().bg(theme::panel_bg());
 
     frame.render_widget(Clear, rect);
     let block = Block::bordered()
@@ -786,14 +786,14 @@ pub fn render_prompt(frame: &mut Frame, area: Rect, prompt: &Prompt) {
 
 /// Render the find / replace bar as a solid strip above the statusline.
 pub fn render_search(frame: &mut Frame, area: Rect, search: &Search) {
-    let on_panel = Style::default().bg(theme::PANEL_BG);
+    let on_panel = Style::default().bg(theme::panel_bg());
     let query_focused = search.field == SearchField::Query;
     let mut lines: Vec<Line> = Vec::new();
 
     let query_pill = if query_focused {
-        theme::pill(theme::ACCENT_SOFT, theme::PANEL_BG)
+        theme::pill(theme::accent_soft(), theme::panel_bg())
     } else {
-        theme::pill(theme::MUTED, theme::PANEL_BG)
+        theme::pill(theme::muted_color(), theme::panel_bg())
     };
 
     let counter = if search.query.is_empty() {
@@ -830,9 +830,9 @@ pub fn render_search(frame: &mut Frame, area: Rect, search: &Search) {
 
     if search.replace_mode {
         let replace_pill = if query_focused {
-            theme::pill(theme::MUTED, theme::PANEL_BG)
+            theme::pill(theme::muted_color(), theme::panel_bg())
         } else {
-            theme::pill(theme::ACCENT_SOFT, theme::PANEL_BG)
+            theme::pill(theme::accent_soft(), theme::panel_bg())
         };
         let mut spans = vec![
             Span::styled(" replace ", replace_pill),
@@ -874,7 +874,7 @@ fn draw_panel(
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme::accent())
-        .style(Style::default().bg(theme::PANEL_BG))
+        .style(Style::default().bg(theme::panel_bg()))
         .title(title);
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
@@ -902,7 +902,7 @@ fn panel_subtitle(text: &str, width: u16) -> Line<'static> {
 fn render_divider(frame: &mut Frame, rect: Rect) {
     frame.render_widget(
         Paragraph::new(Span::styled("─".repeat(rect.width as usize), theme::dim()))
-            .style(Style::default().bg(theme::PANEL_BG)),
+            .style(Style::default().bg(theme::panel_bg())),
         rect,
     );
 }
@@ -917,14 +917,14 @@ fn render_footer(frame: &mut Frame, rect: Rect, text: &str, error: bool) {
             ),
             style,
         ))
-        .style(Style::default().bg(theme::PANEL_BG)),
+        .style(Style::default().bg(theme::panel_bg())),
         rect,
     );
 }
 
 /// Render selectable `(label, detail)` rows with the selected row highlighted.
 fn render_panel_rows(frame: &mut Frame, list: Rect, rows: &[(String, String)], selected: usize) {
-    let on_panel = Style::default().bg(theme::PANEL_BG);
+    let on_panel = Style::default().bg(theme::panel_bg());
     if rows.is_empty() {
         frame.render_widget(
             Paragraph::new(art::empty_state(
@@ -975,7 +975,7 @@ fn render_panel_rows(frame: &mut Frame, list: Rect, rows: &[(String, String)], s
         }
         let mut line = Line::from(spans).style(on_panel);
         if highlighted {
-            line = line.style(Style::default().bg(theme::MENU_SELECTED_BG));
+            line = line.style(Style::default().bg(theme::menu_selected_bg()));
         }
         lines.push(line);
     }
@@ -1037,7 +1037,7 @@ pub fn render_dir_picker(frame: &mut Frame, area: Rect, picker: &DirPicker) {
             &compact_path(&browser.current),
             chunks[0].width,
         ))
-        .style(Style::default().bg(theme::PANEL_BG)),
+        .style(Style::default().bg(theme::panel_bg())),
         chunks[0],
     );
     render_divider(frame, chunks[1]);
@@ -1061,7 +1061,7 @@ pub fn render_new_project(frame: &mut Frame, area: Rect, flow: &NewProject) {
     let width = ((area.width as u32 * 3 / 5) as u16)
         .clamp(42, 86)
         .min(area.width.max(1));
-    let on_panel = Style::default().bg(theme::PANEL_BG);
+    let on_panel = Style::default().bg(theme::panel_bg());
 
     match flow.step {
         NewProjectStep::Parent => {
@@ -1218,7 +1218,7 @@ pub fn render_toasts(frame: &mut Frame, area: Rect, toasts: &[Toast]) {
     }
     let width = ((area.width as usize) * 2 / 3).clamp(16, 64) as u16;
     let x = area.x + area.width.saturating_sub(width + 2);
-    let on_panel = Style::default().bg(theme::PANEL_BG);
+    let on_panel = Style::default().bg(theme::panel_bg());
 
     for (index, toast) in toasts.iter().rev().take(3).enumerate() {
         let Some(offset) = area.height.checked_sub(2 + index as u16) else {
@@ -1241,7 +1241,7 @@ pub fn render_toasts(frame: &mut Frame, area: Rect, toasts: &[Toast]) {
         let message = truncate(&toast.message, width.saturating_sub(4) as usize);
         let pad = (width as usize).saturating_sub(3 + message.chars().count());
         let line = Line::from(vec![
-            Span::styled(format!(" {glyph} "), style.bg(theme::PANEL_BG)),
+            Span::styled(format!(" {glyph} "), style.bg(theme::panel_bg())),
             Span::styled(message, on_panel),
             Span::styled(" ".repeat(pad), on_panel),
         ]);
@@ -1256,7 +1256,7 @@ fn pad_line(spans: &mut Vec<Span<'static>>, width: u16) {
     let pad = (width as usize).saturating_sub(used);
     spans.push(Span::styled(
         " ".repeat(pad),
-        Style::default().bg(theme::PANEL_BG),
+        Style::default().bg(theme::panel_bg()),
     ));
 }
 

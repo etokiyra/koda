@@ -458,7 +458,7 @@ fn render_segment(
     wrapped: bool,
 ) -> Line<'static> {
     let base_bg = if context.current {
-        Some(theme::CURSORLINE_BG)
+        Some(theme::cursorline_bg())
     } else {
         None
     };
@@ -528,7 +528,7 @@ fn render_segment(
             style = with_bg(theme::bracket_match(), base_bg);
         }
         if context.selected.get(original).copied().unwrap_or(false) {
-            style = style.bg(theme::SELECTION_BG);
+            style = style.bg(theme::selection_bg());
         }
         if context.matched.get(original).copied().unwrap_or(false) {
             style = style.bg(
@@ -538,9 +538,9 @@ fn render_segment(
                     .copied()
                     .unwrap_or(false)
                 {
-                    theme::SEARCH_CURRENT_BG
+                    theme::search_current_bg()
                 } else {
-                    theme::SEARCH_BG
+                    theme::search_bg()
                 },
             );
         }
@@ -551,7 +551,7 @@ fn render_segment(
             .copied()
             .unwrap_or(false)
         {
-            style = style.bg(theme::MULTI_CURSOR).fg(theme::palette::BG_DARK);
+            style = style.bg(theme::multi_cursor()).fg(theme::bg_dark());
         }
 
         if run_style == Some(style) {
@@ -574,8 +574,8 @@ fn render_segment(
         spans.push(Span::styled(
             " ",
             Style::default()
-                .bg(theme::MULTI_CURSOR)
-                .fg(theme::palette::BG_DARK),
+                .bg(theme::multi_cursor())
+                .fg(theme::bg_dark()),
         ));
     }
 

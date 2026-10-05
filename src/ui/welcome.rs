@@ -163,7 +163,7 @@ fn action_list(
         }
         let mut line = Line::from(spans);
         if highlighted {
-            line = line.style(Style::default().bg(theme::MENU_SELECTED_BG));
+            line = line.style(Style::default().bg(theme::menu_selected_bg()));
         }
         lines.push(line.centered());
     }

@@ -77,7 +77,7 @@ pub fn render(frame: &mut Frame, area: Rect, editor: &Editor) {
         });
 
         let style = if is_active {
-            theme::pill(theme::MENU_SELECTED_BG, theme::TEXT_BRIGHT)
+            theme::pill(theme::menu_selected_bg(), theme::text_bright())
         } else {
             theme::muted()
         };
@@ -85,7 +85,7 @@ pub fn render(frame: &mut Frame, area: Rect, editor: &Editor) {
 
         if editor.documents[index].is_dirty() {
             let dot = if is_active {
-                theme::star().bg(theme::MENU_SELECTED_BG)
+                theme::star().bg(theme::menu_selected_bg())
             } else {
                 theme::star()
             };

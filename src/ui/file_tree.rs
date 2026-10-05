@@ -110,7 +110,7 @@ pub fn render_filter(frame: &mut Frame, area: Rect, filter: &TreeFilter, focused
 
         let mut line = Line::from(spans);
         if selected {
-            line = line.style(Style::default().bg(theme::SIDEBAR_SELECTED_BG));
+            line = line.style(Style::default().bg(theme::sidebar_selected_bg()));
         }
         lines.push(line);
     }
@@ -250,7 +250,7 @@ fn entry_line(selected: bool, entry: &VisibleEntry, width: u16, git: &GitInfo) -
 
     let mut line = Line::from(spans);
     if selected {
-        line = line.style(Style::default().bg(theme::SIDEBAR_SELECTED_BG));
+        line = line.style(Style::default().bg(theme::sidebar_selected_bg()));
     }
     line
 }
