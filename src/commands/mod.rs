@@ -88,6 +88,7 @@ pub mod ids {
     pub const PREV_TAB: &str = "view.previousTab";
     pub const PALETTE: &str = "view.commandPalette";
     pub const HELP: &str = "app.help";
+    pub const SETTINGS: &str = "app.settings";
     pub const TOGGLE_MOTION: &str = "app.toggleMotion";
     pub const WELCOME_SCENE: &str = "app.welcomeScene";
 }
@@ -433,6 +434,8 @@ impl CommandRegistry {
                 .describes("Search every command Koda offers"),
             Command::new(HELP, "Keyboard Shortcuts", "Help", Some("F1"))
                 .describes("Show every shortcut at a glance"),
+            Command::new(SETTINGS, "Settings", "General", None)
+                .describes("Adjust Koda's appearance, editor and completion preferences"),
         ];
         CommandRegistry { commands }
     }

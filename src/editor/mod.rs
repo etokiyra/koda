@@ -21,6 +21,9 @@ pub use position::{Cursor, Position, Selection};
 pub struct Editor {
     pub documents: Vec<Document>,
     active: usize,
+    /// The user's indentation preference, applied to every open and future
+    /// document. `None` means no preference was set and each file is inferred.
+    indent_preference: Option<(Option<usize>, bool)>,
 }
 
 impl Editor {
@@ -65,10 +68,21 @@ impl Editor {
         Ok(self.push(doc))
     }
 
-    pub fn push(&mut self, doc: Document) -> usize {
+    pub fn push(&mut self, mut doc: Document) -> usize {
+        if let Some((width, use_spaces)) = self.indent_preference {
+            doc.set_indent_preference(width, use_spaces);
+        }
         self.documents.push(doc);
         self.active = self.documents.len() - 1;
         self.active
+    }
+
+    /// Apply an indentation preference to every open and future document.
+    pub fn set_indent_preference(&mut self, width: Option<usize>, use_spaces: bool) {
+        self.indent_preference = Some((width, use_spaces));
+        for doc in &mut self.documents {
+            doc.set_indent_preference(width, use_spaces);
+        }
     }
 
     pub fn set_active(&mut self, index: usize) {

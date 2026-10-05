@@ -237,6 +237,8 @@ pub enum Overlay {
     Prompt(Prompt),
     /// The keyboard-shortcuts cheatsheet.
     Help(Help),
+    /// The settings screen.
+    Settings(SettingsState),
     /// A directory browser, used to open a project.
     DirPicker(DirPicker),
     /// The guided "create a new project" flow.
@@ -483,6 +485,105 @@ impl NewProject {
 #[derive(Default)]
 pub struct Help {
     pub scroll: usize,
+}
+
+/// A row on the Settings screen: a section heading or an editable preference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsRow {
+    Header(&'static str),
+    Theme,
+    LineNumbers,
+    Animations,
+    SoftWrap,
+    IndentWidth,
+    UseSpaces,
+    InlineDiagnostics,
+    AutoCompletion,
+    Reset,
+    Back,
+}
+
+/// The rows of the Settings screen, in display order.
+pub const SETTINGS_ROWS: [SettingsRow; 14] = [
+    SettingsRow::Header("Appearance"),
+    SettingsRow::Theme,
+    SettingsRow::LineNumbers,
+    SettingsRow::Animations,
+    SettingsRow::Header("Editor"),
+    SettingsRow::SoftWrap,
+    SettingsRow::IndentWidth,
+    SettingsRow::UseSpaces,
+    SettingsRow::InlineDiagnostics,
+    SettingsRow::Header("Completion"),
+    SettingsRow::AutoCompletion,
+    SettingsRow::Header("General"),
+    SettingsRow::Reset,
+    SettingsRow::Back,
+];
+
+impl SettingsRow {
+    /// Whether the row can be edited or activated.
+    pub fn is_actionable(self) -> bool {
+        !matches!(self, SettingsRow::Header(_))
+    }
+
+    /// The label shown on the row.
+    pub fn label(self) -> &'static str {
+        match self {
+            SettingsRow::Header(title) => title,
+            SettingsRow::Theme => "Theme",
+            SettingsRow::LineNumbers => "Line numbers",
+            SettingsRow::Animations => "Animations",
+            SettingsRow::SoftWrap => "Soft wrap",
+            SettingsRow::IndentWidth => "Indent width",
+            SettingsRow::UseSpaces => "Use spaces",
+            SettingsRow::InlineDiagnostics => "Inline diagnostics",
+            SettingsRow::AutoCompletion => "Automatic completion",
+            SettingsRow::Reset => "Reset to defaults",
+            SettingsRow::Back => "Back",
+        }
+    }
+}
+
+/// Selection state for the Settings screen.
+pub struct SettingsState {
+    pub selected: usize,
+}
+
+impl Default for SettingsState {
+    fn default() -> Self {
+        SettingsState { selected: 1 }
+    }
+}
+
+impl SettingsState {
+    pub fn selected_row(&self) -> SettingsRow {
+        SETTINGS_ROWS[self.selected.min(SETTINGS_ROWS.len() - 1)]
+    }
+
+    /// Move the selection to the previous actionable row.
+    pub fn move_up(&mut self) {
+        let mut index = self.selected;
+        while index > 0 {
+            index -= 1;
+            if SETTINGS_ROWS[index].is_actionable() {
+                self.selected = index;
+                return;
+            }
+        }
+    }
+
+    /// Move the selection to the next actionable row.
+    pub fn move_down(&mut self) {
+        let mut index = self.selected;
+        while index + 1 < SETTINGS_ROWS.len() {
+            index += 1;
+            if SETTINGS_ROWS[index].is_actionable() {
+                self.selected = index;
+                return;
+            }
+        }
+    }
 }
 
 /// Which search field has focus.

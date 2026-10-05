@@ -201,6 +201,12 @@ impl App {
     /// document, cursor and buffer version so the offer is dropped if the user
     /// moves or edits before it fires.
     pub(super) fn schedule_auto_completion(&mut self) {
+        // Respect the user's preference: with automatic completion off, only an
+        // explicit `Ctrl+Space` opens the popup.
+        if !self.settings.auto_completion {
+            self.completion_due = None;
+            return;
+        }
         if self.cursor_in_comment_or_string() {
             self.completion = None;
             self.completion_due = None;

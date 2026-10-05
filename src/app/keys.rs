@@ -15,6 +15,7 @@ impl App {
                 return;
             }
             Overlay::Help(_) => return,
+            Overlay::Settings(_) => return,
             Overlay::DirPicker(_) => return,
             Overlay::Diff(_) => return,
             Overlay::NewProject(flow) => {
@@ -365,6 +366,12 @@ impl App {
         }
     }
     pub(super) fn handle_overlay_key(&mut self, key: KeyEvent) {
+        // Settings edits application state, so it is handled directly rather
+        // than through the picker `Outcome` plumbing below.
+        if matches!(self.overlay, Overlay::Settings(_)) {
+            self.handle_settings_key(key);
+            return;
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
         enum Outcome {
@@ -579,6 +586,8 @@ impl App {
                 }
                 _ => Outcome::Nothing,
             },
+            // Handled before this match; the arm keeps the match exhaustive.
+            Overlay::Settings(_) => Outcome::Nothing,
             Overlay::Diff(diff) => match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => Outcome::Close,
                 KeyCode::Up => {

@@ -1,6 +1,9 @@
 use super::*;
 use std::fs;
 
+use super::overlay::{SETTINGS_ROWS, SettingsRow};
+use crate::settings::{Settings, ThemeId};
+
 fn temp_project(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("koda-app-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -3073,5 +3076,204 @@ fn the_setup_overlay_lists_languages_and_offers_set_up() {
         "{labels:?}"
     );
     assert!(has_set_up, "a missing tool must offer Set up project");
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// Move the Settings selection to `row` directly, for deterministic setup.
+fn select_setting(app: &mut App, row: SettingsRow) {
+    match &mut app.overlay {
+        Overlay::Settings(state) => {
+            state.selected = SETTINGS_ROWS
+                .iter()
+                .position(|candidate| *candidate == row)
+                .expect("row is in the settings list");
+        }
+        _ => panic!("the settings screen is not open"),
+    }
+}
+
+#[test]
+fn settings_screen_opens_navigates_and_closes() {
+    let dir = temp_project("settings-open");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+
+    app.execute_command(ids::SETTINGS);
+    let Overlay::Settings(state) = &app.overlay else {
+        panic!("settings did not open");
+    };
+    assert_eq!(
+        state.selected_row(),
+        SettingsRow::Theme,
+        "first actionable row"
+    );
+
+    // Down skips the section header; up skips it back.
+    app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    let Overlay::Settings(state) = &app.overlay else {
+        panic!("settings did not stay open");
+    };
+    assert_eq!(
+        state.selected_row(),
+        SettingsRow::SoftWrap,
+        "skips the Editor header"
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    let Overlay::Settings(state) = &app.overlay else {
+        panic!("settings did not stay open");
+    };
+    assert_eq!(state.selected_row(), SettingsRow::Animations);
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(app.overlay.is_none(), "Esc leaves the settings screen");
+
+    crate::ui::theme::set_theme(ThemeId::Mellow);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn changing_the_theme_applies_immediately() {
+    let dir = temp_project("settings-theme");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+    assert_eq!(app.settings.theme, ThemeId::Mellow, "Mellow is the default");
+
+    app.execute_command(ids::SETTINGS);
+    select_setting(&mut app, SettingsRow::Theme);
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert_eq!(app.settings.theme, ThemeId::Midnight);
+    assert_eq!(
+        crate::ui::theme::theme_id(),
+        ThemeId::Midnight,
+        "the theme is applied live"
+    );
+    assert!(app.settings_dirty, "a change is marked for persistence");
+
+    app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    assert_eq!(app.settings.theme, ThemeId::Mellow);
+
+    crate::ui::theme::set_theme(ThemeId::Mellow);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn boolean_and_editor_settings_apply_live() {
+    let dir = temp_project("settings-editor");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+
+    app.execute_command(ids::SETTINGS);
+    select_setting(&mut app, SettingsRow::LineNumbers);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(!app.settings.line_numbers);
+    assert!(!app.show_line_numbers, "line numbers hide immediately");
+
+    select_setting(&mut app, SettingsRow::SoftWrap);
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert!(app.settings.soft_wrap);
+    assert!(app.wrap, "soft wrap turns on immediately");
+
+    select_setting(&mut app, SettingsRow::AutoCompletion);
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert!(!app.settings.auto_completion);
+    app.schedule_auto_completion();
+    assert!(
+        app.completion_due.is_none(),
+        "automatic completion is suppressed"
+    );
+
+    select_setting(&mut app, SettingsRow::Animations);
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert!(!app.settings.motion);
+    assert!(!app.motion, "animations stop immediately");
+
+    select_setting(&mut app, SettingsRow::InlineDiagnostics);
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert!(!app.settings.inline_diagnostics);
+    assert!(
+        !app.inline_diagnostics,
+        "inline diagnostics hide immediately"
+    );
+
+    crate::ui::theme::set_theme(ThemeId::Mellow);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn indentation_preference_applies_to_open_documents() {
+    let dir = temp_project("settings-indent");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+
+    app.execute_command(ids::SETTINGS);
+    // Cycle Indent width: Auto -> 2 -> 4 -> 8 -> Auto. Pin 2.
+    select_setting(&mut app, SettingsRow::IndentWidth);
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert_eq!(app.settings.indent_width, Some(2));
+    assert_eq!(app.editor.active_document().unwrap().indent_width(), 2);
+
+    // With spaces off, indentation inserts a tab.
+    select_setting(&mut app, SettingsRow::UseSpaces);
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert!(!app.settings.use_spaces);
+    let doc = app.editor.active_document_mut().unwrap();
+    doc.move_to(Position::new(0, 0));
+    doc.indent();
+    assert!(doc.buffer.line_text(0).starts_with('\t'));
+
+    crate::ui::theme::set_theme(ThemeId::Mellow);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn reset_restores_defaults() {
+    let dir = temp_project("settings-reset");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+
+    app.execute_command(ids::SETTINGS);
+    select_setting(&mut app, SettingsRow::Theme);
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    select_setting(&mut app, SettingsRow::LineNumbers);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_ne!(app.settings, Settings::default());
+
+    select_setting(&mut app, SettingsRow::Reset);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.settings, Settings::default());
+    assert_eq!(crate::ui::theme::theme_id(), ThemeId::Mellow);
+    assert!(app.show_line_numbers);
+    assert!(!app.wrap);
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn new_with_settings_applies_preferences() {
+    let dir = temp_project("settings-load");
+    let file = dir.join("src/main.rs");
+    let settings = Settings {
+        theme: ThemeId::Midnight,
+        line_numbers: false,
+        soft_wrap: true,
+        indent_width: Some(2),
+        use_spaces: false,
+        auto_completion: false,
+        motion: false,
+        inline_diagnostics: false,
+    };
+    let mut app = App::new_with_settings(Some(&dir), settings).unwrap();
+    assert_eq!(crate::ui::theme::theme_id(), ThemeId::Midnight);
+    assert!(!app.show_line_numbers);
+    assert!(app.wrap);
+    assert!(!app.motion);
+    assert!(!app.inline_diagnostics);
+
+    app.open_path(file);
+    assert_eq!(app.editor.active_document().unwrap().indent_width(), 2);
+
+    crate::ui::theme::set_theme(ThemeId::Mellow);
     fs::remove_dir_all(&dir).ok();
 }

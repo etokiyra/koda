@@ -55,6 +55,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Overlay::Help(help) => {
             overlay::render_help(frame, area, help, &app.commands, app.anim_phase)
         }
+        Overlay::Settings(state) => overlay::render_settings(frame, area, state, &app.settings),
         Overlay::DirPicker(picker) => overlay::render_dir_picker(frame, area, picker),
         Overlay::NewProject(flow) => overlay::render_new_project(frame, area, flow),
         Overlay::Diff(diff) => overlay::render_diff(frame, area, diff),
@@ -132,6 +133,7 @@ fn render_editor_area(frame: &mut Frame, area: Rect, app: &mut App) {
             editor_focused,
             app.inline_diagnostics,
             app.wrap,
+            app.show_line_numbers,
         );
     }
 }
@@ -170,6 +172,7 @@ fn render_split(frame: &mut Frame, area: Rect, app: &mut App, editor_focused: bo
         left_focused,
         app.inline_diagnostics,
         app.wrap,
+        app.show_line_numbers,
     );
     if left_focused {
         app.cursor_screen = left;
@@ -185,6 +188,7 @@ fn render_split(frame: &mut Frame, area: Rect, app: &mut App, editor_focused: bo
         right_focused,
         app.inline_diagnostics,
         app.wrap,
+        app.show_line_numbers,
     );
     if right_focused {
         app.cursor_screen = right;
@@ -204,6 +208,7 @@ fn render_pane(
     focused: bool,
     inline_diagnostics: bool,
     wrap: bool,
+    show_line_numbers: bool,
 ) -> Option<(u16, u16)> {
     let language_id = documents.get(index)?.buffer.language;
     let provider = language.provider(language_id);
@@ -217,6 +222,7 @@ fn render_pane(
         focused,
         inline_diagnostics,
         wrap,
+        show_line_numbers,
     )
 }
 

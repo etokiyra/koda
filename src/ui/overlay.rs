@@ -13,11 +13,13 @@ use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 
 use crate::app::overlay::{
     CompletionState, DiffLineKind, DiffState, DirEntryKind, DirPicker, Help, HoverState,
-    NewProject, NewProjectStep, Picker, Prompt, Search, SearchField,
+    NewProject, NewProjectStep, Picker, Prompt, SETTINGS_ROWS, Search, SearchField, SettingsRow,
+    SettingsState,
 };
 use crate::app::{Toast, ToastKind};
 use crate::commands::CommandRegistry;
 use crate::project::create;
+use crate::settings::Settings;
 use crate::ui::{art, centered, theme};
 
 /// Render a filterable list (command palette / quick open).
@@ -474,6 +476,113 @@ pub fn render_help(
         Paragraph::new(Text::from(slice)).style(Style::default().bg(theme::panel_bg())),
         inner,
     );
+}
+
+/// Render the Settings screen: section headings and editable rows.
+pub fn render_settings(frame: &mut Frame, area: Rect, state: &SettingsState, settings: &Settings) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let width = ((area.width as u32 * 3 / 5) as u16)
+        .clamp(44, 72)
+        .min(area.width.max(1));
+    let height = (SETTINGS_ROWS.len() as u16 + 4).min(area.height);
+    let inner = draw_panel(frame, area, panel_title("Settings"), width, height);
+    if inner.height < 3 {
+        return;
+    }
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    render_divider(frame, chunks[0]);
+    render_settings_rows(frame, chunks[1], state, settings);
+    render_footer(
+        frame,
+        chunks[2],
+        "↑↓ move  ·  Enter/Space change  ·  ←→ adjust  ·  Esc close",
+        false,
+    );
+}
+
+fn render_settings_rows(frame: &mut Frame, list: Rect, state: &SettingsState, settings: &Settings) {
+    let on_panel = Style::default().bg(theme::panel_bg());
+    let label_width = SETTINGS_ROWS
+        .iter()
+        .filter(|row| row.is_actionable())
+        .map(|row| row.label().chars().count())
+        .max()
+        .unwrap_or(0);
+    let mut lines = Vec::new();
+    for (index, row) in SETTINGS_ROWS.iter().enumerate().take(list.height as usize) {
+        if let SettingsRow::Header(title) = row {
+            lines.push(
+                Line::from(Span::styled(format!(" {title}"), theme::accent_bold())).style(on_panel),
+            );
+            continue;
+        }
+        let highlighted = index == state.selected;
+        let marker = if highlighted {
+            Span::styled(" ❯ ", theme::star())
+        } else {
+            Span::raw("   ")
+        };
+        let label_style = if highlighted {
+            theme::bright_bold()
+        } else {
+            theme::text()
+        };
+        let value_style = if highlighted {
+            theme::accent_bold()
+        } else {
+            theme::muted()
+        };
+        let mut spans = vec![
+            marker,
+            Span::styled(format!("{:<label_width$}", row.label()), label_style),
+        ];
+        let value = setting_value(*row, settings);
+        if !value.is_empty() {
+            spans.push(Span::styled("  ", theme::dim()));
+            spans.push(Span::styled(value, value_style));
+        }
+        let mut line = Line::from(spans).style(on_panel);
+        if highlighted {
+            line = line.style(Style::default().bg(theme::menu_selected_bg()));
+        }
+        lines.push(line);
+    }
+    frame.render_widget(Paragraph::new(Text::from(lines)).style(on_panel), list);
+}
+
+/// The value column for a settings row.
+fn setting_value(row: SettingsRow, settings: &Settings) -> String {
+    match row {
+        SettingsRow::Theme => settings.theme.name().to_string(),
+        SettingsRow::LineNumbers => on_off(settings.line_numbers),
+        SettingsRow::Animations => on_off(settings.motion),
+        SettingsRow::SoftWrap => on_off(settings.soft_wrap),
+        SettingsRow::IndentWidth => match settings.indent_width {
+            None => "Auto".to_string(),
+            Some(width) => width.to_string(),
+        },
+        SettingsRow::UseSpaces => on_off(settings.use_spaces),
+        SettingsRow::InlineDiagnostics => on_off(settings.inline_diagnostics),
+        SettingsRow::AutoCompletion => on_off(settings.auto_completion),
+        SettingsRow::Header(_) | SettingsRow::Reset | SettingsRow::Back => String::new(),
+    }
+}
+
+fn on_off(value: bool) -> String {
+    if value {
+        "On".to_string()
+    } else {
+        "Off".to_string()
+    }
 }
 
 /// Render the signature-help popup, anchored just below the cursor.

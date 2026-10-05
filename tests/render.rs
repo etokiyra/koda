@@ -971,3 +971,51 @@ fn every_bundled_theme_renders_without_panicking() {
     theme::set_theme(ThemeId::Mellow);
     cleanup(&dir);
 }
+
+#[test]
+fn renders_the_settings_screen() {
+    let dir = temp_project("settings");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+
+    app.execute_command(ids::SETTINGS);
+    let screen = draw(&mut app);
+    assert!(screen.contains("Settings"), "title missing:\n{screen}");
+    assert!(screen.contains("Appearance"), "group missing:\n{screen}");
+    assert!(screen.contains("Theme"), "theme row missing:\n{screen}");
+    assert!(
+        screen.contains("Mellow"),
+        "default theme missing:\n{screen}"
+    );
+    assert!(screen.contains("Line numbers"));
+    assert!(screen.contains("Animations"));
+    assert!(screen.contains("Soft wrap"));
+    assert!(screen.contains("Indent width"));
+    assert!(screen.contains("Inline diagnostics"));
+    assert!(screen.contains("Automatic completion"));
+    assert!(screen.contains("Reset to defaults"));
+    assert!(screen.contains("Back"));
+
+    cleanup(&dir);
+}
+
+#[test]
+fn the_settings_screen_renders_under_every_theme() {
+    use koda::settings::ThemeId;
+    let dir = temp_project("settings-themes");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+    app.execute_command(ids::SETTINGS);
+
+    for id in ThemeId::ALL {
+        theme::set_theme(id);
+        let screen = draw(&mut app);
+        assert!(
+            screen.contains("Mellow"),
+            "{} must show the current theme",
+            id.name()
+        );
+    }
+    theme::set_theme(ThemeId::Mellow);
+    cleanup(&dir);
+}

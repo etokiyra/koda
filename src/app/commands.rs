@@ -211,6 +211,8 @@ impl App {
             }
             ids::TOGGLE_MOTION => {
                 self.motion = !self.motion;
+                self.settings.motion = self.motion;
+                self.settings_dirty = true;
                 let message = if self.motion {
                     "Animations on"
                 } else {
@@ -267,6 +269,7 @@ impl App {
             ids::PREV_TAB => self.previous_tab(),
             ids::PALETTE => self.open_command_palette(),
             ids::HELP => self.toggle_help(),
+            ids::SETTINGS => self.open_settings(),
             ids::RENAME => self.rename_symbol(),
             ids::CODE_ACTIONS => self.code_actions(),
             ids::FORMAT => self.format_document(),

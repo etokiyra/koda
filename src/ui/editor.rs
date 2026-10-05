@@ -38,6 +38,7 @@ pub fn render(
     focused: bool,
     inline_diagnostics: bool,
     wrap: bool,
+    show_line_numbers: bool,
 ) -> Option<(u16, u16)> {
     if area.width == 0 || area.height == 0 {
         return None;
@@ -53,8 +54,13 @@ pub fn render(
     }
 
     let total_lines = doc.buffer.len_lines();
-    // One column for the diagnostic marker, the widest line number, and a gap.
-    let number_width = total_lines.max(1).to_string().len();
+    // One column for the diagnostic marker, the widest line number (when line
+    // numbers are on), and a gap.
+    let number_width = if show_line_numbers {
+        total_lines.max(1).to_string().len()
+    } else {
+        0
+    };
     let gutter = (number_width + 2) as u16;
     let text_width = area.width.saturating_sub(gutter) as usize;
     if text_width == 0 {
@@ -128,6 +134,7 @@ pub fn render(
                     brackets,
                     inline_diagnostics,
                     true,
+                    show_line_numbers,
                 ));
             }
             row += 1;
@@ -164,6 +171,7 @@ pub fn render(
                 brackets,
                 inline_diagnostics,
                 false,
+                show_line_numbers,
             ));
         }
     }
@@ -456,6 +464,7 @@ fn render_segment(
     brackets: Option<(Position, Position)>,
     inline_diagnostics: bool,
     wrapped: bool,
+    show_line_numbers: bool,
 ) -> Line<'static> {
     let base_bg = if context.current {
         Some(theme::cursorline_bg())
@@ -476,14 +485,19 @@ fn render_segment(
         };
         let marker = context.marker_severity.map(Severity::gutter).unwrap_or(' ');
         spans.push(Span::styled(marker.to_string(), marker_style));
-        spans.push(Span::styled(
-            format!(
-                "{:>width$} ",
-                row + 1,
-                width = gutter.saturating_sub(2) as usize
-            ),
-            with_bg(gutter_style, base_bg),
-        ));
+        if show_line_numbers {
+            spans.push(Span::styled(
+                format!(
+                    "{:>width$} ",
+                    row + 1,
+                    width = gutter.saturating_sub(2) as usize
+                ),
+                with_bg(gutter_style, base_bg),
+            ));
+        } else {
+            // No number: just the gap after the diagnostic marker.
+            spans.push(Span::styled(" ", with_bg(gutter_style, base_bg)));
+        }
     } else {
         // Continuation rows keep the gutter blank so the number reads as one row.
         spans.push(Span::styled(

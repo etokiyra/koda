@@ -66,6 +66,10 @@ pub struct Settings {
     pub indent_width: Option<u8>,
     pub use_spaces: bool,
     pub auto_completion: bool,
+    /// Welcome and busy animations.
+    pub motion: bool,
+    /// Diagnostic messages shown at the end of their line.
+    pub inline_diagnostics: bool,
 }
 
 impl Default for Settings {
@@ -77,6 +81,8 @@ impl Default for Settings {
             indent_width: None,
             use_spaces: true,
             auto_completion: true,
+            motion: true,
+            inline_diagnostics: true,
         }
     }
 }
@@ -152,6 +158,12 @@ impl Settings {
         if let Some(enabled) = value.get("auto_completion").and_then(Value::as_bool) {
             settings.auto_completion = enabled;
         }
+        if let Some(enabled) = value.get("motion").and_then(Value::as_bool) {
+            settings.motion = enabled;
+        }
+        if let Some(enabled) = value.get("inline_diagnostics").and_then(Value::as_bool) {
+            settings.inline_diagnostics = enabled;
+        }
         settings
     }
 
@@ -164,6 +176,8 @@ impl Settings {
             "indent_width": self.indent_width,
             "use_spaces": self.use_spaces,
             "auto_completion": self.auto_completion,
+            "motion": self.motion,
+            "inline_diagnostics": self.inline_diagnostics,
         })
     }
 }
@@ -203,6 +217,8 @@ mod tests {
         assert_eq!(settings.indent_width, None, "width is inferred by default");
         assert!(settings.use_spaces);
         assert!(settings.auto_completion);
+        assert!(settings.motion);
+        assert!(settings.inline_diagnostics);
     }
 
     #[test]
@@ -226,6 +242,8 @@ mod tests {
             indent_width: Some(2),
             use_spaces: false,
             auto_completion: false,
+            motion: false,
+            inline_diagnostics: false,
         };
         settings.save_to(&path).unwrap();
         assert_eq!(Settings::load_from(&path), Some(settings));

@@ -18,6 +18,7 @@ mod lsp;
 mod panes;
 mod search;
 mod session;
+mod settings;
 mod status;
 mod view;
 
@@ -386,23 +387,41 @@ pub struct App {
     project_setup_offered: bool,
     /// An in-progress "Set up this project" run, if any.
     project_setup: Option<crate::language::setup::ProjectSetupRun>,
+    /// The user's global preferences.
+    pub settings: crate::settings::Settings,
+    /// Whether the preferences changed this session and should be written on
+    /// quit. Koda only writes a settings file once the user changes something.
+    settings_dirty: bool,
+    /// Whether the editor gutter shows line numbers.
+    pub show_line_numbers: bool,
 }
 
 impl App {
     /// Run Koda. `target` is the optional CLI path argument.
     pub fn start(target: Option<String>) -> io::Result<()> {
         let target = target.map(PathBuf::from);
-        let mut app = App::new(target.as_deref())?;
+        let mut app = App::new_with_settings(target.as_deref(), crate::settings::Settings::load())?;
         let mut terminal = terminal::init()?;
         let result = app.run(&mut terminal);
         terminal::restore();
         app.save_session();
         app.recent.save();
+        app.persist_settings();
         result
     }
 
-    /// Build the application state for a target path.
+    /// Build the application state for a target path, using the default
+    /// preferences. Tests use this so they are independent of the user's
+    /// settings file; the real CLI loads settings first.
     pub fn new(target: Option<&std::path::Path>) -> io::Result<Self> {
+        App::new_with_settings(target, crate::settings::Settings::default())
+    }
+
+    /// Build the application state for a target path with explicit preferences.
+    pub fn new_with_settings(
+        target: Option<&std::path::Path>,
+        settings: crate::settings::Settings,
+    ) -> io::Result<Self> {
         let language = Arc::new(LanguageService::builtin());
         let background = Background::spawn(Arc::clone(&language));
         let workspace = Workspace::open(target)?;
@@ -436,7 +455,8 @@ impl App {
             cursor_screen: None,
             tree_visible: true,
             inline_diagnostics: true,
-            wrap: false,
+            wrap: settings.soft_wrap,
+            show_line_numbers: settings.line_numbers,
             split: false,
             pane_left: 0,
             pane_right: None,
@@ -483,6 +503,8 @@ impl App {
             project_scan_started: false,
             project_setup_offered: false,
             project_setup: None,
+            settings,
+            settings_dirty: false,
         };
 
         // The welcome screen is always the first view. A path from the command
@@ -495,6 +517,9 @@ impl App {
         app.resume_session = crate::session::session_path(app.workspace.root())
             .and_then(|path| Session::load_from(&path));
 
+        // Apply the user's preferences before the first frame so the initial
+        // render already reflects them.
+        app.apply_settings();
         app.request_git_refresh();
         // Probe for external tools on the worker so startup never waits on it.
         app.background.discover_tools();

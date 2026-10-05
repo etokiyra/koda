@@ -60,6 +60,10 @@ pub struct Document {
     disk_mtime: Option<SystemTime>,
     /// The indentation unit detected for this file, in spaces.
     indent_width: usize,
+    /// Whether indentation is inserted as spaces (rather than one tab per level).
+    use_spaces: bool,
+    /// A user-chosen indent width that overrides per-file inference, if any.
+    indent_preferred: Option<usize>,
     /// The history id of the top edit at the last save (or load). Comparing
     /// against it lets undo/redo restore the clean state, so undoing every edit
     /// no longer leaves a file marked modified.
@@ -88,6 +92,8 @@ impl Document {
             diagnostics_from_lsp: false,
             disk_mtime: None,
             indent_width,
+            use_spaces: true,
+            indent_preferred: None,
             saved_id: None,
         }
     }
@@ -95,6 +101,29 @@ impl Document {
     /// The indentation unit detected for this file, in spaces.
     pub fn indent_width(&self) -> usize {
         self.indent_width
+    }
+
+    /// Apply a user indentation preference.
+    ///
+    /// `width` of `None` keeps per-file inference (the zero-config default); a
+    /// width pins the unit instead. `use_spaces` selects whether indentation is
+    /// inserted as spaces or as one tab per level. The preference survives a
+    /// reload.
+    pub fn set_indent_preference(&mut self, width: Option<usize>, use_spaces: bool) {
+        self.indent_preferred = width;
+        self.use_spaces = use_spaces;
+        self.indent_width = width
+            .map(|width| width.max(1))
+            .unwrap_or_else(|| detect_indent_width(&self.buffer.text()));
+    }
+
+    /// The string inserted for one level of indentation.
+    fn indent_unit(&self) -> String {
+        if self.use_spaces {
+            " ".repeat(self.indent_width.max(1))
+        } else {
+            "\t".to_string()
+        }
     }
 
     pub fn from_path(path: &Path) -> std::io::Result<Self> {
@@ -168,7 +197,9 @@ impl Document {
         self.buffer.replace_contents(&text);
         self.history.clear();
         self.mark_saved();
-        self.indent_width = detect_indent_width(&text);
+        self.indent_width = self
+            .indent_preferred
+            .unwrap_or_else(|| detect_indent_width(&text));
         self.selection = None;
         self.cursors.clear();
         self.preferred_col = None;
@@ -517,7 +548,7 @@ impl Document {
             && after == matching_close(open)
         {
             let outer = leading;
-            let inner = format!("{outer}{}", " ".repeat(self.indent_width));
+            let inner = format!("{outer}{}", self.indent_unit());
             let text = format!("\n{inner}\n{outer}");
             let cursor = start.advanced_by(&text);
             let cursor = Position::new(cursor.row.saturating_sub(1), inner.chars().count());
@@ -541,7 +572,7 @@ impl Document {
             leading
         };
         if before.trim_end().ends_with(['{', '(', '[']) {
-            indent.push_str(&" ".repeat(self.indent_width));
+            indent.push_str(&self.indent_unit());
         }
         let text = format!("\n{indent}");
         let cursor = start.advanced_by(&text);
@@ -923,7 +954,7 @@ impl Document {
             && after == matching_close(open)
         {
             let outer = leading;
-            let inner = format!("{outer}{}", " ".repeat(self.indent_width));
+            let inner = format!("{outer}{}", self.indent_unit());
             let text = format!("\n{inner}\n{outer}");
             self.apply_edit(self.cursor, self.cursor, &text);
             self.cursor = Position::new(self.cursor.row.saturating_sub(1), inner.chars().count());
@@ -941,7 +972,7 @@ impl Document {
             leading
         };
         if before.trim_end().ends_with(['{', '(', '[']) {
-            indent.push_str(&" ".repeat(self.indent_width));
+            indent.push_str(&self.indent_unit());
         }
         let text = format!("\n{indent}");
         let (start, end) = self.selection_range().unwrap_or((self.cursor, self.cursor));
@@ -1089,6 +1120,7 @@ impl Document {
     fn indent_multi(&mut self, increase: bool) {
         let specs = self.all_cursor_specs();
         let width = self.indent_width.max(1);
+        let unit = self.indent_unit();
         let mut rows: Vec<usize> = Vec::new();
         for (start, end, caret) in &specs {
             if start != end {
@@ -1116,9 +1148,9 @@ impl Document {
                 edits.push(MultiEdit {
                     start: Position::new(row, 0),
                     end: Position::new(row, 0),
-                    inserted: " ".repeat(width),
+                    inserted: unit.clone(),
                 });
-                deltas.push((row, width as isize));
+                deltas.push((row, unit.chars().count() as isize));
             } else {
                 let remove = leading_outdent(&line, width);
                 if remove == 0 {
@@ -1161,6 +1193,10 @@ impl Document {
     }
 
     fn insert_tab(&mut self) {
+        if !self.use_spaces {
+            self.apply_edit(self.cursor, self.cursor, "\t");
+            return;
+        }
         let width = self.indent_width.max(1);
         let spaces = width - (self.cursor.col % width);
         self.apply_edit(self.cursor, self.cursor, &" ".repeat(spaces));
@@ -1181,7 +1217,7 @@ impl Document {
                         line
                     } else {
                         changed = true;
-                        format!("{}{line}", " ".repeat(self.indent_width))
+                        format!("{}{line}", self.indent_unit())
                     }
                 } else {
                     let remove = leading_outdent(&line, self.indent_width);
@@ -2364,6 +2400,47 @@ mod tests {
 
         d.indent();
         assert_eq!(d.buffer.text(), "function f() {\n  return 1;\n}");
+    }
+
+    #[test]
+    fn indent_preference_overrides_detection() {
+        let mut d = doc("function f() {\n  return 1;\n}");
+        assert_eq!(d.indent_width(), 2, "detected from the file");
+
+        d.set_indent_preference(Some(8), true);
+        assert_eq!(d.indent_width(), 8, "pinned width wins");
+
+        d.set_indent_preference(None, true);
+        assert_eq!(d.indent_width(), 2, "auto returns to inference");
+    }
+
+    #[test]
+    fn pinned_indent_width_is_used_for_indentation() {
+        let mut d = doc("fn main() {}");
+        d.set_indent_preference(Some(8), true);
+        d.move_to(Position::new(0, 0));
+        d.indent();
+        assert!(d.buffer.line_text(0).starts_with(&" ".repeat(8)));
+    }
+
+    #[test]
+    fn tab_preference_expands_empty_pairs_with_a_tab() {
+        let mut d = doc("{}");
+        d.set_indent_preference(Some(4), false);
+        d.move_to(Position::new(0, 1));
+        d.insert_newline();
+        assert_eq!(d.buffer.text(), "{\n\t\n}");
+    }
+
+    #[test]
+    fn tab_preference_inserts_and_removes_a_tab() {
+        let mut d = doc("fn main() {}");
+        d.set_indent_preference(Some(4), false);
+        d.move_to(Position::new(0, 0));
+        d.indent();
+        assert!(d.buffer.line_text(0).starts_with('\t'));
+        d.outdent();
+        assert_eq!(d.buffer.line_text(0), "fn main() {}");
     }
 
     #[test]

@@ -26,6 +26,10 @@ impl App {
     /// renderer on the next frame.
     pub(super) fn toggle_wrap(&mut self) {
         self.wrap = !self.wrap;
+        // Soft wrap is also a user preference, so the palette toggle persists
+        // and stays in step with the Settings screen.
+        self.settings.soft_wrap = self.wrap;
+        self.settings_dirty = true;
         if let Some(doc) = self.editor.active_document_mut() {
             doc.preferred_col = None;
             doc.scroll_left = 0;
@@ -52,6 +56,8 @@ impl App {
     /// Toggle the inline diagnostic messages at the end of each line.
     pub(super) fn toggle_inline_diagnostics(&mut self) {
         self.inline_diagnostics = !self.inline_diagnostics;
+        self.settings.inline_diagnostics = self.inline_diagnostics;
+        self.settings_dirty = true;
         let state = if self.inline_diagnostics {
             "shown"
         } else {
