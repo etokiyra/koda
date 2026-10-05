@@ -32,5 +32,6 @@ pub mod recent;
 pub mod regex;
 pub mod search;
 pub mod session;
+pub mod settings;
 pub mod terminal;
 pub mod ui;
