@@ -309,6 +309,40 @@ Koda has a personality, but the code always comes first.
 
 ## ✦ Install
 
+### Prebuilt binaries
+
+Every tagged release publishes prebuilt archives on the
+[Releases page](https://github.com/etokiyra/koda/releases). Pick your platform:
+
+| Platform | Archive |
+| --- | --- |
+| Linux x86_64 (glibc) | `koda-<version>-linux-x86_64-gnu.tar.gz` |
+| Linux x86_64 (musl) | `koda-<version>-linux-x86_64-musl.tar.gz` |
+| macOS x86_64 (Intel) | `koda-<version>-macos-x86_64.tar.gz` |
+| macOS arm64 (Apple silicon) | `koda-<version>-macos-arm64.tar.gz` |
+
+Each archive contains the `koda` binary and the licence. Unpack it and put the
+binary on your `PATH`:
+
+```bash
+tar -xzf koda-<version>-linux-x86_64-gnu.tar.gz
+install -m 755 koda ~/.local/bin/koda   # or any directory on your PATH
+koda .
+```
+
+SHA-256 checksums are published beside every archive (`<archive>.sha256`) and as
+a combined `SHA256SUMS` file, so you can verify a download before running it:
+
+```bash
+sha256sum -c koda-<version>-linux-x86_64-gnu.tar.gz.sha256   # macOS: shasum -a 256 -c
+```
+
+Choose the archive that matches both your OS and your architecture; on Apple
+silicon use `macos-arm64`, on Intel use `macos-x86_64`. Windows is not supported
+— see [Platforms](#platforms).
+
+### Build from source
+
 Koda is a standard Cargo project (Rust edition 2024).
 
 ```bash

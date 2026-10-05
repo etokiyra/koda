@@ -24,10 +24,9 @@ _Nothing in progress. Shipped work is in [CHANGELOG.md](CHANGELOG.md)._
 
 ## Next
 
-- [ ] **Distribution.** A release workflow with prebuilt binaries (Linux gnu and
-      musl, macOS x64 and arm64), an install one-liner, and crates.io-ready
-      metadata.
-      *Acceptance:* a user with no Rust toolchain can install and run `koda`.
+- [ ] **Packaging polish.** Publish crates.io-ready metadata and a one-line
+      install script to complement the release binaries.
+      *Acceptance:* `cargo install koda` and a `curl … | sh` installer work.
 - [ ] **Run and test tasks.** Detect runnable tasks per project kind through a
       provider method (`cargo run`/`test`, `go test`, `npm test`, `pytest`, …)
       with no config file.

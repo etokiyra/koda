@@ -5,15 +5,15 @@ All notable changes to Koda are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The version below is the proposed first release. It is written from the code's
-final state — superseded interim entries have been collapsed rather than kept as
-a blow-by-blow — and it carries no date until it is actually tagged.
+The version below is Koda's first release. It is written from the code's final
+state — superseded interim entries have been collapsed rather than kept as a
+blow-by-blow — and is dated when it is tagged.
 
 ## [Unreleased]
 
 _Nothing yet._
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-10-05
 
 The first release: a zero-configuration terminal IDE that opens a project and
 starts working.
@@ -70,6 +70,10 @@ starts working.
   command palette.
 - **Terminal.** OSC 52 clipboard, bracketed paste and focus reporting, and a
   transparent, terminal-native layout.
+- **Distribution.** A tagged release publishes prebuilt archives for Linux
+  x86_64 (glibc and musl) and macOS (x86_64 and arm64), each with a SHA-256
+  checksum, from the GitHub Releases page. See the
+  [install instructions](README.md#-install).
 
 ### Changed
 
@@ -133,5 +137,5 @@ starts working.
 > tool. See [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md#provisioning). Windows is
 > not supported.
 
-[Unreleased]: https://github.com/etokiyra/koda/compare/master...HEAD
+[Unreleased]: https://github.com/etokiyra/koda/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/etokiyra/koda/releases/tag/v0.1.0
