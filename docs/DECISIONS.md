@@ -302,6 +302,26 @@ this file, and add or change a test.
 
 ---
 
+## Product and configuration
+
+- **Zero configuration by default; customisation is in-app.** Koda must work
+  with no file to write. When settings arrive they are reached from inside Koda
+  (a **Settings** screen in the palette); any on-disk settings store under
+  Koda's data directory is an implementation detail the user never has to
+  maintain. A missing settings file must change nothing. This is a deliberate
+  boundary against becoming a config-file-first tool.
+- **"Supported" means complete, not "an LSP starts".** A language is supported
+  only when detection, offline built-in features, provisioning, server launch,
+  server-backed features, lifecycle (version/update/remove) and recovery all
+  hold. The contract is written down in
+  [PRODUCT.md](PRODUCT.md#what-supported-means); the current per-language state
+  is in [LIMITATIONS.md](LIMITATIONS.md).
+- **The full product direction lives in [PRODUCT.md](PRODUCT.md).** It is the
+  single authoritative statement; `ROADMAP.md` turns it into work and
+  `LIMITATIONS.md` records the honest current state.
+
+---
+
 ## Splitting `src/app/mod.rs`
 
 `src/app/mod.rs` was 8876 lines of state, an `impl App` and its tests. It has

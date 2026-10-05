@@ -661,7 +661,8 @@ cargo run -- .                # try it
 ```
 
 Contributions are developed commit-by-commit: small, focused, compiling and
-tested. See [`ROADMAP.md`](ROADMAP.md) for where this is going and
+tested. See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product direction,
+[`ROADMAP.md`](ROADMAP.md) for where this is going and
 [`CHANGELOG.md`](CHANGELOG.md) for what has changed.
 
 ## ✦ Credits & license

@@ -37,6 +37,13 @@ describes the current state.
 
 ## Provisioning
 
+- **No offline or cached install.** Downloads are fetched on every attempt;
+  only the Swift signature path reuses an already-verified archive. A machine
+  with no network cannot install or repair a managed tool even if it downloaded
+  the same artifact before.
+- **No rollback.** A failed attempt can leave a partially extracted tree under
+  Koda's data directory. A retry overwrites it, but nothing is cleaned up
+  proactively.
 - **Two package-manager inputs are still delegations.** Every explicit package
   install names an exact version and delegates integrity to its manager:
   `rustup component add` follows the user's toolchain channel, and `mix
@@ -89,12 +96,29 @@ describes the current state.
 
 ## UI
 
-- **No theme system.** The Mellow palette in `ui/theme.rs` is fixed; there is no
-  runtime theme selection or user configuration.
+- **No settings screen.** Only a few behaviours are toggles in the palette
+  (animations, soft wrap, inline diagnostics); there is no persisted preference
+  store and no Settings screen.
+- **No theme selection.** The Mellow palette in `ui/theme.rs` is fixed; there
+  are no alternative bundled themes.
+- **Terminal coverage is narrow.** `Ctrl+Shift` chords rely on the kitty
+  keyboard protocol (there is no fallback), there is no `NO_COLOR` or 16-colour
+  mode, and the UI has not been checked on light backgrounds.
 - **No file iconography.** The tree uses text only.
 - **No interactive diff/merge view.** The git diff is a read-only overlay; a
   conflicting-file merge view does not exist.
 - **No mouse support.** Everything is keyboard-driven.
+
+## Language support
+
+- **The per-language contract is not surfaced.** `Language Setup` lists tools,
+  but Koda does not show a per-language view of what works offline, what needs a
+  server, and what a platform cannot provide. The README "Supported languages"
+  table is the only such view, and it is not machine-checked.
+- **Built-in depth varies.** Several languages have built-in highlighting,
+  symbols and completion but thin or no built-in diagnostics; their quality
+  comes from the language server where one is installed. See the per-tool and
+  per-platform caveats in [Provisioning](#provisioning).
 
 ## Git
 
