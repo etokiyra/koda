@@ -168,28 +168,33 @@ this file, and add or change a test.
   coordinated Erlang/OTP + Elixir + ElixirLS stack for Elixir, and the official
   Swift toolchain for `sourcekit-lsp`. `Tool::launch_env` supplies the environment
   for both probing and launching; the user's system environment is never modified.
-- **Managed downloads are verified where upstream publishes a check — and four
-  are not.** Every fixed-artifact download is verified: `GithubRelease` (the
-  SHA-256 digest GitHub reports for a release asset), `BobBuild` (the checksum
-  `builds.hex.pm` publishes), `AdoptiumJdk` (the checksum in the Adoptium API
-  response), `NodeRuntime` (`SHASUMS256.txt`), `DartSdk` (the sibling
-  `.sha256sum`), `GoToolchain` (the `go.dev` release JSON), `DownloadGpg`
-  (Swift's detached signature, verified against a private keyring) and
-  `Download { sha256: Some(..) }` (the pinned `App::cpanminus`). **Four managed
-  components are not verified today**: Eclipse JDT downloads the floating
-  `jdtls` `-latest` snapshot with no digest, and `lua-language-server`,
-  `kotlin-language-server` and **OmniSharp** (with its `dotnet-install.sh`)
-  download a pinned release with no checksum. Package-manager installs
-  (`rustup`, `go install <pkg>@latest`, npm, pip, gem, cpan, `cargo install`)
-  delegate integrity to that manager. Closing the four gaps is tracked in
-  [LIMITATIONS.md](LIMITATIONS.md#provisioning). Downloads use a
-  stall-detecting, long-transfer timeout; each install is bounded, locked and
-  re-probed by launching the **real server**, and a verified download that still
-  cannot run (a missing shared library, a broken launcher) reports the real
-  reason instead of a generic failure. Hashing goes through whichever tool the
-  system has — `sha256sum`, `shasum`, `openssl dgst -sha256` or a Python
-  interpreter — and a value that is not 64 hex characters is rejected, so a
-  malformed tool output cannot pass verification.
+- **Every managed download is verified and pinned.** A `Download` step carries a
+  required SHA-256 (there is no way to construct one without a digest), and the
+  other download steps verify upstream data: `GithubRelease` (the SHA-256 digest
+  GitHub reports for a release asset), `BobBuild` (the checksum `builds.hex.pm`
+  publishes), `AdoptiumJdk` (the checksum in the Adoptium API response),
+  `NodeRuntime` (`SHASUMS256.txt`), `DartSdk` (the sibling `.sha256sum`),
+  `GoToolchain` (the `go.dev` release JSON), `DotnetSdk` (the SHA-512 in
+  Microsoft's `releases.json`), `RustupInit` (the `.sha256` beside the versioned
+  `rustup-init` binary), `DownloadGpg` (Swift's detached signature, verified
+  against a private keyring) and the pinned `App::cpanminus`. Every input is an
+  exact version: `jdtls` is a milestone snapshot with its published `.sha256`
+  rather than `-latest`; `lua-language-server`, `kotlin-language-server` and
+  OmniSharp use a pinned tag with a GitHub digest or a pinned SHA-256; the Go
+  toolchain and the Adoptium JDKs are pinned by version; and package-manager
+  installs (`go`, npm, pip, gem, cpan, `cargo`) name an exact version, leaving
+  only `rustup component add` and `mix local.hex`/`local.rebar` as delegations
+  to the manager (tracked in [LIMITATIONS.md](LIMITATIONS.md#provisioning)).
+  Downloads use a stall-detecting, long-transfer timeout and are refused when
+  the target filesystem is too small (the download-size estimate, or an
+  archive's own size before extraction). HTTP(S) proxy variables are forwarded
+  to `curl`. Each install is bounded, locked and re-probed by launching the
+  **real server**, and a verified download that still cannot run (a missing
+  shared library, a broken launcher) reports the real reason instead of a
+  generic failure. Hashing goes through whichever tool the system has —
+  `sha256sum`/`sha512sum`, `shasum`, `openssl dgst` or a Python interpreter —
+  and a value that is not the right length of hex is rejected, so a malformed
+  tool output cannot pass verification.
 - **Platform support is resolved, never guessed.** `swift_platform` and
   `bob_platform` map the running distribution from `/etc/os-release` (including
   `ID_LIKE` derivatives) to the exact upstream artifact. A distribution upstream

@@ -137,14 +137,10 @@ Koda-private gem home. A system `clangd`, `php`, `ruby`, `perl` or `go` is reuse
 when present, and each prerequisite that is genuinely required is reported
 plainly. Everything lives under Koda's own data directory.
 
-Not every managed component is checksum-verified yet. **Verified:** the official
-Go toolchain, clangd, asm-lsp, `phpactor.phar`, the Dart SDK, Node.js, the
-Eclipse Adoptium JDK, Erlang/OTP + Elixir + ElixirLS, the Swift toolchain (GPG
-signature) and `cpanm`. **Not yet verified by Koda:** Eclipse JDT (the floating
-`jdtls` `-latest` snapshot), `lua-language-server`, `kotlin-language-server` and
-OmniSharp (with its `dotnet-install.sh`) download a pinned release without a
-checksum. Package-manager installs delegate integrity to that manager. See
-[`SECURITY.md`](SECURITY.md) for the full trust model.
+Every managed component is checksum- or signature-verified before use, and every
+install input is an exact version. Two package-manager inputs (`rustup component
+add` and `mix local.hex`/`local.rebar`) delegate to the manager's own trust
+model. See [`SECURITY.md`](SECURITY.md) for the full trust model.
 
 **Language Setup…** in the command palette lists every tool Koda knows about and
 installs a missing one with a single `Enter`. The per-language table below names
@@ -166,22 +162,24 @@ installation by running the real tool — never just because a file exists.
 | Erlang/OTP + Elixir | `builds.hex.pm` (Erlang Ecosystem Foundation) | SHA-256 from `builds.txt`, fail-closed | glibc Linux (best-effort Ubuntu 24.04 target where unnamed; musl excluded) |
 | ElixirLS | official GitHub release | SHA-256 asset digest | same as Erlang/Elixir |
 | Go toolchain | `go.dev/dl` | SHA-256 from the release JSON, fail-closed | Linux/macOS, x86_64/arm64 |
+| `rustup-init` | `static.rust-lang.org` | SHA-256 beside the versioned binary | Linux/macOS |
 | clangd | `clangd/clangd` release | SHA-256 asset digest | Linux/macOS (glibc); not musl |
 | asm-lsp | `bergercookie/asm-lsp` release (prebuilt) | SHA-256 asset digest | Linux x86_64, macOS x86_64/arm64; `cargo`/`rustup` elsewhere |
 | phpactor | `phpactor/phpactor` release (`phpactor.phar`) | SHA-256 asset digest | wherever a system `php` exists |
 | Dart SDK | Google `dart-archive` | sibling `.sha256sum`, fail-closed | Linux/macOS, x86_64/arm64 |
 | Node.js | `nodejs.org` | `SHASUMS256.txt` | Linux/macOS, x86_64/arm64 |
-| Eclipse Adoptium JDK | `api.adoptium.net` | checksum from the API | Linux/macOS, x86_64/arm64 |
-| Java (jdtls) | Eclipse snapshots + managed JDK 25 | — (no checksum yet) | Linux/macOS, with a managed JDK |
-| Kotlin | pinned server + managed JDK 21 | — (no checksum yet) | Linux/macOS, with a managed JDK |
-| Lua | `LuaLS` release | — (no checksum yet) | Linux/macOS |
-| OmniSharp | GitHub release + `dotnet-install.sh` | — (no checksum yet) | Linux/macOS |
+| Eclipse Adoptium JDK | `api.adoptium.net` | checksum from the API, for a pinned release | Linux/macOS, x86_64/arm64 |
+| Java (jdtls) | Eclipse milestone + managed JDK 25 | SHA-256 from the published `.sha256` | Linux/macOS, with a managed JDK |
+| Kotlin | pinned server + managed JDK 21 | SHA-256 pinned in Koda's source | Linux/macOS, with a managed JDK |
+| Lua | `LuaLS` release | SHA-256 asset digest | Linux/macOS |
+| OmniSharp | GitHub release | SHA-256 asset digest | Linux/macOS |
+| .NET SDK | `builds.dotnet.microsoft.com` | SHA-512 from `releases.json` | Linux/macOS |
 | Perl (PLS, and `Perl::LanguageServer`) | CPAN, via a checksum-verified `cpanm` | SHA-256 (`App::cpanminus`), fail-closed | wherever a system `perl` exists |
 | solargraph | RubyGems, into a Koda-private gem home | RubyGems signatures/HTTPS | wherever a system `gem` exists |
 
-A `—` in the Integrity column means Koda downloads that component without
-verifying a checksum today. Those four rows (Java/jdtls, Kotlin, Lua and
-OmniSharp) are the outstanding provisioning gap, tracked in
+Every managed download is checksum- or signature-verified. A few package-manager
+installs (`rustup component add`, `mix local.hex`/`local.rebar`) are pinned only
+to the package manager's own trust model; see
 [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md#provisioning).
 
 On a glibc distribution swift.org does not build for, Koda uses its **UBI10**
@@ -356,7 +354,7 @@ small set of tools; each is used only when the feature needs it:
 | `unzip`, `bsdtar` or `python3` | unpacking `.zip` downloads | any one of the three |
 | `gpg` | verifying the Swift toolchain signature | **only for Swift** |
 | `git` | branch, status, diff and commit features | optional; those features degrade to empty |
-| `sh` | `rustup`, Erlang/OTP `Install`, `dotnet-install.sh` | required for those installers |
+| `sh` | the Erlang/OTP `Install` script | required for that installer |
 | `sha256sum`, `shasum`, `openssl` or `python3` | checking download hashes | any one of the four |
 
 Editing, built-in language intelligence and local search work with no external

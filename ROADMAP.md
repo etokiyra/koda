@@ -20,24 +20,12 @@ editor foundation  →  project/language detection  →  language intelligence
 
 ## Now
 
-- [ ] **Close the provisioning integrity gap.** Pin and verify the four managed
-      downloads that have no checksum today: replace the floating `jdtls`
-      snapshot with a released version, and verify `lua-language-server`,
-      `kotlin-language-server` and OmniSharp (plus `dotnet-install.sh`).
-      *Acceptance:* every managed download input has a pinned version and a
-      verified digest, and a test fails if any install input is unpinned or
-      unverified.
 - [ ] **Split `src/app/mod.rs`** (8876 lines) into focused modules, mechanical
       moves only, one extraction per commit, no behaviour change. The proposed
       split is in
       [docs/DECISIONS.md](docs/DECISIONS.md#proposed-splitting-srcappmodrs).
       *Acceptance:* no source file exceeds 800 lines and the full test suite
       passes after every commit.
-- [ ] **Give Language Setup version, size, Update and Remove** for
-      Koda-managed tools only; never touch the user's own installs.
-      *Acceptance:* each managed tool shows its installed version and on-disk
-      size, and can be updated or removed without touching a discovery-only
-      install.
 
 ## Next
 
@@ -77,6 +65,9 @@ editor foundation  →  project/language detection  →  language intelligence
 
 ## Later
 
+- [ ] **Pin the last provisioning delegations.** Give `rustup component add` and
+      `mix local.hex`/`local.rebar` exact versions or a verified archive.
+      *Acceptance:* no managed install follows a manager's floating channel.
 - [ ] **Multi-project workspace.** A `Workspace → Project → Language
       environment → Files` model surfacing several projects as one navigable
       structure.

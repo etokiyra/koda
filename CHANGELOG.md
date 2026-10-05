@@ -55,10 +55,13 @@ starts working.
   the Dart SDK, a managed Node.js runtime (for the npm-based servers), an
   Eclipse Adoptium JDK (jdtls), a dedicated JDK 21 (Kotlin), a coordinated
   Erlang/OTP + Elixir + ElixirLS stack, the Swift toolchain, and `cpanm` into an
-  isolated `local::lib` for Perl's PLS. Downloads verify a published checksum or
-  signature where one exists and fail closed; extraction refuses path traversal;
-  installs are bounded, serialised with an advisory lock, and re-probed by
-  launching the real server.
+  isolated `local::lib` for Perl's PLS. Every managed download is pinned to an
+  exact version and verified against a checksum or signature and fails closed;
+  extraction refuses path traversal; large installs check free disk space and
+  honour `HTTP(S)_PROXY`; installs are bounded, serialised with an advisory lock,
+  and re-probed by launching the real server. **Language Setup** shows a managed
+  tool's version and on-disk size and can update or remove it without touching a
+  user/system install.
 - **Git.** Branch and per-file status, a changed-files list with per-file
   staging, a commit flow, and a read-only unified diff panel.
 - **Interface.** The Mellow colourscheme, five animated welcome scenes, the Koda
@@ -77,6 +80,14 @@ starts working.
   toolchain for their servers — reducing system prerequisites across the board.
 - Language setup is now offered when a project is opened, not only when a file
   is open.
+- **Every managed install input is an exact version.** Eclipse JDT moved from the
+  floating `-latest` snapshot to a pinned milestone with its published `.sha256`;
+  `lua-language-server` and OmniSharp use a pinned tag with a GitHub digest;
+  `kotlin-language-server` uses a pinned SHA-256; the .NET SDK is downloaded
+  directly and verified by SHA-512 instead of running `dotnet-install.sh`; the
+  Rust bootstrap downloads and verifies a pinned `rustup-init` binary instead of
+  the moving `sh.rustup.rs` script; the Go toolchain and the Adoptium JDKs are
+  pinned by version; and every package-manager install names an exact version.
 
 ### Fixed
 
@@ -87,27 +98,36 @@ starts working.
 - **Tag-balance diagnostics ignore raw bodies**, so `<`/`>` inside a
   `<script>`/`<style>` block no longer produce false "never closed" warnings.
 - **Checksum and extraction are portable**: hashing falls back through
-  `sha256sum`, `shasum`, `openssl` and Python, and zip extraction falls back
-  through `unzip`, `bsdtar` and Python.
+  `sha256sum`/`sha512sum`, `shasum`, `openssl` and Python, and zip extraction
+  falls back through `unzip`, `bsdtar` and Python.
 - **Saves are atomic and lossless**, preserving permissions and refusing to
   overwrite an existing destination on rename/copy.
 
 ### Security
 
+- **Every managed download is verified and fails closed.** A `Download` step
+  cannot be constructed without a SHA-256; GitHub releases, `builds.hex.pm`,
+  Adoptium, Node.js, the Dart SDK, the Go toolchain, Microsoft's .NET
+  `releases.json`, `rustup-init`, the Swift signature and the pinned `cpanm`
+  each verify a checksum, digest or signature. A checksum mismatch or a
+  truncated download is rejected and removed before it can become an installed
+  tool. Package-manager installs name an exact version and delegate integrity to
+  the manager.
 - Managed installs run from Koda's own data directory, so a project-local
   `.npmrc` cannot hijack `npm`; downloads and commands are time- and
-  output-bounded, and checksum verification fails closed.
+  output-bounded.
 - Downloaded archives are listed before extraction and refused if any entry is
   absolute or contains `..`, failing closed if the listing itself fails.
 - Koda never writes to a system-owned location or modifies the user's system
   environment.
 
-> **Known gaps at release.** Four managed downloads are not yet checksum- or
-> signature-verified — Eclipse JDT (the floating `jdtls` `-latest` snapshot),
-> `lua-language-server`, `kotlin-language-server` and OmniSharp (with
-> `dotnet-install.sh`). Package-manager installs delegate integrity to that
-> manager. See [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md#provisioning). Windows
-> is not supported.
+> **Known gaps at release.** Two package-manager inputs delegate to their
+> manager's trust model: `rustup component add` follows the user's toolchain
+> channel, and `mix local.hex`/`local.rebar` fetch Hex's signed archive. There is
+> no separate estimate of Swift's unpacked size, and removing a shared managed
+> component (Go tools, npm servers, the JDKs) can also remove a sibling Koda
+> tool. See [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md#provisioning). Windows is
+> not supported.
 
 [Unreleased]: https://github.com/etokiyra/koda/compare/master...HEAD
 [0.1.0]: https://github.com/etokiyra/koda/releases/tag/v0.1.0

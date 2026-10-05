@@ -1,5 +1,12 @@
 # Koda project health audit
 
+> **Point-in-time snapshot (Phase 0).** Phase 2 closed the provisioning gaps
+> recorded here: `jdtls`, `lua-language-server`, `kotlin-language-server` and
+> OmniSharp are now pinned and verified, exports of `dotnet-install.sh` and
+> `sh.rustup.rs` are gone, and a structural test enforces it. See
+> [DECISIONS.md](DECISIONS.md#provisioning) and
+> [LIMITATIONS.md](LIMITATIONS.md#provisioning) for the current state.
+
 Phase 0 of the project health pass. This document is a **read-only audit**: it
 records what the code actually does, with `file:line` evidence, and marks every
 claim `true`, `false` or `unverified`. Nothing in `src/` was changed to produce

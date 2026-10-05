@@ -37,29 +37,38 @@ describes the current state.
 
 ## Provisioning
 
-- **Four managed downloads are not verified.** Eclipse JDT downloads the
-  floating `jdtls` `-latest` snapshot, and `lua-language-server`,
-  `kotlin-language-server` and OmniSharp (with `dotnet-install.sh`) download a
-  pinned release with **no checksum or signature**. Every other fixed-artifact
-  download is verified (see [DECISIONS.md](DECISIONS.md#provisioning)). Closing
-  these four is the top item in [ROADMAP.md](../ROADMAP.md).
-- **Package-manager installs are trusted.** `rustup`, `go install <pkg>@latest`,
-  npm, pip, gem, cpan and `cargo install` fetch unpinned versions and delegate
-  integrity to that manager; Koda adds no digest of its own.
+- **Two package-manager inputs are still delegations.** Every explicit package
+  install names an exact version and delegates integrity to its manager:
+  `rustup component add` follows the user's toolchain channel, and `mix
+  local.hex`/`local.rebar` fetch Hex's own signed archive. Koda adds no digest of
+  its own for these two; every other managed install input is pinned and
+  verified (see [DECISIONS.md](DECISIONS.md#provisioning)).
 - **A plan does not check every step before it starts.** `install()` runs a
   strategy's steps in order and does not consult `step_available` per step, so a
   component that cannot finish (for example the Swift compatibility layer on a
   distribution without `libxml2.so.2`) can still trigger its large download
   first. Verified in the Phase 0 audit: `install_check -- swift` began the
-  ~1.1 GB download even though the compatibility step was unavailable.
+  ~1.1 GB download even though the compatibility step was unavailable. The
+  disk-space check now runs first, which bounds the damage, but the download is
+  still attempted.
+- **Swift's extracted size is not estimated.** The disk check uses the download
+  estimate before an install and an archive's own size before extraction, but
+  there is no separate estimate of the unpacked size (Swift is ~1.1 GB download
+  to ~3.5 GB extracted), so a disk with room for the download but not the
+  extraction is caught only during extraction.
+- **Removing a shared managed component removes its siblings.** Update/Remove
+  act on the first directory Koda owns beneath its tools root. Go-installed tools
+  share `tools/gopath`, the npm servers share `tools/npm`, and the JDK and .NET
+  runtimes are shared, so removing one tool can also remove another Koda tool.
+  Koda never touches a user's own install.
 - **Managed Swift is limited to swift.org's platforms.** The official Linux
   toolchains link against the distribution's libraries, so Koda installs one only
   where swift.org builds for the running release (Ubuntu, Debian, Fedora, Amazon
   Linux, RHEL). Elsewhere it uses the portable UBI10 build plus a compatibility
   layer on glibc Linux, and on musl it only discovers an existing toolchain.
   Swift downloads are large (~1.1 GB; ~3.5 GB extracted) and need disk for both.
-  There is no free-space check, proxy handling or offline message before a large
-  download.
+  There is no dedicated offline message before a download; a network failure is
+  reported as a curl error.
 - **`Perl::LanguageServer` cannot build on Perl ≥ 5.41.** Its `Coro` dependency
   (latest release 6.57, 2020) does not compile against Perl 5.42's changed
   `Time::HiRes` API. Verified on this host (Perl 5.42.2): the install fails with
@@ -96,11 +105,11 @@ describes the current state.
 
 ## Platform
 
-- **Windows is not supported.** There is no Windows CI; several provisioning
-  plans shell out to a Unix `sh` (the `rustup` bootstrap, the Erlang `Install`
-  script and `dotnet-install.sh`), the Swift compatibility layer is `cfg(unix)`,
-  and `language/format.rs` builds a child `PATH` with a hard-coded `:` separator.
-  The code compiles in places but has no end-to-end path.
+- **Windows is not supported.** There is no Windows CI; provisioning still
+  shells out to a Unix `sh` for the Erlang/OTP `Install` script, the Swift
+  compatibility layer is `cfg(unix)`, and `language/format.rs` builds a child
+  `PATH` with a hard-coded `:` separator. The code compiles in places but has no
+  end-to-end path.
 - **Linux and macOS are supported.** CI builds and tests on Linux (glibc), in
   an Arch Linux container and on Alpine (musl), and on macOS. A job's presence
   is not proof it passed; see the "Platform and verification" matrix in the

@@ -98,8 +98,10 @@ Windows-only code paths or claim Windows support. See
 
 - Never write to the user's system directories or modify their shell startup
   files.
-- Never make a large managed download without an integrity check where upstream
-  publishes one (the four exceptions are tracked in LIMITATIONS.md).
+- Never make a managed download without an integrity check: every fixed-artifact
+  download is verified, and a new one must supply a digest. Package-manager
+  installs are pinned to an exact version and delegate integrity to the manager
+  (see LIMITATIONS.md).
 - Never paint an opaque full-screen background.
 - Never let language-specific logic leak into `editor/` or `ui/`.
 - Never require a config file for a core feature.
