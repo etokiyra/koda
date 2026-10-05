@@ -1490,16 +1490,24 @@ pub fn install(tool: Tool) -> Result<String, String> {
             tool.setup_reason()
         ));
     }
-    let _lock = InstallLock::acquire()?;
-
-    // Refuse a large install when the target filesystem cannot hold it, before
-    // any download wastes time or leaves a partial tree behind.
-    if let (Some(bytes), Some(dir)) = (tool.estimated_download_bytes(), tools_dir()) {
-        ensure_disk_space(&dir, bytes)?;
+    // Pre-flight the plan before any install subprocess runs: keep only
+    // strategies whose every step can actually run, so an obvious failure is
+    // reported before an earlier tool in the plan is installed and before a
+    // large download starts.
+    let runnable = filter_runnable(attempts);
+    if runnable.is_empty() {
+        return Err(format!(
+            "{} cannot be installed — {}",
+            tool.label(),
+            tool.setup_reason()
+        ));
     }
 
+    let _lock = InstallLock::acquire()?;
+    preflight(tool)?;
+
     let mut last_error = None;
-    for attempt in &attempts {
+    for attempt in &runnable {
         let mut completed = true;
         for step in &attempt.steps {
             if let Err(message) = run_step(step) {
@@ -1523,6 +1531,48 @@ pub fn install(tool: Tool) -> Result<String, String> {
         }
     }
     Err(last_error.unwrap_or_else(|| format!("could not install {}", tool.label())))
+}
+
+/// The strategies whose every step can actually run on this host.
+fn filter_runnable(attempts: Vec<InstallAttempt>) -> Vec<InstallAttempt> {
+    attempts
+        .into_iter()
+        .filter(|attempt| attempt.steps.iter().all(step_available))
+        .collect()
+}
+
+/// Validate an install plan before any destructive work begins.
+///
+/// This checks only what Koda can know cheaply and reliably: that its tools
+/// directory exists and is writable, and that the target filesystem has room for
+/// the estimated download. Network availability, proxy reachability and archive
+/// contents are necessarily runtime checks and are not predicted here.
+fn preflight(tool: Tool) -> Result<(), String> {
+    let dir = tools_dir().ok_or_else(|| "no data directory for managed tools".to_string())?;
+    ensure_tools_dir_writable(&dir)?;
+    if let Some(bytes) = tool.estimated_download_bytes() {
+        ensure_disk_space(&dir, bytes)?;
+    }
+    Ok(())
+}
+
+/// Confirm Koda can create and write inside its managed tools directory.
+fn ensure_tools_dir_writable(dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|err| {
+        format!(
+            "could not create Koda's tools directory {}: {err}",
+            dir.display()
+        )
+    })?;
+    let probe = temp_sibling(&dir.join("write-probe"))?;
+    std::fs::write(&probe, b"").map_err(|err| {
+        format!(
+            "Koda's tools directory {} is not writable: {err}",
+            dir.display()
+        )
+    })?;
+    let _ = std::fs::remove_file(&probe);
+    Ok(())
 }
 
 /// Execute one install step.
@@ -5822,6 +5872,34 @@ mod tests {
             "a failed download must not create a trusted cache entry"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tools_dir_writability_is_checked() {
+        let dir = cache_test_dir("writable");
+        ensure_tools_dir_writable(&dir).expect("a temp directory is writable");
+        // A regular file where a directory is expected cannot be written into.
+        let file = dir.join("not-a-dir");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(ensure_tools_dir_writable(&file).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn runnable_strategies_are_available_and_gate_installation() {
+        for &tool in Tool::ALL {
+            let runnable = filter_runnable(tool.install_attempts());
+            for attempt in &runnable {
+                assert!(
+                    attempt.steps.iter().all(step_available),
+                    "{tool:?} kept a strategy with an unavailable step"
+                );
+            }
+            // If no strategy can run, Koda must not claim the tool is installable.
+            if runnable.is_empty() {
+                assert!(!can_install(tool), "{tool:?} has no runnable strategy");
+            }
+        }
     }
 
     #[test]
