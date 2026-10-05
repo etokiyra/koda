@@ -239,6 +239,29 @@ this file, and add or change a test.
   hijack `npm`), downloads and commands have time and output limits, checksum
   verification fails closed, and the install lock records a nonce so a reclaimed
   holder cannot delete a successor's lock.
+- **Downloads pass through a verified, digest-keyed cache.** A download is
+  written to a temporary sibling file, verified, and only then renamed into
+  place; a verified copy is stored under `<tools>/cache/<algorithm>-<digest>`
+  and reused without the network. Cache identity is the expected digest, never
+  the filename, and a cached file is re-verified before use — a corrupt entry is
+  discarded and redownloaded, and a failed download or checksum mismatch never
+  enters the cache. Hard links keep the cache from duplicating large archives.
+- **Installation is atomic per step.** An extraction stages into a sibling
+  directory and promotes it with a same-filesystem rename, renaming the previous
+  installation aside first and restoring it if promotion fails. This is per
+  `Extract` step, not a whole-plan transaction: a plan that installs A then
+  fails on B may leave A installed, and Koda reports the incomplete plan rather
+  than a false success.
+- **Install plans are pre-flighted.** `install()` keeps only strategies whose
+  every step is available and validates the tools directory and disk space
+  before any download, so an obviously impossible plan is refused before work
+  starts. Network and archive contents stay runtime checks.
+- **Package-manager delegations are explicit.** Hex is pinned to an exact
+  version; rebar3 is a checksum-verified download registered through
+  `mix local.rebar rebar3 <path>`. Only `rustup component add` remains a
+  delegation to an upstream manager's own verification (rustup's signed
+  manifests), and it is documented as such in
+  [LIMITATIONS.md](LIMITATIONS.md#provisioning).
 
 ---
 

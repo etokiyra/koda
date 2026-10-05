@@ -30,21 +30,28 @@ claims to be.
 intervention on any supported platform, or fails with a precise, actionable
 reason — and never leaves a half-installed tool behind.
 
-**Acceptance.**
-- A plan refuses *before* downloading when a later step cannot run (the
-  Swift-compatibility case in [LIMITATIONS.md](docs/LIMITATIONS.md#provisioning)).
-- A failed attempt cleans up the partial files it created.
-- A previously downloaded, checksum-verified artifact is reused, so an install
-  or repair works offline.
-- A network failure, a missing proxy and a full disk each produce a clear
-  message rather than a raw `curl` error.
-- No install input follows a floating channel (`rustup component add`,
-  `mix local.hex`/`local.rebar` are the last two).
-- Covered by fake-download tests proving the safe path.
+**Done (0.1.x).** A digest-keyed cache reuses verified downloads offline and
+never bypasses verification; downloads and extractions are atomic per step and a
+failed replacement restores the previous install; `install()` pre-flights the
+plan and refuses an unrunnable plan or a short disk before downloading; failures
+name the cause and the tool; Hex is pinned and rebar3 is checksum-verified by
+Koda; fake-download tests cover cache hit/miss/corruption, mismatch, failed
+download, staging cleanup and failed-promotion restore.
 
-**Direction.** Pre-flight the whole plan; make `downloads/` a verified cache
-keyed by digest; roll back an attempt's destination directories on failure;
-translate subprocess failures into user-facing text.
+**Remaining.**
+- `rustup component add` still follows the user's toolchain (the one documented
+  delegation). Pin it, or keep the delegation and justify it.
+- Rollback is per `Extract` step: a plan that installs A and fails on B may
+  leave A. Decide whether a whole-plan transaction is worth it.
+- Add an explicit offline/air-gapped message and a cache eviction policy.
+
+**Acceptance for the remaining work.** No floating install input without a
+documented reason; a multi-step plan leaves no misleading partial state and
+reports what was installed; an offline attempt explains the cache/network state.
+
+**Direction.** Pre-flight the whole plan; make the cache the primary artifact
+store; treat a multi-step plan as a unit only if the rename-based promotion can
+be extended safely.
 
 **Depends on:** nothing. This is the foundation of the whole vision.
 

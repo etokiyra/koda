@@ -5,13 +5,43 @@ All notable changes to Koda are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The version below is Koda's first release. It is written from the code's final
-state — superseded interim entries have been collapsed rather than kept as a
-blow-by-blow — and is dated when it is tagged.
+New work is collected under **Unreleased**. The released version below is Koda's
+first release; it is written from the code's final state — superseded interim
+entries have been collapsed rather than kept as a blow-by-blow — and is dated
+when it is tagged.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **Offline, verified provisioning cache.** A successfully verified download is
+  stored by its digest under Koda's data directory and reused without a network
+  request, so a reinstall or repair works offline. A cached file is re-verified
+  before every use, a corrupt entry is discarded and redownloaded, and only
+  verified artifacts are cached.
+
+### Changed
+
+- **Provisioning is atomic and pre-flighted.** Downloads are written to a
+  temporary file and renamed into place only after verification; extraction
+  stages into a sibling directory and promotes it with a rename, restoring the
+  previous installation if promotion fails, so a failed replacement no longer
+  destroys a known-good tool. `install()` now refuses a plan whose steps cannot
+  all run (or whose disk space is short) before it downloads anything.
+- **Provisioning failures are actionable**, distinguishing no network, a proxy
+  or TLS failure, a timeout and a checksum mismatch, and naming the tool and
+  command that failed.
+- **Hex is pinned to an exact version**, and **rebar3 is a Koda-verified
+  download** registered through `mix local.rebar` instead of being fetched
+  unpinned by Mix. `rustup component add` remains the one documented delegation.
+- **Provisioning pre-flight and rollback boundaries** are documented in
+  [docs/LIMITATIONS.md](docs/LIMITATIONS.md#provisioning).
+
+### Security
+
+- **The download cache never bypasses verification.** Cache identity is the
+  expected digest, a cached artifact is re-hashed before use, and a failed or
+  mismatched download is never written to the cache.
 
 ## [0.1.0] - 2026-10-05
 

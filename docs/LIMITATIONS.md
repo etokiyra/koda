@@ -37,27 +37,32 @@ describes the current state.
 
 ## Provisioning
 
-- **No offline or cached install.** Downloads are fetched on every attempt;
-  only the Swift signature path reuses an already-verified archive. A machine
-  with no network cannot install or repair a managed tool even if it downloaded
-  the same artifact before.
-- **No rollback.** A failed attempt can leave a partially extracted tree under
-  Koda's data directory. A retry overwrites it, but nothing is cleaned up
-  proactively.
-- **Two package-manager inputs are still delegations.** Every explicit package
-  install names an exact version and delegates integrity to its manager:
-  `rustup component add` follows the user's toolchain channel, and `mix
-  local.hex`/`local.rebar` fetch Hex's own signed archive. Koda adds no digest of
-  its own for these two; every other managed install input is pinned and
-  verified (see [DECISIONS.md](DECISIONS.md#provisioning)).
-- **A plan does not check every step before it starts.** `install()` runs a
-  strategy's steps in order and does not consult `step_available` per step, so a
-  component that cannot finish (for example the Swift compatibility layer on a
-  distribution without `libxml2.so.2`) can still trigger its large download
-  first. Verified in the Phase 0 audit: `install_check -- swift` began the
-  ~1.1 GB download even though the compatibility step was unavailable. The
-  disk-space check now runs first, which bounds the damage, but the download is
-  still attempted.
+- **The verified cache has no eviction.** A verified download is stored under
+  `<tools>/cache/<algorithm>-<digest>` and reused offline, so a reinstall or
+  repair needs no network. Nothing evicts it, and removing a managed tool does
+  not remove its cached archive, so the cache grows until the user clears it.
+  The cache uses hard links where the filesystem supports them, so it normally
+  costs no extra disk over the downloads directory.
+- **GPG-verified artifacts are not in the cache.** Swift's archive has no
+  published digest to key on; it keeps the existing behaviour of reusing the
+  already-verified file in the downloads directory (re-checked against its
+  signature) rather than using the digest cache.
+- **Atomicity is per step, not plan-wide.** A download is written to a temporary
+  file and only renamed into place after verification, and an extraction stages
+  into a sibling directory and promotes it with a rename, restoring the previous
+  installation if promotion fails. But a plan that installs A and then fails on
+  B can still leave A installed; Koda reports the incomplete plan and the next
+  attempt recovers. There is no whole-plan transaction.
+- **Pre-flight is best-effort.** `install()` keeps only strategies whose every
+  step is available and checks the tools directory and disk space before any
+  download, so an unrunnable plan (for example Swift without `libxml2.so.2`) or
+  a short disk is reported first. Network reachability, proxy behaviour, archive
+  contents and permissions below the tools directory remain runtime checks.
+- **`rustup component add` remains a delegation.** Hex is pinned by exact version
+  and rebar3 is a Koda-verified download. The only remaining floating
+  provisioning input is rustup's component for the user's active toolchain:
+  rustup chooses the component version and verifies toolchain artifacts against
+  its signed manifests, and Koda does not fetch or pin it independently.
 - **Swift's extracted size is not estimated.** The disk check uses the download
   estimate before an install and an archive's own size before extraction, but
   there is no separate estimate of the unpacked size (Swift is ~1.1 GB download
@@ -74,8 +79,8 @@ describes the current state.
   Linux, RHEL). Elsewhere it uses the portable UBI10 build plus a compatibility
   layer on glibc Linux, and on musl it only discovers an existing toolchain.
   Swift downloads are large (~1.1 GB; ~3.5 GB extracted) and need disk for both.
-  There is no dedicated offline message before a download; a network failure is
-  reported as a curl error.
+  A network failure is reported with a hint (network, proxy or TLS) rather than a
+  bare `curl` error.
 - **`Perl::LanguageServer` cannot build on Perl ≥ 5.41.** Its `Coro` dependency
   (latest release 6.57, 2020) does not compile against Perl 5.42's changed
   `Time::HiRes` API. Verified on this host (Perl 5.42.2): the install fails with
