@@ -378,6 +378,14 @@ pub struct App {
     /// Languages for which Koda has already offered to install a missing
     /// language server this session.
     setup_offered: std::collections::HashSet<LanguageId>,
+    /// The languages detected in the current project, once scanned.
+    project_languages: Option<Vec<LanguageId>>,
+    /// Whether the project-language scan has been requested for this workspace.
+    project_scan_started: bool,
+    /// Whether project setup has been offered for this workspace.
+    project_setup_offered: bool,
+    /// An in-progress "Set up this project" run, if any.
+    project_setup: Option<crate::language::setup::ProjectSetupRun>,
 }
 
 impl App {
@@ -471,6 +479,10 @@ impl App {
             pending_code_actions: Vec::new(),
             last_disk_check: Instant::now(),
             setup_offered: std::collections::HashSet::new(),
+            project_languages: None,
+            project_scan_started: false,
+            project_setup_offered: false,
+            project_setup: None,
         };
 
         // The welcome screen is always the first view. A path from the command
@@ -506,7 +518,14 @@ impl App {
             let background_changed = self.apply_background_events();
             let animated = self.tick_animation();
             let external_changed = self.poll_external_changes();
-            let offered = self.maybe_offer_tool_setup();
+            // Scan the project's languages once, after the user has engaged with
+            // a project, so setup can be offered without blocking startup.
+            if self.engaged && !self.project_scan_started {
+                self.project_scan_started = true;
+                self.background
+                    .detect_project_languages(self.workspace.root().to_path_buf());
+            }
+            let offered = self.maybe_offer_project_setup() || self.maybe_offer_tool_setup();
             if needs_redraw
                 || background_changed
                 || lsp_changed

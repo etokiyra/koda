@@ -2,6 +2,10 @@
 
 use super::*;
 
+use crate::language::setup::{
+    ProjectSetupPlan, ProjectSetupRun, SetupState, SetupSummary, plan_project,
+};
+
 impl App {
     pub(super) fn run_picker_action(&mut self, action: PickerAction) {
         match action {
@@ -11,6 +15,7 @@ impl App {
             PickerAction::RevealLsp { path, position } => self.reveal_lsp(path, position),
             PickerAction::Info(message) => self.set_status(message),
             PickerAction::InstallTool(tool) => self.install_tool(tool),
+            PickerAction::ProjectSetup => self.start_project_setup(),
             PickerAction::ToolActions(tool) => self.tool_actions(tool),
             PickerAction::UpdateTool(tool) => self.install_tool(tool),
             PickerAction::RemoveTool(tool) => self.remove_tool(tool),
@@ -215,6 +220,7 @@ impl App {
             }
             ids::OPEN_PROJECT => self.open_dir_picker(),
             ids::NEW_PROJECT => self.open_new_project(),
+            ids::SETUP_PROJECT => self.open_project_setup(),
             ids::UNDO => self.with_doc(|d| d.undo()),
             ids::REDO => self.with_doc(|d| d.redo()),
             ids::SELECT_ALL => self.with_doc(|d| d.select_all()),
@@ -308,6 +314,196 @@ impl App {
         self.set_status(format!("Installing {}…", tool.label()));
     }
 
+    /// Offer project setup once per workspace, when there is something to say.
+    ///
+    /// Called from the interactive event loop, so it never blocks the first
+    /// frame and never appears when Koda is embedded (tests, previews). If the
+    /// project needs nothing the flag is still set, so the offer is not repeated
+    /// on every iteration.
+    pub(super) fn maybe_offer_project_setup(&mut self) -> bool {
+        if !self.overlay.is_none()
+            || self.pending_install.is_some()
+            || self.project_setup.is_some()
+            || self.project_setup_offered
+            || !self.engaged
+        {
+            return false;
+        }
+        let Some(languages) = self.project_languages.clone() else {
+            return false; // the scan has not finished
+        };
+        if languages.is_empty() {
+            self.project_setup_offered = true;
+            return false;
+        }
+        let Some(tools) = self.tools.clone() else {
+            return false; // wait for the tool probe
+        };
+        let plan = plan_project(&languages, &tools);
+        self.project_setup_offered = true;
+        if !plan.needs_setup() && !plan.has_attention() {
+            return false; // every language is ready: nothing to report
+        }
+        self.show_project_setup(plan);
+        true
+    }
+
+    /// Open the project setup summary on demand (palette, or after "Later").
+    pub(super) fn open_project_setup(&mut self) {
+        let Some(tools) = self.tools.clone() else {
+            self.background.discover_tools();
+            self.set_status("Checking language tools…");
+            return;
+        };
+        let languages = self
+            .project_languages
+            .clone()
+            .unwrap_or_else(|| self.fallback_languages());
+        if languages.is_empty() {
+            self.set_status("No project languages detected");
+            return;
+        }
+        let plan = plan_project(&languages, &tools);
+        self.show_project_setup(plan);
+    }
+
+    /// The languages to plan for when the project scan has not run yet: the
+    /// active file's language plus the detected project kind.
+    fn fallback_languages(&self) -> Vec<LanguageId> {
+        let mut languages = Vec::new();
+        if let Some(language) = self
+            .editor
+            .active_document()
+            .map(|doc| doc.buffer.language)
+            .filter(|language| *language != LanguageId::Unknown)
+        {
+            languages.push(language);
+        }
+        let project = self.workspace.project.kind.language();
+        if project != LanguageId::Unknown && !languages.contains(&project) {
+            languages.push(project);
+        }
+        languages
+    }
+
+    /// Show the setup summary as a picker: one row per language, then the
+    /// action rows.
+    pub(super) fn show_project_setup(&mut self, plan: ProjectSetupPlan) {
+        let mut items = Vec::new();
+        for entry in &plan.languages {
+            let tag = match &entry.state {
+                SetupState::Ready => "ready".to_string(),
+                SetupState::NeedsInstall(_) => "install".to_string(),
+                SetupState::Prerequisite(program) => format!("needs {program}"),
+                SetupState::Unavailable(_) => "unavailable".to_string(),
+            };
+            let label = format!("{} · {tag}", entry.language.name());
+            items.push(PickerItem::new(
+                label,
+                entry.detail.clone(),
+                PickerAction::Info(entry.detail.clone()),
+            ));
+        }
+
+        let missing = plan.installable_tools();
+        if !missing.is_empty() {
+            let noun = if missing.len() == 1 { "tool" } else { "tools" };
+            items.push(
+                PickerItem::new(
+                    "Set up project",
+                    format!("Install {} missing language {noun}", missing.len()),
+                    PickerAction::ProjectSetup,
+                )
+                .shortcut("Enter"),
+            );
+        }
+        items.push(PickerItem::new(
+            "Later",
+            "Set up this project from the command palette another time",
+            PickerAction::Info(
+                "Project setup postponed — run “Set Up Project…” any time".to_string(),
+            ),
+        ));
+
+        let mut picker = Picker::new("Project setup", "Choose…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+    }
+
+    /// Begin provisioning every missing tool the project needs.
+    ///
+    /// Installs run one at a time through the existing provisioning path; the
+    /// queue is planned from the current tool state, so a ready server is never
+    /// reinstalled.
+    pub(super) fn start_project_setup(&mut self) {
+        if self.pending_install.is_some() || self.project_setup.is_some() {
+            self.set_status("An install is already running");
+            return;
+        }
+        let Some(languages) = self.project_languages.clone() else {
+            self.set_status("No project languages detected");
+            return;
+        };
+        let Some(tools) = self.tools.clone() else {
+            self.background.discover_tools();
+            self.set_status("Checking language tools…");
+            return;
+        };
+        let plan = plan_project(&languages, &tools);
+        let queue: std::collections::VecDeque<Tool> = plan.installable_tools().into();
+        if queue.is_empty() {
+            self.set_status("Project is already set up");
+            return;
+        }
+        self.project_setup = Some(ProjectSetupRun {
+            plan,
+            queue,
+            installed: Vec::new(),
+            failed: Vec::new(),
+        });
+        self.advance_project_setup();
+    }
+
+    /// Start the next queued install, or finish the run.
+    pub(super) fn advance_project_setup(&mut self) {
+        let next = self
+            .project_setup
+            .as_mut()
+            .and_then(|run| run.queue.pop_front());
+        match next {
+            Some(tool) => {
+                self.pending_install = Some(tool);
+                self.background.install_tool(tool);
+                self.set_status(format!("Setting up project — installing {}…", tool.label()));
+            }
+            None => {
+                if self.project_setup.is_some() {
+                    self.finish_project_setup();
+                }
+            }
+        }
+    }
+
+    /// Report the outcome of a project setup run, distinguishing full success,
+    /// partial success and outstanding attention.
+    fn finish_project_setup(&mut self) {
+        let Some(run) = self.project_setup.take() else {
+            return;
+        };
+        let failed: Vec<Tool> = run.failed.iter().map(|(tool, _)| *tool).collect();
+        let summary = SetupSummary::from_run(&run.plan, &run.installed, &failed);
+        let headline = summary.headline();
+        let kind = if summary.failed == 0 {
+            ToastKind::Success
+        } else {
+            ToastKind::Error
+        };
+        self.set_status(headline.clone());
+        self.push_toast(kind, headline);
+        // Re-probe so Language Setup and the next plan reflect the new state.
+        self.background.discover_tools();
+    }
+
     /// Offer, once per language, to install a missing language server.
     ///
     /// This is called from the interactive event loop rather than at startup, so
@@ -315,7 +511,11 @@ impl App {
     /// embedded (tests, previews). The user always chooses; dismissing it keeps
     /// Koda's built-in intelligence, and **Language Setup…** stays available.
     pub(super) fn maybe_offer_tool_setup(&mut self) -> bool {
-        if !self.overlay.is_none() || self.pending_install.is_some() || !self.lsp.is_empty() {
+        if !self.overlay.is_none()
+            || self.pending_install.is_some()
+            || self.project_setup.is_some()
+            || !self.lsp.is_empty()
+        {
             return false;
         }
         let Some(tools) = self.tools.as_ref() else {
@@ -331,6 +531,15 @@ impl App {
             .filter(|language| *language != LanguageId::Unknown)
             .unwrap_or_else(|| self.workspace.project.kind.language());
         if language == LanguageId::Unknown {
+            return false;
+        }
+        // Project setup is the primary entry point for a project's languages, so
+        // do not also prompt for a language the project plan already covers.
+        if self
+            .project_languages
+            .as_ref()
+            .is_some_and(|languages| languages.contains(&language))
+        {
             return false;
         }
         // An available server means there is nothing to offer; otherwise offer

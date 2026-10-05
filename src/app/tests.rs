@@ -2899,3 +2899,179 @@ fn opening_a_project_switches_the_workspace() {
     assert!(app.welcome_active());
     fs::remove_dir_all(&dir).ok();
 }
+
+// ---- Project setup -------------------------------------------------------
+
+use crate::language::setup::{LanguageSetup, ProjectSetupPlan, ProjectSetupRun, SetupState};
+
+fn ready_plan(language: LanguageId) -> ProjectSetupPlan {
+    ProjectSetupPlan {
+        languages: vec![LanguageSetup {
+            language,
+            state: SetupState::Ready,
+            detail: "built-in support — no server needed".to_string(),
+        }],
+    }
+}
+
+#[test]
+fn project_setup_is_skipped_when_every_language_is_ready() {
+    let dir = temp_project("setup-ready");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+    app.tools = Some(ToolRegistry::discover_cached());
+    // Markdown has no server: nothing to install, nothing to flag.
+    app.project_languages = Some(vec![LanguageId::Markdown]);
+    app.project_setup_offered = false;
+    app.overlay = Overlay::None;
+
+    assert!(!app.maybe_offer_project_setup());
+    assert!(app.project_setup_offered, "the offer must be recorded once");
+    assert!(app.overlay.is_none());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn project_setup_reports_when_nothing_is_detected() {
+    let dir = temp_project("setup-empty");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+    app.tools = Some(ToolRegistry::discover_cached());
+    app.project_languages = Some(Vec::new());
+    app.overlay = Overlay::None;
+
+    app.open_project_setup();
+    assert!(app.overlay.is_none());
+    assert!(
+        app.status_message()
+            .is_some_and(|message| message.contains("No project languages"))
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn starting_setup_with_nothing_missing_reports_already_set_up() {
+    let dir = temp_project("setup-nothing");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+    app.tools = Some(ToolRegistry::discover_cached());
+    app.project_languages = Some(vec![LanguageId::Markdown]);
+
+    app.start_project_setup();
+    assert!(app.project_setup.is_none());
+    assert!(
+        app.status_message()
+            .is_some_and(|message| message.contains("already set up"))
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn finishing_setup_reports_installed_and_failed_tools() {
+    let dir = temp_project("setup-finish");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+
+    app.project_setup = Some(ProjectSetupRun {
+        plan: ready_plan(LanguageId::Markdown),
+        queue: std::collections::VecDeque::new(),
+        installed: vec![Tool::LuaLs],
+        failed: Vec::new(),
+    });
+    app.advance_project_setup();
+    assert!(app.project_setup.is_none(), "the run is finished");
+    assert!(
+        app.status_message()
+            .is_some_and(|message| message.contains("1 installed")),
+        "got {:?}",
+        app.status_message()
+    );
+
+    // A failed tool is reported honestly rather than as success.
+    app.project_setup = Some(ProjectSetupRun {
+        plan: ready_plan(LanguageId::Markdown),
+        queue: std::collections::VecDeque::new(),
+        installed: Vec::new(),
+        failed: vec![(Tool::LuaLs, "download failed".to_string())],
+    });
+    app.advance_project_setup();
+    assert!(
+        app.status_message()
+            .is_some_and(|message| message.contains("1 failed")),
+        "got {:?}",
+        app.status_message()
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_single_language_offer_is_suppressed_for_project_languages() {
+    let dir = temp_project("setup-suppress");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+    app.tools = Some(ToolRegistry::discover_cached());
+    app.project_languages = Some(vec![LanguageId::Rust]);
+    app.overlay = Overlay::None;
+    app.lsp.clear();
+
+    // The project flow owns Rust, so the per-file offer stays quiet.
+    assert!(!app.maybe_offer_tool_setup());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_setup_overlay_lists_languages_and_offers_set_up() {
+    let dir = temp_project("setup-overlay");
+    let file = dir.join("src/main.rs");
+    let mut app = app_with_file(&file);
+
+    app.show_project_setup(ProjectSetupPlan {
+        languages: vec![
+            LanguageSetup {
+                language: LanguageId::Rust,
+                state: SetupState::Ready,
+                detail: "rust-analyzer is available".to_string(),
+            },
+            LanguageSetup {
+                language: LanguageId::Go,
+                state: SetupState::NeedsInstall(Tool::Gopls),
+                detail: "Koda installs gopls".to_string(),
+            },
+            LanguageSetup {
+                language: LanguageId::Php,
+                state: SetupState::Prerequisite("php".to_string()),
+                detail: "phpactor needs a PHP runtime".to_string(),
+            },
+        ],
+    });
+
+    let picker = match &app.overlay {
+        Overlay::Picker(picker) => picker,
+        _ => panic!("expected a setup picker"),
+    };
+    assert_eq!(picker.title, "Project setup");
+    let mut labels = Vec::new();
+    let mut has_set_up = false;
+    for index in 0..picker.filtered.len() {
+        if let Some(item) = picker.item(index) {
+            labels.push(item.label.clone());
+            if matches!(item.action, PickerAction::ProjectSetup) {
+                has_set_up = true;
+            }
+        }
+    }
+    assert!(
+        labels.iter().any(|label| label.contains("Rust")),
+        "{labels:?}"
+    );
+    assert!(
+        labels.iter().any(|label| label.contains("Go · install")),
+        "{labels:?}"
+    );
+    assert!(
+        labels.iter().any(|label| label.contains("PHP · needs php")),
+        "{labels:?}"
+    );
+    assert!(has_set_up, "a missing tool must offer Set up project");
+    fs::remove_dir_all(&dir).ok();
+}

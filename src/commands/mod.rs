@@ -69,6 +69,7 @@ pub mod ids {
     pub const PROJECT_SEARCH: &str = "project.search";
     pub const OPEN_PROJECT: &str = "project.openDir";
     pub const NEW_PROJECT: &str = "project.new";
+    pub const SETUP_PROJECT: &str = "project.setup";
     pub const CHANGED_FILES: &str = "git.changedFiles";
     pub const GIT_COMMIT: &str = "git.commit";
     pub const GIT_TOGGLE_STAGE: &str = "git.toggleStage";
@@ -380,6 +381,8 @@ impl CommandRegistry {
                 .describes("Open a folder as a project"),
             Command::new(NEW_PROJECT, "Create New Project…", "Project", None)
                 .describes("Scaffold a new Rust, Go, Python or Shell project"),
+            Command::new(SETUP_PROJECT, "Set Up Project…", "Project", None)
+                .describes("Install the language tooling this project needs"),
             Command::new(CHANGED_FILES, "Changed Files…", "Git", Some("Ctrl+Shift+G"))
                 .describes("List the files changed in the working tree"),
             Command::new(GIT_COMMIT, "Commit Changes…", "Git", None)

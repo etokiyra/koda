@@ -216,18 +216,33 @@ impl App {
                 }
                 true
             }
-            BackgroundEvent::ToolInstalled { tool: _, result } => {
+            BackgroundEvent::ProjectLanguages(languages) => {
+                self.project_languages = Some(languages);
+                true
+            }
+            BackgroundEvent::ToolInstalled { tool, result } => {
                 self.pending_install = None;
-                match result {
+                let in_setup = self.project_setup.is_some();
+                match &result {
                     Ok(message) => {
                         self.set_status(message.clone());
-                        self.push_toast(ToastKind::Success, message);
+                        self.push_toast(ToastKind::Success, message.clone());
                     }
                     Err(message) => {
                         let text = format!("Install failed — {message}");
                         self.set_error(text.clone());
                         self.push_toast(ToastKind::Error, text);
                     }
+                }
+                if let Some(run) = self.project_setup.as_mut() {
+                    match result {
+                        Ok(_) => run.installed.push(tool),
+                        Err(message) => run.failed.push((tool, message)),
+                    }
+                }
+                // Continue an in-progress project setup with the next tool.
+                if in_setup {
+                    self.advance_project_setup();
                 }
                 true
             }

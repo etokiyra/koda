@@ -40,6 +40,8 @@ enum Request {
     },
     /// Scan a project for named definitions.
     WorkspaceSymbols { root: PathBuf, revision: u64 },
+    /// Detect the languages present in a project, for project setup.
+    ProjectLanguages { root: PathBuf },
     /// Search a project for a text query.
     SearchProject {
         root: PathBuf,
@@ -89,6 +91,8 @@ pub enum Event {
         revision: u64,
         symbols: Vec<WorkspaceSymbol>,
     },
+    /// The languages detected in a project, for project setup.
+    ProjectLanguages(Vec<LanguageId>),
     /// The result of a project-wide text search.
     SearchResults {
         revision: u64,
@@ -134,6 +138,10 @@ const WORKER_THREADS: usize = 3;
 /// requests still block briefly, but a flood of automatic work cannot grow the
 /// queue without bound.
 const REQUEST_QUEUE: usize = 128;
+
+/// The most files a project-language scan reads. The walk is `.gitignore`-aware
+/// and skips generated directories; the cap keeps a huge tree predictable.
+const PROJECT_SCAN_LIMIT: usize = 4000;
 
 impl Background {
     /// Spawn the workers, sharing the language service with the UI thread.
@@ -216,6 +224,11 @@ impl Background {
         let _ = self
             .requests
             .send(Request::WorkspaceSymbols { root, revision });
+    }
+
+    /// Ask for the languages present in a project, for project setup.
+    pub fn detect_project_languages(&self, root: PathBuf) {
+        let _ = self.requests.send(Request::ProjectLanguages { root });
     }
 
     /// Ask for a project-wide text search.
@@ -312,6 +325,10 @@ fn handle_request(request: Request, language: &LanguageService, events: &Sender<
         Request::WorkspaceSymbols { root, revision } => {
             let symbols = language.workspace_symbols(&root, 3000);
             let _ = events.send(Event::WorkspaceSymbols { revision, symbols });
+        }
+        Request::ProjectLanguages { root } => {
+            let languages = language.detect_project_languages(&root, PROJECT_SCAN_LIMIT);
+            let _ = events.send(Event::ProjectLanguages(languages));
         }
         Request::SearchProject {
             root,

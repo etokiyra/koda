@@ -26,6 +26,8 @@ pub enum PickerAction {
     Info(String),
     /// Install an external tool through its trusted package manager.
     InstallTool(crate::language::tools::Tool),
+    /// Provision every missing tool the current project needs.
+    ProjectSetup,
     /// Open the update/remove choices for a Koda-managed tool.
     ToolActions(crate::language::tools::Tool),
     /// Reinstall a Koda-managed tool at Koda's pinned version.

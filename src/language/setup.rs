@@ -188,6 +188,19 @@ pub fn plan_language(language: LanguageId, state: &dyn ToolState) -> LanguageSet
     }
 }
 
+/// An in-progress "Set up this project" run.
+#[derive(Clone, Debug)]
+pub struct ProjectSetupRun {
+    /// The plan that produced this run.
+    pub plan: ProjectSetupPlan,
+    /// Managed tools still to install, in order.
+    pub queue: std::collections::VecDeque<Tool>,
+    /// Tools that installed successfully.
+    pub installed: Vec<Tool>,
+    /// Tools that failed, with the reason.
+    pub failed: Vec<(Tool, String)>,
+}
+
 /// Counts and a one-line headline for a completed setup run.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SetupSummary {

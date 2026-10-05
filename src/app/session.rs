@@ -64,6 +64,10 @@ impl App {
         self.lsp.clear();
         self.welcome_target = None;
         self.welcome_selected = 0;
+        self.project_languages = None;
+        self.project_scan_started = false;
+        self.project_setup_offered = false;
+        self.project_setup = None;
     }
 
     /// Snapshot the session worth restoring for the active project.
