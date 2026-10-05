@@ -2121,29 +2121,40 @@ fn dart_sdk(dest: &Path) -> Result<(), String> {
 /// Fetch a small text/JSON document over HTTPS with `curl`.
 ///
 /// Used to read checksums and API responses; it never writes to disk, and the
-/// body is bounded by the caller through `--max-filesize`.
+/// body is bounded. No `Accept` header is sent, so it works with any HTTPS
+/// JSON/txt endpoint; use [`curl_text_github`] for the GitHub API.
 fn curl_text(url: &str) -> Result<String, String> {
-    let output = install_command("curl")
-        .args([
-            "--proto",
-            "=https",
-            "--tlsv1.2",
-            "-sS",
-            "-L",
-            "--fail",
-            "--compressed",
-            "--connect-timeout",
-            "30",
-            "--max-time",
-            "120",
-            "-H",
-            "Accept: application/vnd.github+json",
-            "--max-filesize",
-            // The .NET release metadata is ~1 MB and grows with each patch, so
-            // leave headroom while keeping the body bounded.
-            "4194304",
-        ])
-        .arg(url)
+    curl_text_with_accept(url, None)
+}
+
+/// Fetch a GitHub API document with the vendor media type GitHub expects.
+fn curl_text_github(url: &str) -> Result<String, String> {
+    curl_text_with_accept(url, Some("application/vnd.github+json"))
+}
+
+/// Fetch a small document with `curl`, optionally sending an `Accept` header.
+fn curl_text_with_accept(url: &str, accept: Option<&str>) -> Result<String, String> {
+    let mut command = install_command("curl");
+    command.args([
+        "--proto",
+        "=https",
+        "--tlsv1.2",
+        "-sS",
+        "-L",
+        "--fail",
+        "--compressed",
+        "--connect-timeout",
+        "30",
+        "--max-time",
+        "120",
+    ]);
+    if let Some(accept) = accept {
+        command.arg("-H").arg(format!("Accept: {accept}"));
+    }
+    // The .NET release metadata is ~1 MB and grows with each patch, so leave
+    // headroom while keeping the body bounded.
+    command.arg("--max-filesize").arg("4194304").arg(url);
+    let output = command
         .output()
         .map_err(|err| format!("could not run curl: {err}"))?;
     if !output.status.success() {
@@ -2264,7 +2275,7 @@ fn github_asset_sha256(body: &str, asset: &str) -> Option<String> {
 /// Download a pinned GitHub release asset, verifying the digest the API reports.
 fn github_release(repo: &str, tag: &str, asset: &str, dest: &Path) -> Result<(), String> {
     let api = format!("https://api.github.com/repos/{repo}/releases/tags/{tag}");
-    let body = curl_text(&api)
+    let body = curl_text_github(&api)
         .map_err(|err| format!("could not query the {repo} release metadata: {err}"))?;
     // Fail closed: an unverified asset is never run.
     let checksum = github_asset_sha256(&body, asset)
