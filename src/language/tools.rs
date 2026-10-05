@@ -43,6 +43,18 @@ const NODE_VERSION: &str = "24.21.0";
 /// `sh.rustup.rs` script.
 const RUSTUP_VERSION: &str = "1.29.1";
 
+/// The exact official Go toolchain release Koda provisions. `go.dev/dl` publishes
+/// the SHA-256 of every release's archives, so the version is pinned and the
+/// download is still verified against upstream metadata.
+const GO_VERSION: &str = "go1.27.1";
+
+/// The exact Eclipse Adoptium JDK releases for jdtls (25) and Kotlin (21).
+///
+/// The Adoptium API publishes the checksum in the same response as the download
+/// link; pinning `release_name` keeps the version from drifting.
+const ADOPTIUM_JDK25: &str = "jdk-25.0.4.1+1";
+const ADOPTIUM_JDK21: &str = "jdk-21.0.12.1+1";
+
 /// The `lua-language-server` release Koda provisions. It ships a self-contained
 /// archive per platform (no runtime required), so the version is pinned for a
 /// stable download URL.
@@ -818,9 +830,13 @@ pub enum InstallStep {
     /// whose SHA-256 the same service publishes in `builds.txt`. The archive
     /// still needs an [`InstallStep::Extract`].
     BobBuild { package: BobPackage, dest: PathBuf },
-    /// Download and verify an Eclipse Adoptium JDK, whose checksum Adoptium
-    /// publishes in the same JSON document that carries the link.
-    AdoptiumJdk { feature: u32, dest: PathBuf },
+    /// Download and verify an Eclipse Adoptium JDK release, whose checksum
+    /// Adoptium publishes in the same JSON document that carries the link. The
+    /// `release` pins the exact version.
+    AdoptiumJdk {
+        release: &'static str,
+        dest: PathBuf,
+    },
     /// Download and verify the pinned .NET SDK for OmniSharp, whose SHA-512
     /// Microsoft publishes in the channel's `releases.json`. The archive still
     /// needs an [`InstallStep::Extract`].
@@ -1505,7 +1521,7 @@ fn run_step(step: &InstallStep) -> Result<(), String> {
         InstallStep::Run(command) => run_command(command),
         InstallStep::Download { url, dest, sha256 } => download(url, dest, sha256.as_deref()),
         InstallStep::BobBuild { package, dest } => bob_build(*package, dest),
-        InstallStep::AdoptiumJdk { feature, dest } => adoptium_jdk(*feature, dest),
+        InstallStep::AdoptiumJdk { release, dest } => adoptium_jdk(release, dest),
         InstallStep::DotnetSdk { dest } => dotnet_sdk(dest),
         InstallStep::NodeRuntime { dest } => node_runtime(dest),
         InstallStep::DartSdk { dest } => dart_sdk(dest),
@@ -1759,43 +1775,37 @@ fn apply_proxy(command: &mut Command) {
     }
 }
 
-/// Fetch and verify the latest Eclipse Adoptium JDK for `feature`.
+/// Fetch and verify a pinned Eclipse Adoptium JDK release.
 ///
-/// Adoptium's API reports the download link and its SHA-256 together, so the
-/// archive is verified even though the version moves.
-fn adoptium_jdk(feature: u32, dest: &Path) -> Result<(), String> {
+/// Adoptium's API reports the download link and its SHA-256 together, and the
+/// GA list carries the patch history, so `release` pins the exact version while
+/// the checksum still comes from upstream. A release Adoptium no longer
+/// publishes fails closed rather than moving to a different version.
+fn adoptium_jdk(release: &str, dest: &Path) -> Result<(), String> {
     let (os, arch) = adoptium_platform().ok_or_else(|| {
-        "no managed JDK is published for this platform; install Java 25 manually".to_string()
+        "no managed JDK is published for this platform; install Java manually".to_string()
     })?;
+    let feature = release
+        .strip_prefix("jdk-")
+        .and_then(|rest| rest.split('.').next())
+        .ok_or_else(|| format!("misconfigured Adoptium release {release}"))?;
     let api = format!(
-        "https://api.adoptium.net/v3/assets/latest/{feature}/hotspot?os={os}&architecture={arch}&image_type=jdk"
+        "https://api.adoptium.net/v3/assets/feature_releases/{feature}/ga?os={os}&architecture={arch}&image_type=jdk&page_size=50&sort_order=DESC"
     );
-    let output = install_command("curl")
-        .args([
-            "--proto",
-            "=https",
-            "--tlsv1.2",
-            "-sS",
-            "-L",
-            "--fail",
-            "--max-time",
-            "60",
-        ])
-        .arg(&api)
-        .output()
-        .map_err(|err| format!("could not query Adoptium: {err}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "could not query Adoptium: {}",
-            first_stderr_line(&output.stderr)
-        ));
-    }
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|err| format!("bad Adoptium response: {err}"))?;
-    let package = value
-        .get(0)
-        .and_then(|entry| entry.pointer("/binary/package"))
-        .ok_or_else(|| "Adoptium returned no JDK package".to_string())?;
+    let body = curl_text(&api).map_err(|err| format!("could not query Adoptium: {err}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&body).map_err(|err| format!("bad Adoptium response: {err}"))?;
+    let entry = value
+        .as_array()
+        .and_then(|releases| {
+            releases.iter().find(|entry| {
+                entry.get("release_name").and_then(|name| name.as_str()) == Some(release)
+            })
+        })
+        .ok_or_else(|| format!("Adoptium has no {release} release for {os}/{arch}"))?;
+    let package = entry
+        .pointer("/binaries/0/package")
+        .ok_or_else(|| format!("Adoptium {release} had no JDK package for {os}/{arch}"))?;
     let link = package
         .get("link")
         .and_then(|link| link.as_str())
@@ -2280,24 +2290,27 @@ fn go_platform() -> Option<(&'static str, &'static str)> {
     })
 }
 
-/// Download the latest stable official Go toolchain.
+/// Download the pinned official Go toolchain.
 ///
-/// `go.dev/dl/?mode=json` reports the current stable version and the SHA-256 of
-/// every archive together, so the download is verified even though the version
-/// moves. The archive root is `go/`, so a later [`InstallStep::Extract`] with
-/// `strip: 1` yields `go/bin/go`.
+/// `go.dev/dl/?mode=json&include=all` reports every release and the SHA-256 of
+/// each archive, so Koda selects `GO_VERSION` and verifies against upstream
+/// metadata instead of tracking the latest stable. The archive root is `go/`, so
+/// a later [`InstallStep::Extract`] with `strip: 1` yields `go/bin/go`.
 fn go_toolchain(dest: &Path) -> Result<(), String> {
     let (os, arch) = go_platform()
         .ok_or_else(|| "no official Go build is published for this platform".to_string())?;
-    let body = curl_text("https://go.dev/dl/?mode=json")
+    let body = curl_text("https://go.dev/dl/?mode=json&include=all")
         .map_err(|err| format!("could not query the Go release metadata: {err}"))?;
     let releases: serde_json::Value = serde_json::from_str(&body)
         .map_err(|err| format!("could not parse the Go release metadata: {err}"))?;
-    let latest = releases
+    let release = releases
         .as_array()
-        .and_then(|list| list.first())
-        .ok_or_else(|| "go.dev published no releases".to_string())?;
-    let files = latest
+        .and_then(|list| {
+            list.iter()
+                .find(|release| release.get("version").and_then(|v| v.as_str()) == Some(GO_VERSION))
+        })
+        .ok_or_else(|| format!("go.dev does not publish {GO_VERSION}"))?;
+    let files = release
         .get("files")
         .and_then(|files| files.as_array())
         .ok_or_else(|| "the Go release has no files".to_string())?;
@@ -3824,7 +3837,7 @@ fn jdtls_attempts() -> Vec<InstallAttempt> {
         "a Koda-managed JDK and Eclipse JDT",
         vec![
             InstallStep::AdoptiumJdk {
-                feature: 25,
+                release: ADOPTIUM_JDK25,
                 dest: jdk_archive.clone(),
             },
             InstallStep::Extract {
@@ -3914,7 +3927,7 @@ fn kotlin_ls_attempts() -> Vec<InstallAttempt> {
         "a managed JDK 21 and kotlin-language-server",
         vec![
             InstallStep::AdoptiumJdk {
-                feature: 21,
+                release: ADOPTIUM_JDK21,
                 dest: jdk_archive.clone(),
             },
             InstallStep::Extract {
@@ -4290,11 +4303,13 @@ mod tests {
         if tools_dir().is_some() {
             let attempts = Tool::Jdtls.install_attempts();
             let steps = &attempts.first().expect("a jdtls plan").steps;
-            assert!(
-                steps
-                    .iter()
-                    .any(|step| matches!(step, InstallStep::AdoptiumJdk { feature: 25, .. }))
-            );
+            assert!(steps.iter().any(|step| matches!(
+                step,
+                InstallStep::AdoptiumJdk {
+                    release: ADOPTIUM_JDK25,
+                    ..
+                }
+            )));
             assert!(
                 steps
                     .iter()
@@ -4937,9 +4952,13 @@ mod tests {
         let attempts = Tool::KotlinLs.install_attempts();
         let steps = &attempts.first().expect("a Kotlin plan").steps;
         assert!(
-            steps
-                .iter()
-                .any(|step| matches!(step, InstallStep::AdoptiumJdk { feature: 21, .. })),
+            steps.iter().any(|step| matches!(
+                step,
+                InstallStep::AdoptiumJdk {
+                    release: ADOPTIUM_JDK21,
+                    ..
+                }
+            )),
             "Kotlin must install a JDK 21: {steps:?}"
         );
         let jdtls = Tool::Jdtls.install_attempts();
@@ -4949,7 +4968,13 @@ mod tests {
                 .expect("a jdtls plan")
                 .steps
                 .iter()
-                .any(|step| matches!(step, InstallStep::AdoptiumJdk { feature: 25, .. })),
+                .any(|step| matches!(
+                    step,
+                    InstallStep::AdoptiumJdk {
+                        release: ADOPTIUM_JDK25,
+                        ..
+                    }
+                )),
             "jdtls must keep its JDK 25"
         );
         // They live in separate directories and the launcher points Kotlin at
