@@ -1707,7 +1707,11 @@ fn run_command(command: &InstallCommand) -> Result<(), String> {
         Some(status) if status.success() => Ok(()),
         // Package managers print the actual error last (the syntax error, the
         // missing module), so the tail line is the useful one.
-        Some(_) => Err(last_stderr_line(&captured.stderr)),
+        Some(status) => Err(format!(
+            "{} exited with {status}: {}",
+            command.program,
+            last_stderr_line(&captured.stderr)
+        )),
     }
 }
 
@@ -1852,11 +1856,33 @@ fn curl_download(url: &str, dest: &Path) -> Result<(), String> {
         .map_err(|err| format!("could not run curl: {err}"))?;
     if !output.status.success() {
         return Err(format!(
-            "download failed: {}",
-            first_stderr_line(&output.stderr)
+            "download failed: {}{}",
+            first_stderr_line(&output.stderr),
+            download_failure_hint(&String::from_utf8_lossy(&output.stderr))
         ));
     }
     Ok(())
+}
+
+/// A short, actionable hint appended to a failed download, based on curl output.
+///
+/// The raw cause is kept for the curious; this adds what the user should try.
+fn download_failure_hint(stderr: &str) -> &'static str {
+    let lower = stderr.to_ascii_lowercase();
+    if lower.contains("could not resolve host") || lower.contains("name or service not known") {
+        " — no network access to the download host; check your connection or DNS"
+    } else if lower.contains("proxy")
+        || lower.contains("could not connect")
+        || lower.contains("connection refused")
+    {
+        " — the host or proxy refused the connection; check HTTPS_PROXY"
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        " — the connection timed out; retry, or check HTTPS_PROXY"
+    } else if lower.contains("ssl") || lower.contains("certificate") || lower.contains("tls") {
+        " — the TLS connection failed; a proxy or firewall may be intercepting it"
+    } else {
+        " — retry the install; if it keeps failing, check your network and HTTPS_PROXY"
+    }
 }
 
 /// Verify `dest` against `expected`, removing the file on any mismatch.
@@ -1871,7 +1897,7 @@ fn verify_hash(dest: &Path, expected: &str, kind: HashKind) -> Result<(), String
     if !actual.eq_ignore_ascii_case(expected) {
         let _ = std::fs::remove_file(dest);
         return Err(format!(
-            "checksum mismatch for {} (expected {expected}, got {actual})",
+            "checksum mismatch for {} (expected {expected}, got {actual}); the download was discarded and not installed",
             dest.display()
         ));
     }
@@ -5900,6 +5926,15 @@ mod tests {
                 assert!(!can_install(tool), "{tool:?} has no runnable strategy");
             }
         }
+    }
+
+    #[test]
+    fn download_failure_hints_are_actionable() {
+        assert!(download_failure_hint("could not resolve host: example.com").contains("DNS"));
+        assert!(download_failure_hint("Failed to connect to proxy").contains("HTTPS_PROXY"));
+        assert!(download_failure_hint("Operation timed out after 30s").contains("timed out"));
+        assert!(download_failure_hint("SSL certificate problem").contains("TLS"));
+        assert!(download_failure_hint("the requested URL returned error: 404").contains("retry"));
     }
 
     #[test]
