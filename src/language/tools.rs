@@ -36,6 +36,13 @@ const PROBE_ALIVE_WINDOW: Duration = Duration::from_millis(600);
 /// language servers into Koda's managed prefix.
 const NODE_VERSION: &str = "24.21.0";
 
+/// The `rustup-init` release Koda downloads when the user has no `rustup`.
+///
+/// rustup publishes a per-target binary and its SHA-256 under a versioned
+/// archive URL, so the bootstrap is a verified download rather than the moving
+/// `sh.rustup.rs` script.
+const RUSTUP_VERSION: &str = "1.29.1";
+
 /// The `lua-language-server` release Koda provisions. It ships a self-contained
 /// archive per platform (no runtime required), so the version is pinned for a
 /// stable download URL.
@@ -810,6 +817,9 @@ pub enum InstallStep {
     /// publishes beside the archive. The archive still needs an
     /// [`InstallStep::Extract`].
     DartSdk { dest: PathBuf },
+    /// Download, verify and run the pinned `rustup-init` binary, bootstrapping
+    /// the Rust toolchain without the unverified `sh.rustup.rs` script.
+    RustupInit { dest: PathBuf },
     /// Download `url` and verify it against a detached GPG signature using the
     /// public keys at `keys_url`. Used for toolchains whose only published
     /// integrity data is a signature (the Swift toolchain). Fails closed: if
@@ -944,56 +954,69 @@ fn home_dir() -> Option<PathBuf> {
     Some(PathBuf::from(std::env::var_os("HOME")?))
 }
 
-/// The `curl` command that fetches the official `rustup` installer script.
-fn rustup_init_command() -> InstallCommand {
-    let script = tools_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("rustup-init.sh");
-    InstallCommand::with_args(
-        "curl",
-        vec![
-            "--proto".into(),
-            "=https".into(),
-            "--tlsv1.2".into(),
-            "-sSf".into(),
-            "--connect-timeout".into(),
-            "30".into(),
-            "--max-time".into(),
-            "120".into(),
-            "--max-filesize".into(),
-            (1024 * 1024).to_string(),
-            "https://sh.rustup.rs".into(),
-            "-o".into(),
-            script.to_string_lossy().into_owned(),
-        ],
-    )
+/// The `rustup-init` build target for this platform, or `None` where rustup
+/// publishes no build.
+fn rustup_target() -> Option<&'static str> {
+    let musl = libc_is_musl();
+    Some(match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") if musl => "x86_64-unknown-linux-musl",
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("linux", "aarch64") if musl => "aarch64-unknown-linux-musl",
+        ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        _ => return None,
+    })
 }
 
-/// The command that runs the fetched `rustup` installer without touching shell
-/// startup files.
-fn rustup_run_command() -> InstallCommand {
-    let script = tools_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("rustup-init.sh");
-    InstallCommand::with_args(
-        "sh",
+/// The first SHA-256 in a checksum body (`<hex> *./name` or `<hex>  name`).
+fn first_sha256(body: &str) -> Option<String> {
+    body.split_whitespace()
+        .find(|token| is_sha256_hex(token))
+        .map(str::to_string)
+}
+
+/// Download, verify and run the pinned `rustup-init` binary.
+///
+/// The old bootstrap ran the moving `sh.rustup.rs` script with no integrity
+/// check. rustup publishes a per-target `rustup-init` binary and its SHA-256
+/// under a versioned archive URL, so Koda downloads the exact binary, verifies
+/// it, and runs it non-interactively; rustup then verifies the toolchain it
+/// installs through its own signed manifests.
+fn rustup_init(dest: &Path) -> Result<(), String> {
+    let target =
+        rustup_target().ok_or_else(|| "rustup publishes no build for this platform".to_string())?;
+    let base = format!("https://static.rust-lang.org/rustup/archive/{RUSTUP_VERSION}/{target}");
+    let sums = curl_text(&format!("{base}/rustup-init.sha256"))
+        .map_err(|err| format!("could not fetch the rustup checksum: {err}"))?;
+    let checksum = first_sha256(&sums)
+        .ok_or_else(|| "rustup published no checksum for rustup-init".to_string())?;
+    download(&format!("{base}/rustup-init"), dest, Some(&checksum))?;
+    make_executable(dest)?;
+    run_command(&InstallCommand::with_args(
+        dest.to_string_lossy().into_owned(),
         vec![
-            script.to_string_lossy().into_owned(),
             "-y".into(),
             "--no-modify-path".into(),
+            "--profile".into(),
+            "minimal".into(),
         ],
-    )
+    ))
 }
 
-/// Bootstrap the Rust toolchain with the official `rustup` installer, then run
-/// `final_command`. Skipped on Windows, where the installer is a binary.
+/// Bootstrap the Rust toolchain with the verified `rustup-init` binary, then run
+/// `final_command`. Skipped on Windows, where Koda has no supported path.
 fn rustup_bootstrap_with(final_command: InstallCommand) -> Option<InstallAttempt> {
-    if cfg!(windows) || home_dir().is_none() {
+    if cfg!(windows) || home_dir().is_none() || rustup_target().is_none() {
         return None;
     }
-    Some(InstallAttempt::sequence(
+    let dest = downloads_dir()?.join("rustup-init");
+    Some(InstallAttempt::managed(
         "the official rustup installer",
-        vec![rustup_init_command(), rustup_run_command(), final_command],
+        vec![
+            InstallStep::RustupInit { dest },
+            InstallStep::Run(final_command),
+        ],
     ))
 }
 
@@ -1473,6 +1496,7 @@ fn run_step(step: &InstallStep) -> Result<(), String> {
         InstallStep::DotnetSdk { dest } => dotnet_sdk(dest),
         InstallStep::NodeRuntime { dest } => node_runtime(dest),
         InstallStep::DartSdk { dest } => dart_sdk(dest),
+        InstallStep::RustupInit { dest } => rustup_init(dest),
         InstallStep::DownloadGpg {
             url,
             dest,
@@ -3000,6 +3024,7 @@ fn step_available(step: &InstallStep) -> bool {
         | InstallStep::NodeRuntime { .. }
         | InstallStep::DartSdk { .. }
         | InstallStep::GithubRelease { .. } => locate("curl").is_some(),
+        InstallStep::RustupInit { .. } => locate("curl").is_some() && rustup_target().is_some(),
         // The official Go toolchain is resolved from a published JSON document
         // at install time; only `curl` and a known platform are needed here.
         InstallStep::GoToolchain { .. } => locate("curl").is_some() && go_platform().is_some(),
