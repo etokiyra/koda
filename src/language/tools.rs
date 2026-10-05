@@ -2378,7 +2378,26 @@ fn curl_text_github(url: &str) -> Result<String, String> {
 }
 
 /// Fetch a small document with `curl`, optionally sending an `Accept` header.
+///
+/// A successful fetch refreshes a URL-keyed cache of the body; if the network is
+/// unavailable the cached body is used instead. The digest inside cached
+/// metadata is still applied to the artifact, so a cached checksum can only make
+/// an offline install possible, never skip verification.
 fn curl_text_with_accept(url: &str, accept: Option<&str>) -> Result<String, String> {
+    match curl_text_now(url, accept) {
+        Ok(body) => {
+            let _ = remember_metadata(url, &body);
+            Ok(body)
+        }
+        Err(error) => match cached_metadata(url) {
+            Some(body) => Ok(body),
+            None => Err(error),
+        },
+    }
+}
+
+/// Fetch a small document with `curl` and no fallback.
+fn curl_text_now(url: &str, accept: Option<&str>) -> Result<String, String> {
     let mut command = install_command("curl");
     command.args([
         "--proto",
@@ -2406,6 +2425,45 @@ fn curl_text_with_accept(url: &str, accept: Option<&str>) -> Result<String, Stri
         return Err(first_stderr_line(&output.stderr));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// The cache path for a metadata document, keyed by its URL.
+fn metadata_cache_path(url: &str) -> Option<PathBuf> {
+    Some(
+        cache_dir()?
+            .join("metadata")
+            .join(format!("{:016x}", fnv1a(url))),
+    )
+}
+
+/// Remember a fetched metadata body for offline fallback, atomically.
+fn remember_metadata(url: &str, body: &str) -> Result<(), String> {
+    let Some(path) = metadata_cache_path(url) else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("could not create {}: {err}", parent.display()))?;
+    }
+    let tmp = temp_sibling(&path)?;
+    std::fs::write(&tmp, body).map_err(|err| format!("could not cache metadata: {err}"))?;
+    atomic_replace(&tmp, &path)
+}
+
+/// A previously fetched metadata body for `url`, if one was cached.
+fn cached_metadata(url: &str) -> Option<String> {
+    let path = metadata_cache_path(url)?;
+    std::fs::read_to_string(path).ok()
+}
+
+/// A small, stable, dependency-free hash used to name metadata cache entries.
+fn fnv1a(value: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 /// Download a file and verify it against a detached GPG signature.
@@ -6032,6 +6090,17 @@ mod tests {
         assert!(download_failure_hint("Operation timed out after 30s").contains("timed out"));
         assert!(download_failure_hint("SSL certificate problem").contains("TLS"));
         assert!(download_failure_hint("the requested URL returned error: 404").contains("retry"));
+    }
+
+    #[test]
+    fn metadata_cache_round_trips_and_is_url_keyed() {
+        let url = "https://example.invalid/koda-metadata-test";
+        remember_metadata(url, "{\"body\":1}").unwrap();
+        assert_eq!(cached_metadata(url).as_deref(), Some("{\"body\":1}"));
+        assert_eq!(cached_metadata("https://example.invalid/other"), None);
+        if let Some(path) = metadata_cache_path(url) {
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     #[test]
