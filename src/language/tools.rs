@@ -1685,6 +1685,14 @@ fn curl_download(url: &str, dest: &Path) -> Result<(), String> {
         std::fs::create_dir_all(parent)
             .map_err(|err| format!("could not create {}: {err}", parent.display()))?;
     }
+    // Tests exercise the real install path (a `Download` step) without the
+    // network by copying a local payload, so verification is still the same
+    // code the production path runs. Never available in a production build.
+    #[cfg(test)]
+    if let Some(source) = url.strip_prefix("file://") {
+        std::fs::copy(source, dest).map_err(|err| format!("could not copy {source}: {err}"))?;
+        return Ok(());
+    }
     let mut command = install_command("curl");
     command.args([
         "--proto",
@@ -5243,6 +5251,86 @@ mod tests {
         }
         extract(&dir.join("pkg.tar.gz"), &dir.join("out"), 1).expect("a safe archive extracts");
         assert!(dir.join("out/bin/tool").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_checksum_mismatch_is_rejected_before_install() {
+        let dir = std::env::temp_dir().join(format!("koda-badsum-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("payload.tar.gz");
+        std::fs::write(&source, b"the real payload").unwrap();
+        let dest = dir.join("download.tar.gz");
+        // A valid-looking but wrong digest must abort the real step.
+        let step = InstallStep::Download {
+            url: format!("file://{}", source.display()),
+            dest: dest.clone(),
+            sha256: "00".repeat(32),
+        };
+        let error = run_step(&step).expect_err("a wrong checksum must fail");
+        assert!(error.contains("checksum mismatch"), "{error}");
+        assert!(
+            !dest.exists(),
+            "a mismatched download must not be left behind"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_truncated_download_is_rejected_before_install() {
+        let dir = std::env::temp_dir().join(format!("koda-truncated-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let full = b"a complete archive payload with enough bytes to truncate cleanly";
+        let full_path = dir.join("full");
+        std::fs::write(&full_path, full).unwrap();
+        // The expected digest is the full file's; only half the bytes arrive.
+        let Ok(expected) = file_sha256(&full_path) else {
+            let _ = std::fs::remove_dir_all(&dir);
+            return; // No hashing tool on this host.
+        };
+        let source = dir.join("truncated");
+        std::fs::write(&source, &full[..full.len() / 2]).unwrap();
+        let dest = dir.join("download");
+        let step = InstallStep::Download {
+            url: format!("file://{}", source.display()),
+            dest: dest.clone(),
+            sha256: expected,
+        };
+        let error = run_step(&step).expect_err("a truncated download must fail");
+        assert!(error.contains("checksum mismatch"), "{error}");
+        assert!(
+            !dest.exists(),
+            "a truncated download must not be left behind"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_truncated_archive_fails_extraction() {
+        if locate("tar").is_none() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("koda-shorttar-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("pkg/bin")).unwrap();
+        std::fs::write(dir.join("pkg/bin/tool"), "#!/bin/sh\n").unwrap();
+        let built = std::process::Command::new("tar")
+            .current_dir(&dir)
+            .args(["-czf", "pkg.tar.gz", "pkg"])
+            .status();
+        if !built.map(|status| status.success()).unwrap_or(false) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let archive = std::fs::read(dir.join("pkg.tar.gz")).unwrap();
+        std::fs::write(dir.join("short.tar.gz"), &archive[..archive.len() / 2]).unwrap();
+        let result = extract(&dir.join("short.tar.gz"), &dir.join("out"), 1);
+        assert!(
+            result.is_err(),
+            "a truncated archive must not extract successfully"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
