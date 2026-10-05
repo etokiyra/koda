@@ -6093,6 +6093,43 @@ mod tests {
     }
 
     #[test]
+    fn a_partial_plan_keeps_earlier_work_and_reports_the_failing_step() {
+        let dir = cache_test_dir("partial-plan");
+        let source = dir.join("source");
+        std::fs::write(&source, b"good payload for the partial plan test").unwrap();
+        let sha = file_sha256(&source).unwrap();
+
+        // Step A of a plan succeeds.
+        let a = dir.join("a");
+        run_step(&InstallStep::Download {
+            url: format!("file://{}", source.display()),
+            dest: a.clone(),
+            sha256: sha.clone(),
+        })
+        .expect("the first step succeeds");
+        assert!(a.is_file());
+
+        // Step B fails; the failure is explicit and earlier work remains. Koda
+        // reports the incomplete plan rather than a false success.
+        let b = dir.join("b");
+        let error = run_step(&InstallStep::Download {
+            url: "file:///definitely/missing".to_string(),
+            dest: b.clone(),
+            sha256: "cd".repeat(32),
+        })
+        .expect_err("the second step fails");
+        assert!(!error.is_empty());
+        assert!(!b.exists());
+        assert!(a.is_file(), "earlier work in an incomplete plan remains");
+
+        // Do not leave this test's payload in the real digest cache.
+        if let Some(cache) = cache_dir() {
+            let _ = std::fs::remove_file(cache.join(cache_key(&sha, HashKind::Sha256)));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn metadata_cache_round_trips_and_is_url_keyed() {
         let url = "https://example.invalid/koda-metadata-test";
         remember_metadata(url, "{\"body\":1}").unwrap();
