@@ -298,10 +298,16 @@ The editor is the heart of Koda, and it is built for real projects.
 
 Koda has a personality, but the code always comes first.
 
-- **The Mellow colours.** Koda speaks the palette and semantic mappings of
-  [Mellow][mellow], the separate named colorscheme shipped with Helix — not
-  Helix's default theme. Blue keywords, bright-blue types, green strings,
-  magenta numbers, grey italic comments.
+- **The Mellow colours — the default.** Koda speaks the palette and semantic
+  mappings of [Mellow][mellow], the separate named colorscheme shipped with
+  Helix — not Helix's default theme. Blue keywords, bright-blue types, green
+  strings, magenta numbers, grey italic comments.
+- **Three bundled themes, one Settings screen.** Mellow is joined by
+  **Midnight** (high-contrast dark) and **Daylight** (light), selectable at
+  runtime. A small **Settings** screen (palette → **Settings**) also remembers
+  line numbers, animations, soft wrap, indentation width, spaces vs tabs, inline
+  diagnostics and automatic completion. Everything applies immediately, nothing
+  needs a config file, and a fresh install is fully usable untouched.
 - **Transparency first.** Plain surfaces use your terminal's own background;
   only the statusline, popups and the current line carry a soft panel.
 - **A little familiar.** A star-cat keeps you company on the welcome screen and

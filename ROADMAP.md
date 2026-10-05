@@ -83,14 +83,27 @@ should be generated from the same data rather than a second hand-written table.
 **Goal.** A user can change the handful of things that matter without ever
 editing a file.
 
-**Acceptance.**
-- A **Settings** screen (from the palette) changes at least: theme, animations,
-  soft wrap, inline diagnostics, default indentation, completion behaviour and
-  keybindings.
-- Choices persist across launches; a fresh install still needs no file.
-- At least two bundled themes beyond the default Mellow, selectable at runtime.
+**Done (0.1.x).** A keyboard-driven **Settings** screen (opened from the
+palette) changes theme, line numbers, animations, soft wrap, indentation width,
+spaces vs tabs, inline diagnostics and automatic completion. Each change applies
+immediately and can be reset to the defaults; a settings file is written on quit
+only once something changed, so a fresh install still needs no file. The store
+lives under Koda's state directory, tolerates a missing or malformed file (the
+broken file is preserved as `settings.json.corrupt`), and ignores unknown
+fields. Three bundled themes — **Mellow** (the default), a high-contrast dark
+**Midnight**, and a light **Daylight** — are data-driven from one role set and
+selectable at runtime.
 
-**Direction.** A settings store under Koda's data directory, a small set of
+**Remaining.**
+- **Keybindings are intentionally not user-configurable.** Koda keeps a
+  conventional, keyboard-first keymap; a not-yet-existing arbitrary keybinding
+  editor is out of scope by design, not by omission.
+- The light theme has deterministic render coverage but has not been viewed on a
+  real light terminal (see [LIMITATIONS.md](docs/LIMITATIONS.md)); a 16-colour /
+  `NO_COLOR` fallback belongs with item 4.
+- Users cannot yet add their own themes (by design for now).
+
+**Direction.** A settings store under Koda's state directory, a small set of
 typed preferences, and a TUI that writes it. The file is an implementation
 detail, never a requirement.
 

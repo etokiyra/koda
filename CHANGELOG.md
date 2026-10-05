@@ -14,6 +14,20 @@ when it is tagged.
 
 ### Added
 
+- **In-app Settings.** A keyboard-driven **Settings** screen (opened from the
+  command palette) changes a small set of global preferences: theme, line
+  numbers, animations, soft wrap, indentation width, spaces vs tabs, inline
+  diagnostics and automatic completion. Each change applies immediately, can be
+  reset to the defaults, and is remembered across launches. Koda is fully usable
+  with no settings file; the choices live in
+  `$XDG_STATE_HOME/koda/settings.json` (or `~/.local/state/koda/settings.json`).
+  A missing file loads the defaults, and a malformed file is preserved as
+  `settings.json.corrupt` rather than overwritten.
+- **Three bundled themes.** **Mellow** (the default) is joined by **Midnight**,
+  a high-contrast cool dark theme, and **Daylight**, a light theme. All three
+  are data-driven from one semantic role set, selectable at runtime, and cover
+  every existing surface (editor, statusline, tabs, file tree, palette,
+  completion popup, diagnostics, overlays and diffs).
 - **One-step project setup.** Opening a project runs a bounded,
   `.gitignore`-aware scan for the languages it contains, then offers a single
   **Project setup** summary. **Set up project** installs every missing managed
@@ -32,6 +46,9 @@ when it is tagged.
 
 ### Changed
 
+- **View toggles now persist.** **Toggle Soft Wrap**, **Toggle Inline
+  Diagnostics** and **Toggle Animations** update the corresponding preference,
+  so the palette and the Settings screen stay in step across launches.
 - **Provisioning is atomic and pre-flighted.** Downloads are written to a
   temporary file and renamed into place only after verification; extraction
   stages into a sibling directory and promotes it with a rename, restoring the

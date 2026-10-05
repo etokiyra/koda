@@ -118,14 +118,18 @@ describes the current state.
 
 ## UI
 
-- **No settings screen.** Only a few behaviours are toggles in the palette
-  (animations, soft wrap, inline diagnostics); there is no persisted preference
-  store and no Settings screen.
-- **No theme selection.** The Mellow palette in `ui/theme.rs` is fixed; there
-  are no alternative bundled themes.
+- **Settings are global and fixed.** A **Settings** screen (theme, line numbers,
+  animations, soft wrap, indent width, spaces vs tabs, inline diagnostics,
+  automatic completion) writes one global store. There is no project-level
+  settings file, no arbitrary keybinding configuration, and the preference list
+  is fixed rather than extensible.
+- **Bundled themes only.** Mellow (default), Midnight and Daylight ship and are
+  selectable at runtime; users cannot supply their own theme. The light theme is
+  covered by deterministic render tests but has **not** been viewed on a real
+  light terminal, so its readability is argued from contrast, not verified.
 - **Terminal coverage is narrow.** `Ctrl+Shift` chords rely on the kitty
   keyboard protocol (there is no fallback), there is no `NO_COLOR` or 16-colour
-  mode, and the UI has not been checked on light backgrounds.
+  mode, and the UI has not been interactively checked on light backgrounds.
 - **No file iconography.** The tree uses text only.
 - **No interactive diff/merge view.** The git diff is a read-only overlay; a
   conflicting-file merge view does not exist.

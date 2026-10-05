@@ -325,9 +325,15 @@ this file, and add or change a test.
 
 ## UI
 
-- **Centralised Mellow theme + art.** All colour flows through `ui/theme.rs`;
-  all ASCII personality through `ui/art.rs`. Widgets render semantic roles, not
-  literal colours. This keeps Koda recognisable and easy to evolve.
+- **Centralised, data-driven themes + art.** All colour flows through
+  `ui/theme.rs`; all ASCII personality through `ui/art.rs`. Widgets render
+  semantic roles (accent, text, selection, panel, border, syntax…), never
+  literal colours. Three themes are built from those roles — **Mellow** (the
+  default), **Midnight** and **Daylight** — and the active `ThemeId` is a
+  thread-local so a swap reaches every widget without threading a `Theme`
+  through the whole render tree or churning call sites. Adding a theme means
+  adding one `Theme` value and one `ThemeId`, nothing else. This keeps Koda
+  recognisable and easy to evolve.
 - **Scenes are drawn on a canvas.** `ui/art.rs` composes each welcome scene by
   placing glyphs at coordinates on a small `Canvas`, then turning runs of equal
   style into spans. This keeps the art symmetric and lets one element animate
@@ -361,11 +367,29 @@ this file, and add or change a test.
 ## Product and configuration
 
 - **Zero configuration by default; customisation is in-app.** Koda must work
-  with no file to write. When settings arrive they are reached from inside Koda
-  (a **Settings** screen in the palette); any on-disk settings store under
-  Koda's data directory is an implementation detail the user never has to
-  maintain. A missing settings file must change nothing. This is a deliberate
-  boundary against becoming a config-file-first tool.
+  with no file to write. Customisation is reached from inside Koda (a
+  **Settings** screen in the palette); the on-disk settings store under Koda's
+  state directory is an implementation detail the user never has to maintain. A
+  missing settings file must change nothing. This is a deliberate boundary
+  against becoming a config-file-first tool.
+- **Settings are global, small and write-on-change-verified.** There is exactly
+  one settings store (`$XDG_STATE_HOME/koda/settings.json`), never a
+  project-level file, and the surface is a fixed list of typed preferences — no
+  generic preferences framework, no config DSL. A malformed file is renamed to
+  `settings.json.corrupt` and the defaults load; unknown fields are ignored so a
+  file written by a newer Koda still loads. The store is written on quit and
+  only when something actually changed, matching the session and recent stores,
+  so Koda never creates a settings file for a user who changed nothing; this
+  also keeps the test suite from touching a real user store. A preference that
+  affects a subsystem is applied through the smallest interface (the editor
+  gains one indentation preference; the theme a thread-local; automatic
+  completion a single guard), not by passing a `Settings` object through every
+  call.
+- **Arbitrary keybindings and user themes are deliberately out.** Koda keeps a
+  conventional, keyboard-first keymap and a curated, bundled theme set. A
+  keybinding editor and a theme language/marketplace are recurring "obvious next
+  features" that would trade Koda's zero-configuration identity for a
+  configuration surface; they are excluded on purpose, not pending.
 - **"Supported" means complete, not "an LSP starts".** A language is supported
   only when detection, offline built-in features, provisioning, server launch,
   server-backed features, lifecycle (version/update/remove) and recovery all

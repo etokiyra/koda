@@ -83,6 +83,27 @@ language and still leave it Complete; the authoritative per-language state is
   completely rather than many partially.
 - **Be honest.** A feature is claimed only with code or a test behind it.
 
+## Settings and themes
+
+Koda is fully usable with no settings file. When a user wants to personalise it,
+they open **Settings** from the command palette; there is no file to find or
+edit.
+
+- **Supported settings.** Theme, line numbers, animations, soft wrap, indent
+  width (Auto or a fixed width), spaces vs tabs, inline diagnostics, and
+  automatic completion. Each applies immediately and can be reset to its default.
+- **Storage.** Choices are written on quit, and only once something changed, to
+  `$XDG_STATE_HOME/koda/settings.json` (or
+  `~/.local/state/koda/settings.json`). A missing file loads the defaults; a
+  malformed file is set aside as `settings.json.corrupt` and the defaults load.
+  The file is an implementation detail, never a requirement.
+- **Themes.** Three are bundled and selectable at runtime: **Mellow** (the
+  default), **Midnight** (high-contrast dark) and **Daylight** (light). They are
+  data-driven from one semantic role set; users cannot yet add their own.
+
+Settings are global. Koda does not create project-level configuration, and the
+zero-configuration project experience is unchanged.
+
 ## Platform strategy
 
 - **First-class:** Linux x86_64 (glibc), Linux x86_64 (musl), macOS x86_64,
