@@ -2735,7 +2735,7 @@ fn starting_and_quitting_without_engaging_keeps_the_session() {
     // Establish a session.
     let engaged = app_with_file(&file);
     engaged.save_session();
-    let session_path = session::session_path(engaged.workspace.root()).unwrap();
+    let session_path = crate::session::session_path(engaged.workspace.root()).unwrap();
     let before = Session::load_from(&session_path).expect("a session");
 
     // A fresh start that quits untouched must not overwrite it.
