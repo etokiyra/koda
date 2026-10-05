@@ -273,4 +273,357 @@ impl App {
             _ => {}
         }
     }
+    pub(super) fn open_command_palette(&mut self) {
+        let items = self
+            .commands
+            .all()
+            .iter()
+            .map(|command| {
+                let (enabled, hint) = self.command_availability(command);
+                let mut item = PickerItem::new(
+                    command.palette_label(),
+                    command.description.to_string(),
+                    PickerAction::Command(command.id),
+                )
+                .shortcut(command.shortcut.unwrap_or(""));
+                if !enabled {
+                    item = item.disabled(hint.unwrap_or_else(|| "unavailable".to_string()));
+                }
+                item
+            })
+            .collect();
+        let mut picker = Picker::new("Command Palette", "Type a command…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+    }
+
+    /// Install a tool through its trusted package manager, on the worker.
+    pub(super) fn install_tool(&mut self, tool: Tool) {
+        if self.pending_install.is_some() {
+            self.set_status("An install is already running");
+            return;
+        }
+        self.pending_install = Some(tool);
+        self.background.install_tool(tool);
+        self.set_status(format!("Installing {}…", tool.label()));
+    }
+
+    /// Offer, once per language, to install a missing language server.
+    ///
+    /// This is called from the interactive event loop rather than at startup, so
+    /// the prompt never blocks the first frame and never appears when Koda is
+    /// embedded (tests, previews). The user always chooses; dismissing it keeps
+    /// Koda's built-in intelligence, and **Language Setup…** stays available.
+    pub(super) fn maybe_offer_tool_setup(&mut self) -> bool {
+        if !self.overlay.is_none() || self.pending_install.is_some() || !self.lsp.is_empty() {
+            return false;
+        }
+        let Some(tools) = self.tools.as_ref() else {
+            return false;
+        };
+        // Prefer the active file's language; with no file open, use the
+        // project's detected language so opening a project is enough to be
+        // offered its tooling.
+        let language = self
+            .editor
+            .active_document()
+            .map(|doc| doc.buffer.language)
+            .filter(|language| *language != LanguageId::Unknown)
+            .unwrap_or_else(|| self.workspace.project.kind.language());
+        if language == LanguageId::Unknown {
+            return false;
+        }
+        // An available server means there is nothing to offer; otherwise offer
+        // the first installable candidate.
+        if Tool::available_server(language, tools).is_some() {
+            return false;
+        }
+        let Some(tool) = Tool::installable_server(language, tools) else {
+            return false;
+        };
+        if !self.setup_offered.insert(language) {
+            return false;
+        }
+
+        let install = PickerItem::new(
+            format!("Install {}", tool.label()),
+            tool.setup_reason(),
+            PickerAction::InstallTool(tool),
+        )
+        .shortcut("Enter");
+        let later = PickerItem::new(
+            "Not now",
+            "Keep Koda's built-in intelligence — install later from Language Setup…",
+            PickerAction::Info("Install language tools any time from Language Setup…".to_string()),
+        );
+        let mut picker = Picker::new(
+            format!("{} is not installed", tool.label()),
+            "Choose…",
+            vec![install, later],
+        );
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+        true
+    }
+
+    /// Offer Update and Remove for a Koda-managed tool.
+    pub(super) fn tool_actions(&mut self, tool: Tool) {
+        let Some(status) = self
+            .tools
+            .as_ref()
+            .and_then(|tools| tools.status(tool))
+            .cloned()
+        else {
+            self.set_status("Tool status is unavailable");
+            return;
+        };
+        if !status.is_managed() {
+            self.set_status(format!("{} is not managed by Koda", tool.label()));
+            return;
+        }
+        let size = status
+            .managed_size()
+            .map(|bytes| format!(" ({})", crate::language::tools::human_bytes(bytes)))
+            .unwrap_or_default();
+        let update = PickerItem::new(
+            format!("Update {}", tool.label()),
+            format!("Reinstall Koda's pinned version{size}"),
+            PickerAction::UpdateTool(tool),
+        )
+        .shortcut("Enter");
+        let remove = PickerItem::new(
+            format!("Remove {}", tool.label()),
+            format!("Delete Koda's managed files{size}"),
+            PickerAction::RemoveTool(tool),
+        );
+        let cancel = PickerItem::new(
+            "Cancel",
+            "Change nothing",
+            PickerAction::Info("Nothing changed".to_string()),
+        );
+        let mut picker = Picker::new(
+            format!("{} (Koda-managed)", tool.label()),
+            "Choose…",
+            vec![update, remove, cancel],
+        );
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+    }
+
+    /// Remove a Koda-managed tool's files.
+    ///
+    /// Refuses to touch anything Koda does not own, and never removes the shared
+    /// tools root itself. A `discover` afterwards refreshes the setup view.
+    pub(super) fn remove_tool(&mut self, tool: Tool) {
+        if self.pending_install.is_some() {
+            self.set_status("An install is already running");
+            return;
+        }
+        let Some(status) = self
+            .tools
+            .as_ref()
+            .and_then(|tools| tools.status(tool))
+            .cloned()
+        else {
+            self.set_status("Tool status is unavailable");
+            return;
+        };
+        if !status.is_managed() {
+            self.set_error(format!(
+                "{} is not managed by Koda — not removing it",
+                tool.label()
+            ));
+            return;
+        }
+        let Some(dir) = status.managed_dir() else {
+            self.set_error(format!("Could not locate {}'s files", tool.label()));
+            return;
+        };
+        if crate::language::tools::tools_dir().is_some_and(|root| dir == root) {
+            self.set_error("Refusing to remove the shared tools directory");
+            return;
+        }
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => {
+                self.push_toast(ToastKind::Info, format!("Removed {}", tool.label()));
+                self.background.discover_tools();
+            }
+            Err(err) => self.set_error(format!("Could not remove {}: {err}", tool.label())),
+        }
+    }
+
+    /// Whether a command can run right now, and why not when it cannot.
+    pub(super) fn command_availability(&self, command: &Command) -> (bool, Option<String>) {
+        let document = self.editor.active_document();
+        if command.needs_doc && document.is_none() {
+            return (false, Some("no file open".to_string()));
+        }
+        if let Some(capability) = command.capability {
+            let language = document
+                .map(|doc| doc.buffer.language)
+                .unwrap_or(LanguageId::Unknown);
+            if !self
+                .language
+                .provider(language)
+                .capabilities()
+                .contains(&capability)
+            {
+                return (
+                    false,
+                    Some(format!("not available for {}", language.name())),
+                );
+            }
+        }
+        match command.id {
+            ids::UNDO if !document.is_some_and(|doc| doc.can_undo()) => {
+                (false, Some("nothing to undo".to_string()))
+            }
+            ids::REDO if !document.is_some_and(|doc| doc.can_redo()) => {
+                (false, Some("nothing to redo".to_string()))
+            }
+            ids::COPY | ids::CUT if !document.is_some_and(|doc| doc.has_selection()) => {
+                (false, Some("nothing selected".to_string()))
+            }
+            ids::YANK_POP if self.last_yank.is_none() => {
+                (false, Some("nothing to yank".to_string()))
+            }
+            ids::REPLACE_ALL if !self.search.open || self.search.query.is_empty() => {
+                (false, Some("open find first".to_string()))
+            }
+            ids::NEXT_TAB | ids::PREV_TAB if self.editor.len() < 2 => {
+                (false, Some("only one tab".to_string()))
+            }
+            ids::CLOSE_TAB | ids::CLOSE_ALL | ids::SAVE_ALL if self.editor.is_empty() => {
+                (false, Some("no files open".to_string()))
+            }
+            ids::REVERT if !document.is_some_and(|doc| doc.is_dirty()) => {
+                (false, Some("no changes to revert".to_string()))
+            }
+            ids::RENAME_FILE | ids::DELETE_FILE if self.file_op_target().is_none() => {
+                (false, Some("select a file first".to_string()))
+            }
+            ids::DUPLICATE_FILE | ids::COPY_FILE if self.file_op_target().is_none() => {
+                (false, Some("select a file first".to_string()))
+            }
+            ids::GIT_COMMIT if !self.workspace.git.available => {
+                (false, Some("not a git repository".to_string()))
+            }
+            ids::GIT_COMMIT if self.workspace.git.files.is_empty() => {
+                (false, Some("nothing to commit".to_string()))
+            }
+            ids::GIT_TOGGLE_STAGE if !self.workspace.git.available => {
+                (false, Some("not a git repository".to_string()))
+            }
+            ids::GIT_TOGGLE_STAGE if self.file_op_target().is_none() => {
+                (false, Some("select a file first".to_string()))
+            }
+            ids::DIAGNOSTICS_NEXT | ids::DIAGNOSTICS_PREV
+                if !document.is_some_and(|doc| !doc.diagnostics().is_empty()) =>
+            {
+                (false, Some("no diagnostics".to_string()))
+            }
+            ids::DIAGNOSTICS_LIST
+                if !self
+                    .editor
+                    .documents
+                    .iter()
+                    .any(|doc| !doc.diagnostics().is_empty()) =>
+            {
+                (false, Some("no diagnostics".to_string()))
+            }
+            ids::FORMAT => self.format_availability(document),
+            ids::RENAME if !self.lsp_supports(RequestKind::Rename) => {
+                (false, Some("needs a language server".to_string()))
+            }
+            ids::CODE_ACTIONS if !self.lsp_supports(RequestKind::CodeActions) => {
+                (false, Some("needs a language server".to_string()))
+            }
+            _ => (true, None),
+        }
+    }
+
+    /// Whether formatting can run, and why not when it cannot.
+    pub(super) fn format_availability(
+        &self,
+        document: Option<&Document>,
+    ) -> (bool, Option<String>) {
+        // A language server may format even when the provider has no formatter.
+        if self.lsp_supports(RequestKind::Formatting) {
+            return (true, None);
+        }
+        let language = document
+            .map(|doc| doc.buffer.language)
+            .unwrap_or(LanguageId::Unknown);
+        let Some(tool) =
+            Tool::for_language(language, crate::language::tools::ToolPurpose::Formatter)
+        else {
+            return (true, None);
+        };
+        // Prefer the probed registry; fall back to a PATH check before it lands.
+        let available = match &self.tools {
+            Some(tools) => tools.available(tool),
+            None => format::is_available(tool.program()),
+        };
+        if available {
+            (true, None)
+        } else {
+            (false, Some(format!("{} is not installed", tool.program())))
+        }
+    }
+
+    /// Show which language tools Koda found, and how to install the rest.
+    pub(super) fn language_setup(&mut self) {
+        let Some(tools) = self.tools.clone() else {
+            // Discovery is still running; ask again and tell the user.
+            self.background.discover_tools();
+            self.set_status("Checking language tools…");
+            return;
+        };
+
+        let mut items = Vec::new();
+        for status in tools.all() {
+            let tool = status.tool;
+            let purpose = match tool.purpose() {
+                crate::language::tools::ToolPurpose::LanguageServer => "language server",
+                crate::language::tools::ToolPurpose::Formatter => "formatter",
+            };
+            let label = format!("{}  ·  {} {purpose}", tool.label(), tool.language().name());
+            let item = if status.available {
+                // A managed tool shows its version and on-disk size, and can be
+                // updated or removed. A user/system install is read-only.
+                let detail = match status.managed_size() {
+                    Some(bytes) => format!(
+                        "{} · {}{}",
+                        status.summary(),
+                        crate::language::tools::human_bytes(bytes),
+                        if status.is_managed() {
+                            " · Koda-managed"
+                        } else {
+                            ""
+                        }
+                    ),
+                    None => status.summary(),
+                };
+                if status.is_managed() {
+                    PickerItem::new(label, detail, PickerAction::ToolActions(tool))
+                        .shortcut("Enter")
+                } else {
+                    PickerItem::new(label, detail.clone(), PickerAction::Info(detail))
+                }
+            } else if crate::language::tools::can_install(tool) {
+                let hint = tool.setup_reason();
+                PickerItem::new(label, hint, PickerAction::InstallTool(tool)).shortcut("Enter")
+            } else {
+                // Explain exactly why Koda cannot install it, and what the user
+                // can do instead, rather than repeating the generic install hint.
+                let reason = tool.setup_reason();
+                PickerItem::new(label, reason.clone(), PickerAction::Info(reason.clone()))
+                    .disabled(reason)
+            };
+            items.push(item);
+        }
+        let mut picker = Picker::new("Language Setup", "Language tools…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+    }
 }
