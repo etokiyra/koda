@@ -39,10 +39,12 @@ describes the current state.
 
 - **The verified cache has no eviction.** A verified download is stored under
   `<tools>/cache/<algorithm>-<digest>` and reused offline, so a reinstall or
-  repair needs no network. Nothing evicts it, and removing a managed tool does
-  not remove its cached archive, so the cache grows until the user clears it.
-  The cache uses hard links where the filesystem supports them, so it normally
-  costs no extra disk over the downloads directory.
+  repair needs no network. Checksums and release metadata are cached by URL too,
+  so metadata-driven installs can also fall back offline after their first
+  successful fetch. Nothing evicts either cache, and removing a managed tool
+  does not remove its cached archive, so they grow until the user clears them.
+  The artifact cache uses hard links where the filesystem supports them, so it
+  normally costs no extra disk over the downloads directory.
 - **GPG-verified artifacts are not in the cache.** Swift's archive has no
   published digest to key on; it keeps the existing behaviour of reusing the
   already-verified file in the downloads directory (re-checked against its

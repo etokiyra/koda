@@ -15,10 +15,12 @@ when it is tagged.
 ### Added
 
 - **Offline, verified provisioning cache.** A successfully verified download is
-  stored by its digest under Koda's data directory and reused without a network
-  request, so a reinstall or repair works offline. A cached file is re-verified
-  before every use, a corrupt entry is discarded and redownloaded, and only
-  verified artifacts are cached.
+  stored by its digest under Koda's data directory and reused without
+  re-downloading it, and the checksum/release metadata that names it is cached
+  by URL as well, so a tool Koda has installed once can be reinstalled or
+  repaired with no network. A cached artifact is re-verified before every use, a
+  corrupt entry is discarded and redownloaded, and only verified artifacts are
+  cached.
 
 ### Changed
 

@@ -242,10 +242,14 @@ this file, and add or change a test.
 - **Downloads pass through a verified, digest-keyed cache.** A download is
   written to a temporary sibling file, verified, and only then renamed into
   place; a verified copy is stored under `<tools>/cache/<algorithm>-<digest>`
-  and reused without the network. Cache identity is the expected digest, never
-  the filename, and a cached file is re-verified before use — a corrupt entry is
-  discarded and redownloaded, and a failed download or checksum mismatch never
-  enters the cache. Hard links keep the cache from duplicating large archives.
+  and reused without re-downloading. Cache identity is the expected digest,
+  never the filename, and a cached file is re-verified before use — a corrupt
+  entry is discarded and redownloaded, and a failed download or checksum
+  mismatch never enters the cache. Checksum and release metadata is cached by
+  URL alongside it, so a metadata-driven step can resolve an expected digest
+  offline; a cached digest is still applied to the artifact, so it can only
+  enable an offline install, never bypass verification. Hard links keep the
+  artifact cache from duplicating large archives.
 - **Installation is atomic per step.** An extraction stages into a sibling
   directory and promotes it with a same-filesystem rename, renaming the previous
   installation aside first and restoring it if promotion fails. This is per
