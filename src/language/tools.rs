@@ -1492,6 +1492,12 @@ pub fn install(tool: Tool) -> Result<String, String> {
     }
     let _lock = InstallLock::acquire()?;
 
+    // Refuse a large install when the target filesystem cannot hold it, before
+    // any download wastes time or leaves a partial tree behind.
+    if let (Some(bytes), Some(dir)) = (tool.estimated_download_bytes(), tools_dir()) {
+        ensure_disk_space(&dir, bytes)?;
+    }
+
     let mut last_error = None;
     for attempt in &attempts {
         let mut completed = true;
@@ -1785,6 +1791,49 @@ fn apply_proxy(command: &mut Command) {
             return;
         }
     }
+}
+
+/// Free space in bytes on the filesystem containing `path`, or `None` when it
+/// cannot be determined.
+///
+/// Uses `df -Pk` (POSIX output, 1024-byte blocks), which is available on Linux
+/// and macOS. A not-yet-created path is resolved to its nearest existing
+/// ancestor so a first install still gets a check.
+fn free_disk_bytes(path: &Path) -> Option<u64> {
+    let mut probe = path;
+    while !probe.exists() {
+        probe = probe.parent()?;
+    }
+    let output = install_command("df").arg("-Pk").arg(probe).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    // The POSIX format keeps one filesystem on one line; the last line is the
+    // data row and its fourth column is the available block count.
+    let line = text.lines().last()?;
+    let available = line.split_whitespace().nth(3)?.parse::<u64>().ok()?;
+    available.checked_mul(1024)
+}
+
+/// Refuse an install when the target filesystem cannot hold it.
+///
+/// A clear error beats a half-written toolchain. When free space cannot be
+/// measured (`df` missing or unparsable) the check is skipped rather than
+/// blocking a valid install, and a size Koda does not know is not guessed.
+fn ensure_disk_space(dest: &Path, needed: u64) -> Result<(), String> {
+    let Some(free) = free_disk_bytes(dest) else {
+        return Ok(());
+    };
+    if free < needed {
+        return Err(format!(
+            "not enough free disk space under {}: need about {}, only {} is available",
+            dest.display(),
+            human_bytes(needed),
+            human_bytes(free)
+        ));
+    }
+    Ok(())
 }
 
 /// Fetch and verify a pinned Eclipse Adoptium JDK release.
@@ -2711,6 +2760,11 @@ fn listing_from(
 fn extract(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
     std::fs::create_dir_all(dest)
         .map_err(|err| format!("could not create {}: {err}", dest.display()))?;
+    // The archive's own size is a real lower bound for the unpacked tree; there
+    // is no separate extracted-size estimate, so do not invent one.
+    if let Ok(metadata) = std::fs::metadata(archive) {
+        ensure_disk_space(dest, metadata.len())?;
+    }
     let zip = archive.extension().and_then(|ext| ext.to_str()) == Some("zip");
     // Refuse an archive that could write outside `dest` before extracting it.
     ensure_archive_paths_safe(archive, zip)?;
@@ -5252,6 +5306,17 @@ mod tests {
         extract(&dir.join("pkg.tar.gz"), &dir.join("out"), 1).expect("a safe archive extracts");
         assert!(dir.join("out/bin/tool").is_file());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn disk_space_is_checked_when_measurable() {
+        let dir = std::env::temp_dir();
+        if free_disk_bytes(&dir).is_none() {
+            return; // `df` unavailable; the check degrades to a no-op.
+        }
+        ensure_disk_space(&dir, 0).expect("zero bytes always fits");
+        let error = ensure_disk_space(&dir, u64::MAX).expect_err("an impossible request must fail");
+        assert!(error.contains("free disk space"), "{error}");
     }
 
     #[test]
