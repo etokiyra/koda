@@ -719,4 +719,143 @@ impl App {
         prompt.input = word;
         self.overlay = Overlay::Prompt(prompt);
     }
+    /// Show the matches from a project-wide search.
+    pub(super) fn open_project_search_picker(&mut self, matches: Vec<SearchMatch>) {
+        if matches.is_empty() {
+            self.set_status("No matches in project");
+            return;
+        }
+        let total = matches.len();
+        let root = self.workspace.root().to_path_buf();
+        let items = matches
+            .into_iter()
+            .map(|entry| {
+                let relative = entry
+                    .path
+                    .strip_prefix(&root)
+                    .unwrap_or(&entry.path)
+                    .display()
+                    .to_string();
+                let detail = format!("{relative}:{}", entry.line + 1);
+                PickerItem::new(
+                    entry.text,
+                    detail,
+                    PickerAction::Reveal {
+                        path: entry.path,
+                        position: Position::new(entry.line, entry.col),
+                    },
+                )
+            })
+            .collect();
+        let mut picker = Picker::new("Search Results", "Filter results…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+        self.set_status(format!("{total} match(es)"));
+    }
+
+    /// Ask for project-wide symbols, optionally with a pre-applied query.
+    ///
+    /// `F12` uses a query so a definition that is not in the current file can
+    /// still be found across the project without a language server.
+    pub(super) fn open_workspace_symbols_with(&mut self, query: Option<String>) {
+        self.pending_workspace_symbols_query = query.clone();
+        if let Some(language) = self.ready_server_for(RequestKind::WorkspaceSymbols) {
+            self.ws_lsp_pending = true;
+            if let Some(server) = self
+                .lsp
+                .get_mut(&language)
+                .and_then(|job| job.server.as_mut())
+            {
+                server.workspace_symbols(query.as_deref().unwrap_or(""));
+            }
+        }
+        self.workspace_symbols_seq += 1;
+        let revision = self.workspace_symbols_seq;
+        self.pending_workspace_symbols = Some(revision);
+        self.background
+            .workspace_symbols(self.workspace.root().to_path_buf(), revision);
+        self.set_status("Searching symbols…");
+    }
+
+    /// Ask for project-wide symbols: the language server when attached, plus the
+    /// built-in scan as an immediate, always-available fallback.
+    pub(super) fn open_workspace_symbols(&mut self) {
+        self.open_workspace_symbols_with(None);
+    }
+
+    /// Prompt for a project-wide text query.
+    pub(super) fn open_project_search(&mut self) {
+        let mut prompt = Prompt::new(
+            PromptKind::ProjectSearch,
+            "Search in project",
+            "text to find",
+        );
+        // Prefill from a single-line selection, so searching for the word under
+        // the cursor is one keystroke.
+        if let Some(text) = self
+            .editor
+            .active_document()
+            .and_then(|doc| doc.selected_text())
+        {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() && !trimmed.contains('\n') {
+                prompt.input = trimmed.to_string();
+            }
+        }
+        self.overlay = Overlay::Prompt(prompt);
+    }
+
+    pub(super) fn open_workspace_symbol_picker(&mut self, symbols: Vec<WorkspaceSymbol>) {
+        if symbols.is_empty() {
+            // A server may still be answering; only report failure when nothing
+            // else is coming and no picker is showing.
+            if !self.ws_lsp_pending && self.overlay.is_none() {
+                self.set_status("No symbols found");
+            }
+            return;
+        }
+        let root = self.workspace.root().to_path_buf();
+        let items = symbols
+            .into_iter()
+            .map(|entry| {
+                let relative = entry
+                    .path
+                    .strip_prefix(&root)
+                    .unwrap_or(&entry.path)
+                    .display()
+                    .to_string();
+                let detail = format!(
+                    "{}  ·  {relative}:{}",
+                    entry.symbol.kind.label(),
+                    entry.symbol.line + 1
+                );
+                PickerItem::new(
+                    entry.symbol.name,
+                    detail,
+                    PickerAction::Reveal {
+                        path: entry.path,
+                        position: Position::new(entry.symbol.line, entry.symbol.col),
+                    },
+                )
+            })
+            .collect();
+        self.merge_workspace_symbols(items);
+    }
+
+    /// Show or extend the workspace-symbol picker, keeping any results already
+    /// listed. Used by both the built-in scan and the language server.
+    pub(super) fn merge_workspace_symbols(&mut self, items: Vec<PickerItem>) {
+        if let Overlay::Picker(picker) = &mut self.overlay
+            && picker.title == "Workspace Symbols"
+        {
+            picker.extend_items(items);
+            return;
+        }
+        let mut picker = Picker::new("Workspace Symbols", "Filter symbols…", items);
+        if let Some(query) = self.pending_workspace_symbols_query.take() {
+            picker.query = query;
+        }
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+    }
 }
