@@ -85,6 +85,21 @@ const ELIXIR_LS_VERSION: &str = "0.31.1";
 const OTP_VERSION: &str = "27.3.4";
 const ELIXIR_VERSION: &str = "1.18.4";
 
+/// The Hex release Koda installs into the private Mix home. `mix local.hex`
+/// accepts an exact version and Hex verifies the archive against the checksum
+/// in `builds.hex.pm/installs/hex.csv`, so this is pinned rather than "latest".
+const HEX_VERSION: &str = "2.5.1";
+
+/// The rebar3 release Koda installs into the private Mix home.
+///
+/// The GitHub release publishes a single escript and Koda runs it through
+/// `mix local.rebar rebar3 <path>`. GitHub reports no asset digest for this
+/// release, so the SHA-256 is a Koda-computed pin of the immutable tagged asset
+/// (verified to run on the pinned Erlang/OTP). It is the newest rebar3
+/// compatible with OTP 27.
+const REBAR3_VERSION: &str = "3.24.0";
+const REBAR3_SHA256: &str = "d2d31cfb98904b8e4917300a75f870de12cb5167cd6214d1043e973a56668a54";
+
 /// `App::cpanminus`, the non-interactive CPAN client Koda bootstraps so Perl
 /// modules can be installed without an interactive `cpan` first run. The
 /// archive and its SHA-256 (from MetaCPAN) are pinned together.
@@ -4526,6 +4541,7 @@ fn elixir_ls_attempts() -> Vec<InstallAttempt> {
         otp_major(OTP_VERSION)
     ));
     let ls_archive = downloads.join(format!("elixir-ls-v{ELIXIR_LS_VERSION}.zip"));
+    let rebar_archive = downloads.join("rebar3");
     let installer = otp.join("Install");
     let quiet_install = ls.join("quiet_install.exs");
     vec![InstallAttempt::managed(
@@ -4563,14 +4579,34 @@ fn elixir_ls_attempts() -> Vec<InstallAttempt> {
                 strip: 0,
             },
             // Install Hex and rebar into the private Mix home so the build never
-            // prompts and never writes to the user's `~/.mix`.
+            // prompts and never writes to the user's `~/.mix`. Hex is pinned to
+            // an exact version; rebar3 is a pinned, checksum-verified escript
+            // registered from the local file rather than fetched by Mix.
             InstallStep::Run(
-                InstallCommand::new("mix", &["local.hex", "--force"])
+                InstallCommand::new("mix", &["local.hex", HEX_VERSION, "--force"])
                     .env("MIX_HOME", mix.to_string_lossy().into_owned()),
             ),
+            InstallStep::Download {
+                url: format!(
+                    "https://github.com/erlang/rebar3/releases/download/{REBAR3_VERSION}/rebar3"
+                ),
+                dest: rebar_archive.clone(),
+                sha256: REBAR3_SHA256.to_string(),
+            },
+            InstallStep::MakeExecutable {
+                path: rebar_archive.clone(),
+            },
             InstallStep::Run(
-                InstallCommand::new("mix", &["local.rebar", "--force"])
-                    .env("MIX_HOME", mix.to_string_lossy().into_owned()),
+                InstallCommand::with_args(
+                    "mix",
+                    vec![
+                        "local.rebar".into(),
+                        "rebar3".into(),
+                        rebar_archive.to_string_lossy().into_owned(),
+                        "--force".into(),
+                    ],
+                )
+                .env("MIX_HOME", mix.to_string_lossy().into_owned()),
             ),
             InstallStep::GithubRelease {
                 repo: "elixir-lsp/elixir-ls".to_string(),
@@ -4787,8 +4823,9 @@ mod tests {
     }
 
     /// Assert a `Run` step names an exact version for every package-manager
-    /// install. Delegating managers that Koda cannot pin (`rustup component add`,
-    /// `mix local.hex`/`local.rebar`) are intentionally not matched.
+    /// install. The remaining delegation Koda cannot pin independently
+    /// (`rustup component add`) is intentionally not matched; Hex is pinned by
+    /// version, and rebar3 is a verified `Download` step.
     fn assert_run_is_pinned(tool: Tool, command: &InstallCommand) {
         let args: Vec<&str> = command.args.iter().map(String::as_str).collect();
         for arg in &args {
@@ -5315,6 +5352,57 @@ mod tests {
     fn otp_major_is_the_first_component() {
         assert_eq!(otp_major("27.3.4"), "27");
         assert_eq!(otp_major("29.1"), "29");
+    }
+
+    #[test]
+    fn elixir_pins_hex_and_rebar() {
+        if bob_platform().is_none() {
+            return;
+        }
+        let attempts = Tool::ElixirLs.install_attempts();
+        let Some(attempt) = attempts.first() else {
+            return;
+        };
+        let mut hex_pinned = false;
+        let mut rebar_downloaded = false;
+        let mut rebar_registered = false;
+        for step in &attempt.steps {
+            match step {
+                InstallStep::Run(command) if command.program == "mix" => {
+                    if command.args.iter().any(|arg| arg == "local.hex") {
+                        assert!(
+                            command.args.iter().any(|arg| arg == HEX_VERSION),
+                            "Hex must be pinned: {command:?}"
+                        );
+                        hex_pinned = true;
+                    }
+                    if command.args.iter().any(|arg| arg == "local.rebar") {
+                        // rebar3 is registered from the verified local file, not
+                        // fetched from the network by `mix`.
+                        assert!(
+                            command.args.iter().any(|arg| arg == "rebar3"),
+                            "rebar must be registered from a local file: {command:?}"
+                        );
+                        rebar_registered = true;
+                    }
+                }
+                InstallStep::Download { url, sha256, .. }
+                    if url.contains("rebar3") && sha256.as_str() == REBAR3_SHA256 =>
+                {
+                    rebar_downloaded = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(hex_pinned, "the Elixir plan must pin Hex");
+        assert!(
+            rebar_downloaded,
+            "rebar3 must be downloaded and checksum-verified"
+        );
+        assert!(
+            rebar_registered,
+            "the verified rebar3 must be registered with Mix"
+        );
     }
 
     #[test]
