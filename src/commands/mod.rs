@@ -4,6 +4,8 @@
 //! command palette and give the keymap something stable to target. Actions are
 //! dispatched by id in the app layer, which keeps commands free of UI details.
 
+use std::collections::HashMap;
+
 use crate::language::Capability;
 
 /// Stable command identifiers.
@@ -439,6 +441,74 @@ impl CommandRegistry {
     pub fn get(&self, id: &str) -> Option<&Command> {
         self.commands.iter().find(|c| c.id == id)
     }
+}
+
+/// Editor movement keys that are not commands.
+///
+/// Shared by the F1 cheatsheet and the README keymap so the two cannot drift.
+pub const EDITOR_KEYS: &[(&str, &str)] = &[
+    ("Arrows", "move the cursor"),
+    ("Ctrl+←/→", "move by word"),
+    ("Shift+Arrows", "select"),
+    ("Home / End", "line start / end"),
+    ("Ctrl+Home / End", "document start / end"),
+    ("PageUp / PageDown", "scroll a page"),
+    ("F3 / Shift+F3", "find next / previous"),
+    ("Ctrl+PageUp/Down", "previous / next tab"),
+];
+
+/// Context-local keys that are not registry commands (the find bar, the file
+/// tree and the welcome screen).
+pub const CONTEXT_KEYS: &[(&str, &str)] = &[
+    (
+        "Alt+C / Alt+W / Alt+R",
+        "find: toggle case / whole word / regex",
+    ),
+    ("Alt+Enter", "find: replace every match"),
+    ("Space", "changed files: stage or unstage"),
+    ("d", "changed files: show the diff"),
+    ("/", "file tree: filter project files"),
+    (".", "file tree: toggle hidden files"),
+    ("↑ / ↓", "welcome: choose an action"),
+    ("Enter", "welcome: open the chosen action"),
+    ("v", "welcome: cycle the animated scene"),
+];
+
+/// Render the keymap as a Markdown table from the command registry plus the
+/// editor and context keys.
+///
+/// `examples/keymap.rs` prints this to regenerate the README block, and
+/// `tests/keymap.rs` fails when `README.md` drifts from it.
+pub fn keymap_markdown() -> String {
+    let registry = CommandRegistry::builtin();
+    let mut out = String::from("| Category | Shortcut | Action |\n| --- | --- | --- |\n");
+
+    let mut order: Vec<&'static str> = Vec::new();
+    let mut groups: HashMap<&'static str, Vec<(&'static str, &'static str)>> = HashMap::new();
+    for command in registry.all() {
+        let Some(shortcut) = command.shortcut else {
+            continue;
+        };
+        if !groups.contains_key(command.category) {
+            order.push(command.category);
+        }
+        groups
+            .entry(command.category)
+            .or_default()
+            .push((shortcut, command.title));
+    }
+    for category in order {
+        for (shortcut, title) in &groups[category] {
+            out.push_str(&format!("| {category} | `{shortcut}` | {title} |\n"));
+        }
+    }
+    for (shortcut, title) in EDITOR_KEYS {
+        out.push_str(&format!("| Editor | `{shortcut}` | {title} |\n"));
+    }
+    for (shortcut, title) in CONTEXT_KEYS {
+        out.push_str(&format!("| Context | `{shortcut}` | {title} |\n"));
+    }
+    out
 }
 
 #[cfg(test)]

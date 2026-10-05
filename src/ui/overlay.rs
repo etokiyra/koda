@@ -663,17 +663,6 @@ pub fn render_diff(frame: &mut Frame, area: Rect, diff: &DiffState) {
 /// Build the cheatsheet from the command registry (so it never goes stale) plus
 /// a few editor-movement keys that are not commands.
 fn help_lines(commands: &CommandRegistry, phase: usize) -> Vec<Line<'static>> {
-    const EDITOR: &[(&str, &str)] = &[
-        ("Arrows", "move the cursor"),
-        ("Ctrl+←/→", "move by word"),
-        ("Shift+Arrows", "select"),
-        ("Home / End", "line start / end"),
-        ("Ctrl+Home / End", "document start / end"),
-        ("PageUp / PageDown", "scroll a page"),
-        ("F3 / Shift+F3", "find next / previous"),
-        ("Ctrl+PageUp/Down", "previous / next tab"),
-    ];
-
     let mut order: Vec<&'static str> = Vec::new();
     let mut groups: HashMap<&'static str, Vec<(&'static str, &'static str)>> = HashMap::new();
     for command in commands.all() {
@@ -694,7 +683,7 @@ fn help_lines(commands: &CommandRegistry, phase: usize) -> Vec<Line<'static>> {
         .all()
         .iter()
         .filter_map(|command| command.shortcut)
-        .chain(EDITOR.iter().map(|(key, _)| *key))
+        .chain(crate::commands::EDITOR_KEYS.iter().map(|(key, _)| *key))
         .map(|key| key.chars().count())
         .max()
         .unwrap_or(0);
@@ -712,7 +701,7 @@ fn help_lines(commands: &CommandRegistry, phase: usize) -> Vec<Line<'static>> {
     }
 
     lines.push(Line::from(Span::styled("Editor", theme::accent_bold())));
-    for (shortcut, title) in EDITOR {
+    for (shortcut, title) in crate::commands::EDITOR_KEYS {
         lines.push(help_row(shortcut, title, key_width));
     }
     lines.push(Line::from(""));

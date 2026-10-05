@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: MPL 2.0" src="https://img.shields.io/badge/license-MPL--2.0-90b99f?style=flat-square"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-539%20passing-9dc6ac?style=flat-square">
+  <a href="https://github.com/etokiyra/koda/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/etokiyra/koda/actions/workflows/ci.yml/badge.svg?branch=master"></a>
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
   <a href="https://github.com/etokiyra/koda/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/etokiyra/koda?style=flat-square&color=aca1cf"></a>
   <a href="https://github.com/etokiyra/koda/issues"><img alt="Issues" src="https://img.shields.io/github/issues/etokiyra/koda?style=flat-square&color=e6b99d"></a>
@@ -146,41 +146,12 @@ OmniSharp (with its `dotnet-install.sh`) download a pinned release without a
 checksum. Package-manager installs delegate integrity to that manager. See
 [`SECURITY.md`](SECURITY.md) for the full trust model.
 
-**Language Setup…** in the command palette then lists every tool Koda knows
-about and installs a missing one with a single `Enter` — through the official
-channel, so provenance and integrity stay with the package manager:
-
-| Tool | Purpose | Koda installs it with |
-| --- | --- | --- |
-| `rust-analyzer` | Rust language server | `rustup component add rust-analyzer` |
-| `gopls` | Go language server | `go install`, with the **official Go toolchain** provisioned if missing |
-| `pylsp` | Python language server | a Koda-managed virtualenv (or `pipx`/`uv`/`pip --user`) |
-| `bash-language-server` | Shell language server | `npm`, with a prefix Koda manages |
-| `typescript-language-server` | TypeScript & JavaScript language server | `npm`, with a prefix Koda manages |
-| `clangd` | C/C++ language server | the official **self-contained clangd bundle**; detected if installed |
-| `jdtls` | Java language server | a managed Adoptium JDK 25 + Eclipse JDT |
-| `omnisharp` | C# language server | a managed .NET SDK + OmniSharp |
-| `phpactor` | PHP language server | the official **`phpactor.phar`** (needs a PHP runtime) |
-| `lua-language-server` | Lua language server | a self-contained download managed by Koda |
-| `kotlin-language-server` | Kotlin language server | a managed Adoptium JDK 21 + the pinned server release |
-| `sqls` | SQL language server | `go install`, with the **official Go toolchain** provisioned if missing |
-| `solargraph` | Ruby language server | `gem install` into a **Koda-private gem home** (needs Ruby) |
-| `asm-lsp` | Assembly language server | the **prebuilt release**; `cargo`/`rustup` fallback |
-| `sourcekit-lsp` | Swift language server | a **GPG-verified Swift toolchain** (native or the portable UBI10 build plus a compatibility layer); detected otherwise |
-| `dart` analysis server | Dart/Flutter language server | a **managed Dart SDK** (Google `dart-archive`, checksum-verified) |
-| `elixir-ls` / `language_server.sh` | Elixir language server | a managed **Erlang/OTP + Elixir + ElixirLS** stack (`builds.hex.pm`, checksum-verified) |
-| `pls` | Perl language server (preferred) | a checksum-verified `cpanm` into a Koda-managed `local::lib` |
-| `Perl::LanguageServer` | Perl language server (fallback) | the same isolated `local::lib` (needs `Coro`, so on older Perls) |
-| `vscode-html-language-server` | HTML language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
-| `vscode-css-language-server` | CSS language server | `npm` (`vscode-langservers-extracted`), Koda-managed prefix |
-| `rustfmt` | Rust formatting | `rustup component add rustfmt` |
-| `gofmt` | Go formatting | the managed Go toolchain (installed if missing) |
-| `prettier` | Web/HTML/CSS/JSON/YAML/Markdown formatting | `npm install -g prettier` (Koda-managed Node/prefix) |
-| `clang-format` | C/C++ formatting | ships with the Clang/LLVM toolchain |
-| `shfmt` | Shell formatting | `go install`, with the official Go toolchain provisioned if missing |
-| `perltidy` | Perl formatting | `cpan Perl::Tidy` |
-| `dart format` | Dart formatting | ships with the managed Dart SDK (via a temporary-file contract) |
-| `mix format` | Elixir formatting | ships with the managed Erlang/Elixir runtime (stdin contract) |
+**Language Setup…** in the command palette lists every tool Koda knows about and
+installs a missing one with a single `Enter`. The per-language table below names
+each server and how it is obtained. Formatting runs the language's trusted tool —
+`rustfmt`, `gofmt`, `prettier`, `clang-format`, `shfmt`, `perltidy`, or the
+managed `dart format` and `mix format` — on a buffer snapshot, so unsaved edits
+format in place.
 
 ### Managed toolchains
 
@@ -244,77 +215,44 @@ environment is left untouched. Installation is serialised with an advisory lock
 (with stale-lock recovery), so two Koda instances cannot corrupt the same
 managed prefix.
 
-### Language setup status
-
-How Koda obtains each language server, based on the actual implementation (not
-marketing). "Automatic" means Koda downloads and verifies the tooling itself;
-"needs X" means Koda installs through an existing toolchain and reports the
-prerequisite when it is absent.
-
-| Language | Language server | Koda's setup |
-| --- | --- | --- |
-| Rust | `rust-analyzer` | automatic (`rustup`, bootstrapped if missing) |
-| Go | `gopls` | automatic (`go install`, provisioning official Go if missing) |
-| Python | `pylsp` | automatic (Koda-managed virtualenv) |
-| TypeScript / JavaScript | `typescript-language-server` | automatic (Koda-managed Node.js) |
-| C / C++ | `clangd` | automatic (official self-contained clangd bundle; glibc Linux and macOS) |
-| Java | `jdtls` | automatic (checksum-verified JDK 25) |
-| C# | `OmniSharp` | automatic (managed .NET SDK) |
-| PHP | `phpactor` | automatic `phpactor.phar` (needs a PHP runtime) |
-| Kotlin | `kotlin-language-server` | automatic (dedicated JDK 21) |
-| Lua | `lua-language-server` | automatic (self-contained archive) |
-| Ruby | `solargraph` | automatic into an isolated gem home (needs Ruby) |
-| SQL | `sqls` | automatic (`go install`, provisioning official Go if missing) |
-| Assembly | `asm-lsp` | automatic (prebuilt release; `cargo`/`rustup` fallback) |
-| Swift | `sourcekit-lsp` | automatic (GPG-verified toolchain; native or portable + compatibility layer) |
-| Dart / Flutter | `dart language-server` | automatic (checksum-verified Dart SDK) |
-| Elixir | `ElixirLS` | automatic (Erlang/OTP + Elixir + ElixirLS) |
-| Perl | `PLS` (or `Perl::LanguageServer`) | automatic (checksum-verified `cpanm` + isolated `local::lib`) |
-| HTML | `vscode-html-language-server` | automatic (Koda-managed Node.js) |
-| CSS | `vscode-css-language-server` | automatic (Koda-managed Node.js) |
-| Markdown / JSON / TOML / YAML | — | offline built-in intelligence, no server needed |
-
 ### Supported languages
 
-| Language | Syntax | Diagnostics | Symbols | Completion | Hover | Navigation | Rename |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| **Rust** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
-| **Go** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
-| **Python** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
-| **TypeScript** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
-| **JavaScript** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
-| **C** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
-| **C++** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
-| **Java** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
-| **C#** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
-| **PHP** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
-| **Kotlin** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
-| **HTML** | built-in | built-in + LSP | built-in (ids) | built-in | built-in | LSP | LSP |
-| **CSS** | built-in | built-in + LSP | built-in (selectors) | built-in | built-in | LSP | LSP |
-| **Lua** | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP |
-| **Ruby** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
-| **SQL** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
-| **Perl** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
-| **Dart** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
-| **Elixir** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
-| **Swift** | built-in | built-in | built-in | built-in | built-in | built-in | LSP |
-| **Assembly** | built-in | — | built-in (labels) | built-in | built-in | built-in | — |
-| **Shell** | built-in | LSP | built-in (functions) | built-in | built-in | built-in | — |
-| **Markdown** | built-in | — | built-in (headings) | — | — | — | — |
-| **JSON** | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — |
-| **TOML** | built-in | built-in | built-in (tables & keys) | built-in (literals) | — | — | — |
-| **YAML** | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — |
+One table. Every language has built-in, offline intelligence; a language server
+is optional and, when present, takes over the feature (`+ LSP`) with the
+built-in provider as the fallback.
 
-Prose and configuration files are first-class too. Markdown, JSON, TOML and YAML
-get syntax highlighting, structural diagnostics where they make sense, and a
-symbol outline, all offline and with no setup. **Python**, **Shell**,
-**TypeScript**, **JavaScript**, **C**, **C++**, **Java**, **C#**, **PHP**,
-**Kotlin**, **Lua**, **Ruby**, **SQL**, **Perl**, **Dart**, **Elixir**,
-**Swift**, **Assembly**, **HTML** and **CSS** work offline through Koda's
-built-in intelligence (highlighting, diagnostics where available, symbols,
-completion, hover, navigation) and gain richer server-backed features when Koda
-installs or finds a managed language server. Adding a language means implementing
-one trait and registering it — no changes to the editor or the UI.
+| Language | Syntax | Diagnostics | Symbols | Completion | Hover | Navigation | Rename | Language server | Koda's setup |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Rust | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `rust-analyzer` | `rustup`, bootstrapped if missing |
+| Go | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `gopls` | `go install` via managed Go |
+| Python | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `pylsp` | managed virtualenv |
+| TypeScript | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `typescript-language-server` | managed Node.js |
+| JavaScript | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `typescript-language-server` | managed Node.js |
+| C | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `clangd` | self-contained bundle (glibc/macOS) |
+| C++ | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `clangd` | self-contained bundle (glibc/macOS) |
+| Java | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `jdtls` | managed JDK 25 + Eclipse JDT |
+| C# | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `OmniSharp` | managed .NET SDK |
+| PHP | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `phpactor` | `phpactor.phar` (needs PHP) |
+| Kotlin | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `kotlin-language-server` | managed JDK 21 + pinned server |
+| HTML | built-in | built-in + LSP | built-in (ids) | built-in | built-in | LSP | LSP | `vscode-html-language-server` | managed Node.js |
+| CSS | built-in | built-in + LSP | built-in (selectors) | built-in | built-in | LSP | LSP | `vscode-css-language-server` | managed Node.js |
+| Lua | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `lua-language-server` | self-contained archive |
+| Ruby | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `solargraph` | isolated gem home (needs Ruby) |
+| SQL | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `sqls` | `go install` via managed Go |
+| Perl | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `PLS` (fallback `Perl::LanguageServer`) | checksum-verified `cpanm` + `local::lib` |
+| Dart | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `dart language-server` | managed Dart SDK |
+| Elixir | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `ElixirLS` | managed Erlang/OTP + Elixir + ElixirLS |
+| Swift | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `sourcekit-lsp` | GPG-verified toolchain |
+| Assembly | built-in | — | built-in (labels) | built-in | built-in | built-in | — | `asm-lsp` | prebuilt release; `cargo` fallback |
+| Shell | built-in | LSP | built-in (functions) | built-in | built-in | built-in | — | `bash-language-server` | `npm`, managed prefix |
+| Markdown | built-in | — | built-in (headings) | — | — | — | — | — | offline only |
+| JSON | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — | — | offline only |
+| TOML | built-in | built-in | built-in (tables & keys) | built-in (literals) | — | — | — | — | offline only |
+| YAML | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — | — | offline only |
+
+Editing, highlighting and every built-in provider work offline with no server at
+all. Adding a language means implementing one trait and registering it — no
+changes to the editor or the UI.
 
 ## ❯ Editing & workflow
 
@@ -528,65 +466,84 @@ Koda reports what happened rather than deleting anything.
 <details>
 <summary>Expand the full keymap</summary>
 
-| Shortcut | Action |
-| --- | --- |
-| `Ctrl+S` | Save |
-| `Ctrl+Shift+S` | Save as |
-| `Ctrl+Q` | Quit (press twice if there are unsaved changes) |
-| `Ctrl+O` | Open file (path prompt) |
-| `Ctrl+N` | New file |
-| `Ctrl+P` | Quick open |
-| `Ctrl+Shift+P` | Command palette |
-| `F1` | Keyboard-shortcuts cheatsheet |
-| `F5` | Refresh the file tree and git status |
-| `↑` / `↓` (welcome) | Choose a welcome-screen action |
-| `Enter` (welcome) | Open the chosen action |
-| `v` (welcome) | Cycle the animated scene |
-| `Ctrl+F` / `Ctrl+H` | Find / replace |
-| `F3` / `Shift+F3` | Find next / previous |
-| `Ctrl+Shift+F` | Search in the whole project |
-| `Alt+C` / `Alt+W` / `Alt+R` (in find) | Toggle case / whole word / regex |
-| `Alt+Enter` (in replace) | Replace every match |
-| `Ctrl+G` | Go to line |
-| `Ctrl+Shift+G` | List the files changed in git |
-| `Space` (in changed files) | Stage / unstage the selected file |
-| `d` (in changed files) | Show the selected file's diff |
-| `Alt+D` | Show the active file's unified diff |
-| `Alt+I` | Toggle inline diagnostic messages |
-| `Alt+Z` | Toggle soft wrap |
-| `Ctrl+Shift+M` | Show diagnostics |
-| `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo |
-| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
-| `Alt+Y` | Yank-pop: replace the last paste with an earlier kill |
-| `Ctrl+Space` | Complete (manual; suggestions also appear as you type) |
-| `Ctrl+Shift+I` | Format the active file |
-| `Ctrl+Shift+H` | Hover: info about the symbol under the cursor |
-| `Ctrl+A` | Select all |
-| `Ctrl+D` | Add a cursor at the next occurrence of the selection |
-| `Ctrl+Shift+L` | Add a cursor at every occurrence |
-| `Ctrl+Alt+↓` / `Ctrl+Alt+↑` | Add a cursor on the line below / above |
-| `Esc` | End a multi-cursor session, then clear the selection |
-| `Ctrl+B` | Focus the file panel, or hide it when focused |
-| `Ctrl+E` | Toggle focus between the file tree and editor |
-| `Alt+V` | Split the editor into two panes |
-| `Alt+O` | Focus the other pane |
-| `Ctrl+W` | Close tab (press twice to discard unsaved changes) |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
-| `Ctrl+PageDown` / `Ctrl+PageUp` | Next / previous tab |
-| `Ctrl+/` | Toggle comment |
-| `F8` / `Shift+F8` | Next / previous diagnostic |
-| `Ctrl+Shift+O` | Go to symbol in the active file |
-| `Ctrl+T` | Go to symbol in the workspace |
-| `F12` / `Shift+F12` | Go to definition / find references |
-| `F2` | Rename symbol |
-| `Ctrl+.` | Code actions |
-| `Tab` / `Shift+Tab` | Indent / outdent selection |
-| `Alt+↑` / `Alt+↓` | Move line up / down |
-| `Ctrl+Shift+D` | Duplicate line |
-| `Ctrl+Shift+K` | Delete line |
-| `Alt+M` | Go to matching bracket |
-| `/` (in the tree) | Filter project files |
-| `.` (in the tree) | Toggle hidden files |
+<!-- keymap:start -->
+| Category | Shortcut | Action |
+| --- | --- | --- |
+| File | `Ctrl+S` | Save |
+| File | `Ctrl+Shift+S` | Save As… |
+| File | `Ctrl+O` | Open File… |
+| File | `Ctrl+P` | Quick Open… |
+| File | `Ctrl+W` | Close Tab |
+| File | `Ctrl+N` | New File… |
+| File | `Ctrl+Q` | Quit |
+| Edit | `Ctrl+Z` | Undo |
+| Edit | `Ctrl+Shift+Z` | Redo |
+| Edit | `Ctrl+A` | Select All |
+| Edit | `Ctrl+D` | Select Next Occurrence |
+| Edit | `Ctrl+Shift+L` | Select All Occurrences |
+| Edit | `Ctrl+Alt+↓` | Add Cursor Below |
+| Edit | `Ctrl+Alt+↑` | Add Cursor Above |
+| Edit | `Ctrl+C` | Copy |
+| Edit | `Ctrl+X` | Cut |
+| Edit | `Ctrl+V` | Paste |
+| Edit | `Alt+Y` | Yank Pop |
+| Edit | `Ctrl+Space` | Complete |
+| Edit | `Ctrl+F` | Find |
+| Edit | `Ctrl+H` | Replace |
+| Edit | `Alt+Enter` | Replace All |
+| Edit | `Ctrl+G` | Go to Line… |
+| Edit | `Ctrl+/` | Toggle Comment |
+| Edit | `Tab` | Indent |
+| Edit | `Shift+Tab` | Outdent |
+| Edit | `Alt+↑` | Move Line Up |
+| Edit | `Alt+↓` | Move Line Down |
+| Edit | `Ctrl+Shift+D` | Duplicate Line |
+| Edit | `Ctrl+Shift+K` | Delete Line |
+| Edit | `Alt+M` | Go to Matching Bracket |
+| Language | `Ctrl+Shift+I` | Format Document |
+| Language | `Ctrl+Shift+H` | Hover |
+| Language | `F12` | Go to Definition |
+| Language | `Shift+F12` | Find References |
+| Language | `Ctrl+Shift+O` | Go to Symbol… |
+| Language | `F2` | Rename Symbol |
+| Language | `Ctrl+.` | Code Actions |
+| Diagnostics | `F8` | Next Diagnostic |
+| Diagnostics | `Shift+F8` | Previous Diagnostic |
+| Diagnostics | `Ctrl+Shift+M` | Show Diagnostics |
+| Project | `Ctrl+T` | Go to Symbol in Workspace… |
+| Project | `Ctrl+Shift+F` | Search in Project… |
+| Git | `Ctrl+Shift+G` | Changed Files… |
+| Git | `Alt+D` | Diff File |
+| View | `Ctrl+B` | File Panel: Focus / Hide |
+| View | `Ctrl+E` | Focus File Tree / Editor |
+| View | `Alt+I` | Toggle Inline Diagnostics |
+| View | `Alt+Z` | Toggle Soft Wrap |
+| View | `F5` | Refresh File Tree |
+| View | `Alt+V` | Split Editor |
+| View | `Alt+O` | Focus Other Pane |
+| View | `/` | Filter File Tree |
+| View | `Ctrl+Tab` | Next Tab |
+| View | `Ctrl+Shift+Tab` | Previous Tab |
+| View | `Ctrl+Shift+P` | Command Palette |
+| Help | `F1` | Keyboard Shortcuts |
+| Editor | `Arrows` | move the cursor |
+| Editor | `Ctrl+←/→` | move by word |
+| Editor | `Shift+Arrows` | select |
+| Editor | `Home / End` | line start / end |
+| Editor | `Ctrl+Home / End` | document start / end |
+| Editor | `PageUp / PageDown` | scroll a page |
+| Editor | `F3 / Shift+F3` | find next / previous |
+| Editor | `Ctrl+PageUp/Down` | previous / next tab |
+| Context | `Alt+C / Alt+W / Alt+R` | find: toggle case / whole word / regex |
+| Context | `Alt+Enter` | find: replace every match |
+| Context | `Space` | changed files: stage or unstage |
+| Context | `d` | changed files: show the diff |
+| Context | `/` | file tree: filter project files |
+| Context | `.` | file tree: toggle hidden files |
+| Context | `↑ / ↓` | welcome: choose an action |
+| Context | `Enter` | welcome: open the chosen action |
+| Context | `v` | welcome: cycle the animated scene |
+<!-- keymap:end -->
 
 Editor keys behave as you would expect: arrows, `Home`/`End`, `PageUp`/`PageDown`,
 `Shift`+arrows to select, `Ctrl`+arrows for word movement. Typing with a
@@ -597,59 +554,12 @@ undoes as one step.
 
 ## ✦ Architecture
 
-<details>
-<summary>Expand the source tree</summary>
-
-```text
-src/
-├── app/          # state, event loop, overlays, command dispatch
-├── commands/     # the extensible command registry
-├── editor/       # buffers, documents, cursor, history (no language logic)
-├── filesystem/   # thin, well-behaved fs helpers
-├── git/          # lightweight git integration
-├── language/
-│   ├── detection/  # signals, scoring, confidence
-│   ├── provider/   # the LanguageProvider trait + registry
-│   ├── lsp/        # JSON-RPC client, lifecycle, result conversion
-│   ├── tools/      # discovery + trusted provisioning
-│   ├── data.rs     # shared scanners for JSON/TOML/YAML
-│   ├── rust/       # Rust provider
-│   ├── go/          # Go provider
-│   ├── python/     # Python provider (built-in, offline)
-│   ├── shell/      # Shell provider (bash/zsh/sh)
-│   ├── web/        # TypeScript/JavaScript provider
-│   ├── c/          # C/C++ provider
-│   ├── java/       # Java provider (built-in, offline)
-│   ├── csharp/     # C# provider (built-in, offline)
-│   ├── php/        # PHP provider (built-in, offline)
-│   ├── kotlin/     # Kotlin provider (managed JDK 21 LSP)
-│   ├── lua/        # Lua provider (managed self-contained LSP)
-│   ├── sql/        # SQL provider (dialect-neutral)
-│   ├── ruby/       # Ruby provider
-│   ├── perl/       # Perl provider
-│   ├── asm/        # Assembly provider (x86/AArch64 baseline)
-│   ├── dart/       # Dart provider
-│   ├── elixir/     # Elixir provider
-│   ├── swift/      # Swift provider
-│   ├── html/       # HTML provider (tags, ids)
-│   ├── css/        # CSS provider (selectors, properties)
-│   ├── markdown/   # Markdown provider (headings as symbols)
-│   └── json|toml|yaml/  # configuration-data providers
-├── project/      # workspace, project detection, file tree, templates
-├── recent.rs     # recent projects and files for the welcome screen
-├── regex.rs      # a small regex engine for search
-├── search.rs     # project-wide text search
-├── session.rs    # per-project session persistence
-├── terminal/     # terminal lifecycle + OSC 52 clipboard
-├── background.rs # worker thread for detection, LSP, git and formatting
-└── ui/           # rendering for every surface
-```
+The full source tree, dependency rules, the detection-signal model and how to
+add a language live in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 The guiding rule: **language-specific logic never leaks into the editor or the
 UI.** Detection answers *what is this file*; providers answer *how do we support
 it*. Everything expensive runs on a background worker so the UI never blocks.
-
-</details>
 
 ## ☾ Language detection
 
