@@ -1769,13 +1769,12 @@ fn verify_hash(dest: &Path, expected: &str, kind: HashKind) -> Result<(), String
     Ok(())
 }
 
-/// Forward a standard proxy environment variable to `curl`.
+/// The proxy to pass to `curl`, chosen from the standard environment variables.
 ///
-/// `curl` honours these itself, but passing them explicitly keeps Koda's
-/// intent visible and testable. `HTTPS_PROXY`/`https_proxy` win for our
-/// all-HTTPS downloads, then `ALL_PROXY`, then `HTTP_PROXY` (some proxies serve
-/// HTTPS tunnelling through the plain proxy variable).
-fn apply_proxy(command: &mut Command) {
+/// `HTTPS_PROXY`/`https_proxy` win for our all-HTTPS downloads, then
+/// `ALL_PROXY`, then `HTTP_PROXY` (some proxies serve HTTPS tunnelling through
+/// the plain proxy variable). An empty value is ignored.
+fn proxy_from_env(env: impl Fn(&str) -> Option<String>) -> Option<String> {
     for key in [
         "HTTPS_PROXY",
         "https_proxy",
@@ -1784,12 +1783,23 @@ fn apply_proxy(command: &mut Command) {
         "HTTP_PROXY",
         "http_proxy",
     ] {
-        if let Some(value) = std::env::var_os(key)
+        if let Some(value) = env(key)
             && !value.is_empty()
         {
-            command.arg("--proxy").arg(value);
-            return;
+            return Some(value);
         }
+    }
+    None
+}
+
+/// Forward the selected proxy environment variable to `curl`.
+///
+/// `curl` honours these variables itself, but passing the selected one
+/// explicitly keeps Koda's intent visible and testable. This forwards the
+/// variable; it does not establish or validate a live proxy.
+fn apply_proxy(command: &mut Command) {
+    if let Some(proxy) = proxy_from_env(|key| std::env::var(key).ok()) {
+        command.arg("--proxy").arg(proxy);
     }
 }
 
@@ -5317,6 +5327,25 @@ mod tests {
         ensure_disk_space(&dir, 0).expect("zero bytes always fits");
         let error = ensure_disk_space(&dir, u64::MAX).expect_err("an impossible request must fail");
         assert!(error.contains("free disk space"), "{error}");
+    }
+
+    #[test]
+    fn proxy_environment_is_selected_for_curl() {
+        // No proxy configured: nothing is forwarded.
+        assert_eq!(proxy_from_env(|_| None), None);
+        // A configured proxy is selected (here from the lowercase variable).
+        let env = |key: &str| (key == "https_proxy").then(|| "http://proxy:3128".to_string());
+        assert_eq!(proxy_from_env(env).as_deref(), Some("http://proxy:3128"));
+        // HTTPS_PROXY wins over HTTP_PROXY.
+        let env = |key: &str| match key {
+            "HTTPS_PROXY" => Some("http://secure:8080".to_string()),
+            "HTTP_PROXY" => Some("http://plain:3128".to_string()),
+            _ => None,
+        };
+        assert_eq!(proxy_from_env(env).as_deref(), Some("http://secure:8080"));
+        // An empty value is not a proxy.
+        let env = |key: &str| (key == "HTTPS_PROXY").then(String::new);
+        assert_eq!(proxy_from_env(env), None);
     }
 
     #[test]
