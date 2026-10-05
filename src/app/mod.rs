@@ -6,6 +6,7 @@
 pub mod overlay;
 
 mod commands;
+mod completion;
 mod diagnostics;
 mod files;
 mod git;
