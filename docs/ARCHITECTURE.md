@@ -27,6 +27,7 @@ src/
 │   ├── panes.rs            # split panes and tabs
 │   ├── search.rs           # find/replace
 │   ├── session.rs          # session persistence, workspace + welcome actions
+│   ├── settings.rs         # Settings screen + live application of preferences
 │   ├── status.rs           # statusline messages and toasts
 │   ├── tests.rs            # the app-level integration tests
 │   └── view.rs             # tree/diagnostic/wrap toggles and reveal
@@ -65,9 +66,10 @@ src/
 ├── regex.rs                # a small regex engine for search
 ├── search.rs               # project-wide text search
 ├── session.rs              # per-project session persistence
+├── settings.rs             # global user preferences + atomic JSON persistence
 ├── terminal/mod.rs         # init/restore, OSC 52 clipboard
 └── ui/
-    ├── theme.rs            # Mellow palette + semantic roles (single source of truth)
+    ├── theme.rs            # bundled themes + semantic roles (single source of truth)
     ├── art.rs              # original ASCII art: mascot, wordmark, frames
     ├── header.rs           # identity bar / breadcrumb
     ├── tabs.rs             # tab pills
