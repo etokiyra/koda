@@ -85,6 +85,25 @@ const ASM_LSP_VERSION: &str = "0.10.1";
 /// single executable phar, so Composer is not required.
 const PHPACTOR_VERSION: &str = "2026.06.23.0";
 
+/// The SHA-256 of the pinned `kotlin-language-server` `server.zip`.
+///
+/// GitHub publishes no asset digest for this release, so the value is a
+/// Koda-computed pin of the immutable release asset (recorded from a fresh
+/// download and reviewed). A replaced or corrupted asset fails closed.
+const KOTLIN_LS_SHA256: &str = "4fe7d71d087b307c7869036171bd9d8c6a4284cd7c25b89098b0a24eb2d9b6d2";
+
+/// The Eclipse JDT Language Server milestone Koda provisions.
+///
+/// Eclipse publishes a `.sha256` beside each milestone archive, and the
+/// snapshot timestamp is part of the immutable filename, so the pinned version
+/// and digest cannot drift.
+const JDTLS_VERSION: &str = "1.61.0";
+const JDTLS_SNAPSHOT: &str = "1.61.0-202609031315";
+const JDTLS_SHA256: &str = "338e7e73d61836651ba2453919a0d34fa763eb4e7c03342092309bffb8934c64";
+
+/// The OmniSharp release Koda provisions, pinned to an exact tag.
+const OMNISHARP_VERSION: &str = "v2.0.0";
+
 /// The longest a single install command may run before it is killed. Package
 /// managers can legitimately take a while on a slow link, but a hung process
 /// must never wedge the background worker forever.
@@ -3554,8 +3573,10 @@ fn omnisharp_asset() -> Option<&'static str> {
 /// managed JDK is the Adoptium build the Adoptium API reports as latest for
 /// that feature release, so the pair stays consistent.
 fn jdtls_attempts() -> Vec<InstallAttempt> {
-    const JDTLS_URL: &str =
-        "https://download.eclipse.org/jdtls/snapshots/jdt-language-server-latest.tar.gz";
+    let jdtls_url = format!(
+        "https://download.eclipse.org/jdtls/milestones/{JDTLS_VERSION}/\
+         jdt-language-server-{JDTLS_SNAPSHOT}.tar.gz"
+    );
     let (Some(downloads), Some(dest)) = (downloads_dir(), jdtls_dir()) else {
         return Vec::new();
     };
@@ -3578,9 +3599,9 @@ fn jdtls_attempts() -> Vec<InstallAttempt> {
                 strip: 1,
             },
             InstallStep::Download {
-                url: JDTLS_URL.to_string(),
+                url: jdtls_url,
                 dest: jdtls_archive.clone(),
-                sha256: None,
+                sha256: Some(JDTLS_SHA256.to_string()),
             },
             InstallStep::Extract {
                 archive: jdtls_archive,
@@ -3620,16 +3641,14 @@ fn lua_ls_attempts() -> Vec<InstallAttempt> {
         return Vec::new();
     };
     let archive = downloads.join(&asset);
-    let url = format!(
-        "https://github.com/LuaLS/lua-language-server/releases/download/{LUA_LS_VERSION}/{asset}"
-    );
     vec![InstallAttempt::managed(
         "a self-contained lua-language-server",
         vec![
-            InstallStep::Download {
-                url,
+            InstallStep::GithubRelease {
+                repo: "LuaLS/lua-language-server".to_string(),
+                tag: LUA_LS_VERSION.to_string(),
+                asset,
                 dest: archive.clone(),
-                sha256: None,
             },
             InstallStep::Extract {
                 archive,
@@ -3672,7 +3691,7 @@ fn kotlin_ls_attempts() -> Vec<InstallAttempt> {
             InstallStep::Download {
                 url,
                 dest: ls_archive.clone(),
-                sha256: None,
+                sha256: Some(KOTLIN_LS_SHA256.to_string()),
             },
             // The distribution's archive root is `server/`.
             InstallStep::Extract {
@@ -3960,12 +3979,11 @@ fn omnisharp_attempts() -> Vec<InstallAttempt> {
                     "--no-path".into(),
                 ],
             )),
-            InstallStep::Download {
-                url: format!(
-                    "https://github.com/OmniSharp/omnisharp-roslyn/releases/download/v2.0.0/{asset}"
-                ),
+            InstallStep::GithubRelease {
+                repo: "OmniSharp/omnisharp-roslyn".to_string(),
+                tag: OMNISHARP_VERSION.to_string(),
+                asset: asset.to_string(),
                 dest: archive.clone(),
-                sha256: None,
             },
             InstallStep::Extract {
                 archive,
@@ -4091,7 +4109,7 @@ mod tests {
         assert!(
             steps
                 .iter()
-                .any(|step| matches!(step, InstallStep::Download { .. }))
+                .any(|step| matches!(step, InstallStep::GithubRelease { .. }))
         );
         assert!(
             steps
