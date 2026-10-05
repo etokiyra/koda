@@ -287,6 +287,19 @@ this file, and add or change a test.
 
 ## Project, search and git
 
+- **Project setup is planned, then delegated.** Opening a project detects its
+  languages with a bounded, `.gitignore`-aware, generated-directory-skipping
+  walk (the same one quick open uses) and extension-based classification. That
+  list is turned into an explicit plan (`language::setup`) whose states are
+  `Ready`, `NeedsInstall`, `Prerequisite` and `Unavailable`; the planner decides
+  *what* is needed and the existing provisioning subsystem decides *how* to
+  install it. Execution installs the plan's missing tools one at a time through
+  the normal, locked provisioning path, records each result, and never
+  reinstalls an already-available server. Detection is deliberately
+  extension-only so the scan is cheap and deterministic; a script whose language
+  only a shebang or its content would reveal is not counted by the project scan
+  (opening it still detects it normally).
+
 - **Deterministic project scaffolding.** `project/create.rs` writes conventional
   project files directly instead of invoking `cargo`, `go` or `pip`, so
   creation is instant, offline and toolchain-independent. It never deletes a

@@ -117,11 +117,18 @@ route colour through the theme so a fallback theme can be chosen.
 **Goal.** The first five minutes explain Koda and get a project working in one
 step.
 
-**Acceptance.**
-- Opening a project detects its language(s), lists missing tooling and offers a
-  single **Set up this project** action that provisions all of it.
-- Dismissing changes nothing and leaves built-in intelligence working.
-- The welcome screen communicates what Koda will do before it does it.
+**Done (0.1.x).** Opening a project runs a bounded, `.gitignore`-aware scan for
+its languages, plans each one (ready / needs install / needs a prerequisite /
+unavailable), and offers a single **Project setup** summary with a
+**Set up project** action and a **Later** dismissal. Selecting it installs every
+missing managed tool through the existing provisioning path, one at a time, and
+reports installed / ready / failed / needs-attention. Already-ready tooling is
+never reinstalled, an independent language still succeeds if another fails, and
+the per-language offer is suppressed for languages the project plan covers.
+`Set Up Project…` in the palette opens it on demand.
+
+**Remaining.**
+- The welcome screen does not yet preview that Koda will set up tooling.
 
 **Direction.** Reuse language detection and the provisioning queue; batch the
 offers per project instead of per language.

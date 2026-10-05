@@ -19,6 +19,21 @@ describes the current state.
 
 ## Search and project
 
+- **Project setup detects languages by extension only.** The project scan walks
+  up to 4000 files with the same bounded, `.gitignore`-aware rules as quick
+  open, and counts a language only from a recognised file extension. A project
+  whose only source is, say, a shebang-only script with no extension is not
+  detected by the project scan; opening the file still detects it normally.
+- **Project setup installs missing tools one at a time.** It reuses the single
+  install path (and its advisory lock), so a project with several missing
+  toolchains provisions them sequentially. The UI stays responsive, but a large
+  managed toolchain (for example Swift) can take a while. A failure in one
+  language does not stop the others; the summary reports installed, ready,
+  failed and needs-attention counts.
+- **Project setup is offered once per workspace.** After **Later** it does not
+  re-prompt; reopen it with **Set Up Project…** in the command palette (or from
+  **Language Setup…** for individual tools).
+
 - **`.gitignore` discovery is capped.** At most 256 nested `.gitignore` files and
   4096 directories are read per project; in an enormous monorepo a deeper rule
   beyond the cap is not applied. The caps keep project open predictable.

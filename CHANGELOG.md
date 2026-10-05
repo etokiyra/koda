@@ -14,6 +14,14 @@ when it is tagged.
 
 ### Added
 
+- **One-step project setup.** Opening a project runs a bounded,
+  `.gitignore`-aware scan for the languages it contains, then offers a single
+  **Project setup** summary. **Set up project** installs every missing managed
+  language tool through the existing provisioning path; a language that is
+  already ready is never reinstalled, an independent language still succeeds if
+  another fails, and a missing system prerequisite is reported rather than
+  attempted. **Later** (or `Esc`) dismisses it and leaves built-in editing
+  working; **Set Up Project…** in the palette reopens it on demand.
 - **Offline, verified provisioning cache.** A successfully verified download is
   stored by its digest under Koda's data directory and reused without
   re-downloading it, and the checksum/release metadata that names it is cached

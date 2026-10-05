@@ -121,10 +121,10 @@ The complexity lives inside Koda:
                               (and it stays out of your way when none exists)
 ```
 
-Missing something? Koda notices when a project or a supported file is open
-without its language server and offers to install it, once, without blocking
-startup. Opening a `Cargo.toml` project offers Rust tooling before any file is
-opened, and the same holds for every language Koda can provision. Most
+Missing something? Opening a project detects the languages it contains and
+offers a single **Project setup** action that installs every missing language
+tool; Koda also notices when a supported file is open without its server and
+offers to install it, once, without blocking startup. Most
 servers are provisioned from a trusted, verified source: the **official Go
 toolchain** (which in turn provides `gopls`, `sqls` and `shfmt`), a
 **self-contained clangd bundle**, the **.NET SDK** for C#, a **checksum-verified
@@ -138,12 +138,14 @@ when present, and each prerequisite that is genuinely required is reported
 plainly. Everything lives under Koda's own data directory.
 
 Every managed component is checksum- or signature-verified before use, and every
-install input is an exact version. Two package-manager inputs (`rustup component
-add` and `mix local.hex`/`local.rebar`) delegate to the manager's own trust
-model. See [`SECURITY.md`](SECURITY.md) for the full trust model.
+install input is an exact version. The one remaining package-manager delegation
+is `rustup component add`, which follows the user's toolchain. See
+[`SECURITY.md`](SECURITY.md) for the full trust model.
 
-**Language Setup…** in the command palette lists every tool Koda knows about and
-installs a missing one with a single `Enter`. The per-language table below names
+**Set Up Project…** in the command palette (or the offer after opening a
+project) plans and installs a whole project's missing tooling in one step;
+**Language Setup…** lists every tool Koda knows about and installs a missing one
+with a single `Enter`. The per-language table below names
 each server and how it is obtained. Formatting runs the language's trusted tool —
 `rustfmt`, `gofmt`, `prettier`, `clang-format`, `shfmt`, `perltidy`, or the
 managed `dart format` and `mix format` — on a buffer snapshot, so unsaved edits
