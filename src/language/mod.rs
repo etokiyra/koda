@@ -36,6 +36,7 @@ pub mod provider;
 pub mod python;
 pub mod ruby;
 pub mod rust;
+pub mod setup;
 pub mod shell;
 pub mod sql;
 pub mod swift;
@@ -106,6 +107,34 @@ impl LanguageService {
         })
     }
 
+    /// Detect the languages present in a project by file extension.
+    ///
+    /// Uses the same bounded, `.gitignore`-aware walk as quick open, so it skips
+    /// hidden entries, generated directories (`target`, `node_modules`, …) and
+    /// ignored files, and stops after `limit` files. Extension detection is
+    /// deliberately cheap: a script whose language only a shebang or its content
+    /// would reveal is not counted, which keeps the project scan predictable.
+    pub fn detect_project_languages(&self, root: &Path, limit: usize) -> Vec<LanguageId> {
+        let mut seen: Vec<LanguageId> = Vec::new();
+        for path in crate::filesystem::collect_files(root, limit) {
+            let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
+                continue;
+            };
+            let Some(language) = self.language_for_extension(extension) else {
+                continue;
+            };
+            if language != LanguageId::Unknown && !seen.contains(&language) {
+                seen.push(language);
+            }
+        }
+        // Deterministic order: the canonical `LanguageId::ALL` order.
+        LanguageId::ALL
+            .iter()
+            .copied()
+            .filter(|language| seen.contains(language))
+            .collect()
+    }
+
     /// Scan a project for named definitions, up to `limit` symbols.
     ///
     /// Intended for the background worker: it reads each source file once and
@@ -158,4 +187,70 @@ fn read_sample(path: &Path) -> Option<String> {
         return None;
     }
     Some(String::from_utf8_lossy(&buf).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("koda-langs-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn detects_the_languages_present_in_a_project() {
+        let dir = temp_dir("mixed");
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("src/main.rs"), "fn main() {}\n").unwrap();
+        fs::write(dir.join("app.ts"), "export const x = 1;\n").unwrap();
+        fs::write(dir.join("README.md"), "# hi\n").unwrap();
+        let service = LanguageService::builtin();
+        assert_eq!(
+            service.detect_project_languages(&dir, 100),
+            vec![
+                LanguageId::Rust,
+                LanguageId::Markdown,
+                LanguageId::TypeScript
+            ]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generated_directories_are_not_scanned() {
+        let dir = temp_dir("ignored");
+        fs::create_dir_all(dir.join("target")).unwrap();
+        fs::write(dir.join("target/generated.rs"), "fn main() {}\n").unwrap();
+        fs::create_dir_all(dir.join("node_modules/pkg")).unwrap();
+        fs::write(dir.join("node_modules/pkg/index.ts"), "export {};\n").unwrap();
+        let service = LanguageService::builtin();
+        assert!(service.detect_project_languages(&dir, 100).is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_empty_project_detects_nothing() {
+        let dir = temp_dir("empty");
+        let service = LanguageService::builtin();
+        assert!(service.detect_project_languages(&dir, 100).is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detection_order_is_deterministic() {
+        let dir = temp_dir("order");
+        fs::write(dir.join("a.ts"), "export {};\n").unwrap();
+        fs::write(dir.join("b.rs"), "fn main() {}\n").unwrap();
+        let service = LanguageService::builtin();
+        assert_eq!(
+            service.detect_project_languages(&dir, 100),
+            vec![LanguageId::Rust, LanguageId::TypeScript]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
