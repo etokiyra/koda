@@ -118,14 +118,34 @@ describes the current state.
 
 ## Language support
 
-- **The per-language contract is not surfaced.** `Language Setup` lists tools,
-  but Koda does not show a per-language view of what works offline, what needs a
-  server, and what a platform cannot provide. The README "Supported languages"
-  table is the only such view, and it is not machine-checked.
+- **The authoritative contract is [LANGUAGE-SUPPORT.md](LANGUAGE-SUPPORT.md).**
+  It records, per language, the built-in offline capabilities, the server and its
+  pin and verification, the runtime prerequisite, the platforms and the
+  verification status. This section lists only the known gaps.
+- **Server-backed commands are gated on the built-in provider.** `Format
+  Document`, `Rename Symbol` and `Code Actions` are LSP-backed, but the command
+  palette enables them from the provider's declared capabilities. Only Rust and
+  Go declare `Rename`/`Code Actions`, so the palette under-reports them for
+  Python, Java, C#, Kotlin, Lua, PHP, Ruby and Swift even when their server
+  supports them; the keybindings still work. Same for `Format Document` where
+  the provider has no built-in formatter. See
+  [LANGUAGE-SUPPORT.md](LANGUAGE-SUPPORT.md#known-inconsistency-the-capability-gate).
 - **Built-in depth varies.** Several languages have built-in highlighting,
   symbols and completion but thin or no built-in diagnostics; their quality
-  comes from the language server where one is installed. See the per-tool and
-  per-platform caveats in [Provisioning](#provisioning).
+  comes from the language server where one is installed.
+- **Most servers are not live-verified beyond Linux glibc x86_64.** Only `gopls`,
+  `clangd`, `asm-lsp`, `PLS`, `sqls`, Dart, ElixirLS, Lua, Kotlin, HTML and CSS
+  have had a live handshake, and only on Linux glibc. Every server on Linux musl
+  and macOS is build/unit-verified only.
+- **Several servers are platform-limited.** Elixir is Linux-only; Swift is
+  native or portable on glibc Linux and discovery-only elsewhere; Assembly has
+  no prebuilt aarch64 Linux binary; `clangd` is withheld on musl. See
+  [LANGUAGE-SUPPORT.md](LANGUAGE-SUPPORT.md#platform-notes).
+- **PHP and Ruby need their runtime.** Koda provisions `phpactor.phar` and an
+  isolated `solargraph` gem but not a PHP or Ruby interpreter (no verified
+  portable upstream distribution), so their servers are Complete-with-a-
+  prerequisite rather than zero-config. Built-in editing works offline with no
+  runtime. See [Provisioning](#provisioning).
 
 ## Git
 

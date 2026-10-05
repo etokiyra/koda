@@ -57,20 +57,24 @@ be extended safely.
 
 ### 2. A complete supported-language matrix
 
-**Goal.** Every language in the README's "Supported languages" table has a
-defined setup path, and every limitation is deliberate and documented.
+**Goal.** Every language Koda knows has an explicit, honest contract, and every
+limitation is deliberate and documented.
 
-**Acceptance.**
-- One published matrix per language: built-in features, server, provisioning,
-  formatting, updates/removal, offline behaviour and per-platform availability.
-- The PHP and Ruby runtime question is decided (provision it, or state the
-  prerequisite as first-class).
-- Elixir on macOS, Swift on musl/non-Linux, and the glibc-only bundles are
-  either given a path or explicitly scoped out.
-- No cell is blank without an explanation.
+**Done (0.1.x).** [docs/LANGUAGE-SUPPORT.md](docs/LANGUAGE-SUPPORT.md) is the
+authoritative contract and matrix: offline capabilities, server pin and
+verification, runtime prerequisite, platform limits, class and verification
+status for every language. PHP and Ruby are decided as Complete-with-a-
+prerequisite (no verified portable runtime exists), and the Elixir, Swift,
+Assembly and clangd platform limits are scoped. A test fails when a registered
+language has no matrix row.
 
-**Direction.** Extend [docs/LIMITATIONS.md](docs/LIMITATIONS.md) with the
-per-language view the README table summarizes.
+**Remaining.**
+- Surface the per-language state inside Koda: `Language Setup` lists tools, not
+  "what can I realistically expect for this language".
+- Keep the matrix in sync as servers and platforms change.
+
+**Direction.** Item 5 (project setup) consumes this contract; the in-app view
+should be generated from the same data rather than a second hand-written table.
 
 **Depends on:** item 1 (so gaps can be closed, not just documented).
 

@@ -32,26 +32,36 @@ manages.
 
 ## What "supported" means
 
-A language is **supported** only when all of these hold; "an LSP starts" is not
-enough:
+A language is **supported** only when the claim matches what the code does; "an
+LSP starts" is not enough. Koda uses four classes, defined in full in
+[LANGUAGE-SUPPORT.md](LANGUAGE-SUPPORT.md#the-support-contract):
 
-- **Detection** — file-level signals identify it reliably, with project context
-  as corroboration.
-- **Built-in, offline features** — highlighting and, where meaningful,
-  structural diagnostics, symbols, completion, hover and navigation with no
-  server and no network.
-- **Provisioning** — Koda can obtain its tooling on each supported platform, or
+- **Complete** — detection, built-in offline editing, and a language server Koda
+  provisions itself with nothing else required from the system.
+- **Complete (prerequisite)** — the same, but one system runtime or tool must
+  already exist (for example `php`, `ruby`/`gem` or `python3`); Koda names it
+  and does not replace it.
+- **Offline only** — detection and built-in offline editing; no language server
+  (Markdown, JSON, TOML, YAML).
+- **Platform-limited** — the server or toolchain is unavailable or unverified on
+  some first-class platform; the limitation is stated per platform.
+
+For a language to count as Complete it must provide:
+
+- **Detection** — file-level signals identify it, with project context as
+  corroboration.
+- **Offline features** — highlighting and, where meaningful, structural
+  diagnostics, symbols, completion, hover and navigation with no server and no
+  network.
+- **Provisioning** — Koda can obtain the server on each supported platform, or
   states precisely why it cannot.
-- **Language server** — when one is available it is launched, initialised,
-  synchronised, restarted on failure and shut down cleanly.
-- **Server-backed features** — completion, diagnostics, hover, definition,
-  references, symbols, rename, code actions and formatting where the server
-  offers them.
-- **Lifecycle** — the user can see the installed version and size, update it,
-  and remove it, and only Koda-managed files are touched.
-- **Recovery and offline** — a missing prerequisite, a corrupt install or no
-  network produces a clear explanation and leaves editing working.
-- **Platform coverage** — the limitations are documented, not discovered.
+- **Lifecycle and recovery** — the server is launched, restarted on failure and
+  shut down cleanly; a missing prerequisite or no network leaves editing working
+  and is explained.
+
+Formatting, references, rename and code actions may legitimately be absent for a
+language and still leave it Complete; the authoritative per-language state is
+[LANGUAGE-SUPPORT.md](LANGUAGE-SUPPORT.md).
 
 ## Product principles
 

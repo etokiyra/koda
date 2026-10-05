@@ -217,36 +217,44 @@ managed prefix.
 
 One table. Every language has built-in, offline intelligence; a language server
 is optional and, when present, takes over the feature (`+ LSP`) with the
-built-in provider as the fallback.
+built-in provider as the fallback. The **authoritative per-language contract** —
+offline capabilities, runtime prerequisites, platform limits and verification
+status — is [docs/LANGUAGE-SUPPORT.md](docs/LANGUAGE-SUPPORT.md).
 
-| Language | Syntax | Diagnostics | Symbols | Completion | Hover | Navigation | Rename | Language server | Koda's setup |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Rust | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `rust-analyzer` | `rustup`, bootstrapped if missing |
-| Go | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `gopls` | `go install` via managed Go |
-| Python | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `pylsp` | managed virtualenv |
-| TypeScript | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `typescript-language-server` | managed Node.js |
-| JavaScript | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `typescript-language-server` | managed Node.js |
-| C | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `clangd` | self-contained bundle (glibc/macOS) |
-| C++ | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `clangd` | self-contained bundle (glibc/macOS) |
-| Java | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `jdtls` | managed JDK 25 + Eclipse JDT |
-| C# | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `OmniSharp` | managed .NET SDK |
-| PHP | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `phpactor` | `phpactor.phar` (needs PHP) |
-| Kotlin | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `kotlin-language-server` | managed JDK 21 + pinned server |
-| HTML | built-in | built-in + LSP | built-in (ids) | built-in | built-in | LSP | LSP | `vscode-html-language-server` | managed Node.js |
-| CSS | built-in | built-in + LSP | built-in (selectors) | built-in | built-in | LSP | LSP | `vscode-css-language-server` | managed Node.js |
-| Lua | built-in | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `lua-language-server` | self-contained archive |
-| Ruby | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `solargraph` | isolated gem home (needs Ruby) |
-| SQL | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `sqls` | `go install` via managed Go |
-| Perl | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `PLS` (fallback `Perl::LanguageServer`) | checksum-verified `cpanm` + `local::lib` |
-| Dart | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `dart language-server` | managed Dart SDK |
-| Elixir | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `ElixirLS` | managed Erlang/OTP + Elixir + ElixirLS |
-| Swift | built-in | built-in | built-in | built-in | built-in | built-in | LSP | `sourcekit-lsp` | GPG-verified toolchain |
-| Assembly | built-in | — | built-in (labels) | built-in | built-in | built-in | — | `asm-lsp` | prebuilt release; `cargo` fallback |
-| Shell | built-in | LSP | built-in (functions) | built-in | built-in | built-in | — | `bash-language-server` | `npm`, managed prefix |
-| Markdown | built-in | — | built-in (headings) | — | — | — | — | — | offline only |
-| JSON | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — | — | offline only |
-| TOML | built-in | built-in | built-in (tables & keys) | built-in (literals) | — | — | — | — | offline only |
-| YAML | built-in | built-in | built-in (top-level keys) | built-in (literals) | — | — | — | — | offline only |
+| Language | Syntax | Format | Diagnostics | Symbols | Completion | Hover | Navigation | Rename | Language server | Koda's setup |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Rust | built-in | `rustfmt` | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `rust-analyzer` | `rustup`, bootstrapped if missing |
+| Go | built-in | `gofmt` | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `gopls` | `go install` via managed Go |
+| Python | built-in | — | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `pylsp` | managed virtualenv (needs `python3`) |
+| TypeScript | built-in | `prettier` | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `typescript-language-server` | managed Node.js |
+| JavaScript | built-in | `prettier` | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `typescript-language-server` | managed Node.js |
+| C | built-in | `clang-format` | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `clangd` | self-contained bundle (glibc/macOS); `clang-format` needs LLVM |
+| C++ | built-in | `clang-format` | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `clangd` | self-contained bundle (glibc/macOS); `clang-format` needs LLVM |
+| Java | built-in | LSP | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `jdtls` | managed JDK 25 + Eclipse JDT (needs `python3`) |
+| C# | built-in | LSP | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `OmniSharp` | managed .NET SDK |
+| PHP | built-in | — | built-in | built-in | built-in | built-in | built-in | LSP | `phpactor` | `phpactor.phar` (needs PHP) |
+| Kotlin | built-in | LSP | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `kotlin-language-server` | managed JDK 21 + pinned server |
+| HTML | built-in | `prettier` | built-in + LSP | built-in (ids) | built-in | built-in | LSP | LSP | `vscode-html-language-server` | managed Node.js |
+| CSS | built-in | `prettier` | built-in + LSP | built-in (selectors) | built-in | built-in | LSP | LSP | `vscode-css-language-server` | managed Node.js |
+| Lua | built-in | LSP | built-in + LSP | built-in | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `lua-language-server` | self-contained archive |
+| Ruby | built-in | — | built-in | built-in | built-in | built-in | built-in | LSP | `solargraph` | isolated gem home (needs Ruby) |
+| SQL | built-in | — | built-in | built-in | built-in | built-in | built-in | LSP | `sqls` | `go install` via managed Go |
+| Perl | built-in | `perltidy` | built-in | built-in | built-in | built-in | built-in | LSP | `PLS` (fallback `Perl::LanguageServer`) | checksum-verified `cpanm` + `local::lib` (needs Perl) |
+| Dart | built-in | `dart format` | built-in | built-in | built-in | built-in | built-in | LSP | `dart language-server` | managed Dart SDK |
+| Elixir | built-in | `mix format` | built-in | built-in | built-in | built-in | built-in | LSP | `ElixirLS` | managed Erlang/OTP + Elixir + ElixirLS (Linux only) |
+| Swift | built-in | — | built-in | built-in | built-in | built-in | built-in | LSP | `sourcekit-lsp` | GPG-verified toolchain (platform-limited) |
+| Assembly | built-in | — | — | built-in (labels) | built-in | built-in | built-in | — | `asm-lsp` | prebuilt release; `cargo` fallback |
+| Shell | built-in | `shfmt` | LSP | built-in (functions) | built-in | built-in | built-in | — | `bash-language-server` | `npm`, managed prefix |
+| Markdown | built-in | `prettier` | — | built-in (headings) | — | — | — | — | — | offline only |
+| JSON | built-in | `prettier` | built-in | built-in (top-level keys) | built-in (literals) | — | — | — | — | offline only |
+| TOML | built-in | — | built-in | built-in (tables & keys) | built-in (literals) | — | — | — | — | offline only |
+| YAML | built-in | `prettier` | built-in | built-in (top-level keys) | built-in (literals) | — | — | — | — | offline only |
+
+`LSP` in the Format column means the attached server formats the file when it
+offers formatting. `Rename` and code actions are LSP-backed too; they work for
+any attached server that supports them, although the command palette currently
+only *advertises* them where the built-in provider declares the capability (see
+the note in [docs/LANGUAGE-SUPPORT.md](docs/LANGUAGE-SUPPORT.md#known-inconsistency-the-capability-gate)).
 
 Editing, highlighting and every built-in provider work offline with no server at
 all. Adding a language means implementing one trait and registering it — no

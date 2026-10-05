@@ -92,6 +92,22 @@ this file, and add or change a test.
   first user: **PLS** (no `Coro` dependency, so it builds on current Perls) is
   preferred, with `Perl::LanguageServer` discovered as a fallback. The editor
   still tracks one running server per language.
+- **The support contract is explicit and tiered.** A language is Complete,
+  Complete-with-a-prerequisite, Offline only or Platform-limited, and the claim
+  must match the code; "an LSP starts" is not enough. The contract, the
+  per-language matrix and the verification status live in
+  [LANGUAGE-SUPPORT.md](LANGUAGE-SUPPORT.md), and a test
+  (`tests/language_support.rs`) fails when a registered language has no row, so
+  adding a language cannot silently skip its documentation.
+- **`Capability` is provider-scoped today, which under-reports LSP features.**
+  Providers declare built-in capabilities, but the palette gates the LSP-backed
+  `Format Document`, `Rename Symbol` and `Code Actions` commands on them as
+  well, so the palette advertises those only where a provider declares them
+  (Rust/Go for rename and code actions). The keybindings do not consult the
+  list, so the features work for any attached server that supports them. The
+  direction is to keep provider capabilities for built-in features and consult
+  the attached server's advertised capabilities for server-backed commands; do
+  not add a second capability system before the existing one is fixed.
 
 ---
 

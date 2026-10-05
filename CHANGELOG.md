@@ -38,6 +38,13 @@ when it is tagged.
   unpinned by Mix. `rustup component add` remains the one documented delegation.
 - **Provisioning pre-flight and rollback boundaries** are documented in
   [docs/LIMITATIONS.md](docs/LIMITATIONS.md#provisioning).
+- **The language-support contract is now explicit.** A new
+  [docs/LANGUAGE-SUPPORT.md](docs/LANGUAGE-SUPPORT.md) defines what "supported"
+  means (Complete / Complete-with-a-prerequisite / Offline only /
+  Platform-limited), lists each language's offline capabilities, server and
+  verification, runtime prerequisite and platform limits, and records the
+  known capability-gating inconsistency. A test keeps it in sync with the
+  provider registry.
 
 ### Security
 
