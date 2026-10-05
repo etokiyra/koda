@@ -1418,89 +1418,9 @@ impl App {
     // Overlays
     // ----------------------------------------------------------------------
 
-    fn open_quick_open(&mut self) {
-        let root = self.workspace.root().to_path_buf();
-        let files = filesystem::collect_files(&root, 8000);
-
-        // Recently-opened files come first, so Ctrl+P then Enter reopens the last
-        // file without typing.
-        let mut ordered: Vec<PathBuf> = Vec::new();
-        let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-        for path in self.recent_files.iter().rev() {
-            let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-            if !seen.insert(canonical) {
-                continue;
-            }
-            if path.is_file() {
-                ordered.push(path.clone());
-            }
-        }
-        for path in files {
-            let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-            if seen.insert(canonical) {
-                ordered.push(path);
-            }
-        }
-
-        let items = ordered
-            .into_iter()
-            .map(|path| {
-                let label = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                let detail = path
-                    .strip_prefix(&root)
-                    .unwrap_or(&path)
-                    .display()
-                    .to_string();
-                PickerItem::new(label, detail, PickerAction::OpenPath(path))
-            })
-            .collect();
-        let mut picker = Picker::new("Quick Open", "Type a file name…", items);
-        picker.refilter();
-        self.overlay = Overlay::Picker(picker);
-    }
-
-    fn open_prompt(&mut self, kind: PromptKind, label: &str, placeholder: &str) {
-        self.overlay = Overlay::Prompt(Prompt::new(kind, label, placeholder));
-    }
-
-    /// Show the keyboard-shortcuts cheatsheet, or hide it if it is already up.
-    fn toggle_help(&mut self) {
-        self.completion = None;
-        self.hover = None;
-        self.overlay = match self.overlay {
-            Overlay::Help(_) => Overlay::None,
-            _ => Overlay::Help(Help::default()),
-        };
-    }
-
     // ----------------------------------------------------------------------
     // Misc
     // ----------------------------------------------------------------------
-
-    fn toggle_tree(&mut self) {
-        // `Ctrl+B` is the file panel: reveal and focus it, focus it when the
-        // editor has focus, and hide it once it is focused.
-        if !self.tree_visible {
-            self.tree_visible = true;
-            self.focus = Focus::FileTree;
-        } else if self.focus == Focus::Editor {
-            self.focus = Focus::FileTree;
-        } else {
-            self.tree_visible = false;
-            self.focus = Focus::Editor;
-        }
-    }
-
-    /// Re-read the project tree and git status on demand.
-    fn refresh_workspace(&mut self) {
-        self.workspace.refresh();
-        self.request_git_refresh();
-        self.set_status("Refreshed");
-    }
 
     /// The document index shown in the left pane.
     pub fn pane_left_index(&self) -> usize {
