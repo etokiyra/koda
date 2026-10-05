@@ -119,6 +119,22 @@ const OMNISHARP_VERSION: &str = "v2.0.0";
 const DOTNET_SDK_VERSION: &str = "10.0.401";
 const DOTNET_CHANNEL: &str = "10.0";
 
+// Pinned package-manager inputs. A package manager still resolves its own
+// dependencies, but Koda always names an exact version, so an install is
+// reproducible and a new upstream release cannot arrive silently.
+const GOPLS_SPEC: &str = "golang.org/x/tools/gopls@v0.23.0";
+const SQLS_SPEC: &str = "github.com/sqls-server/sqls@v0.2.48";
+const SHFMT_SPEC: &str = "mvdan.cc/sh/v3/cmd/shfmt@v3.14.1";
+const BASH_LS_SPEC: &str = "bash-language-server@5.8.1";
+const TYPESCRIPT_LS_SPEC: &str = "typescript-language-server@6.0.1";
+const TYPESCRIPT_SPEC: &str = "typescript@7.0.2";
+const VSCODE_LANGSERVERS_SPEC: &str = "vscode-langservers-extracted@4.10.0";
+const PRETTIER_SPEC: &str = "prettier@3.9.9";
+const PYTHON_LSP_SPEC: &str = "python-lsp-server==1.15.0";
+const SOLARGRAPH_VERSION: &str = "0.60.4";
+const PLS_SPEC: &str = "PLS@0.906";
+const PERL_LS_SPEC: &str = "Perl::LanguageServer@2.6.2";
+
 /// The longest a single install command may run before it is killed. Package
 /// managers can legitimately take a while on a slow link, but a hung process
 /// must never wedge the background worker forever.
@@ -477,7 +493,7 @@ impl Tool {
             Tool::Gofmt => "Koda can install the official Go toolchain, which includes gofmt",
             Tool::Prettier => "install with npm — Koda provisions Node.js if missing",
             Tool::ClangFormat => "it ships with the Clang/LLVM toolchain",
-            Tool::Shfmt => "install it with `go install mvdan.cc/sh/v3/cmd/shfmt@latest`",
+            Tool::Shfmt => "install it with `go install mvdan.cc/sh/v3/cmd/shfmt@v3.14.1`",
             Tool::PerlTidy => "install it with `cpan Perl::Tidy`",
         }
     }
@@ -597,11 +613,11 @@ impl Tool {
         match self {
             Tool::RustAnalyzer => Some(("rustup", &["component", "add", "rust-analyzer"])),
             Tool::Rustfmt => Some(("rustup", &["component", "add", "rustfmt"])),
-            Tool::Pylsp => Some(("pipx", &["install", "python-lsp-server"])),
-            Tool::BashLs => Some(("npm", &["install", "-g", "bash-language-server"])),
+            Tool::Pylsp => Some(("pipx", &["install", PYTHON_LSP_SPEC])),
+            Tool::BashLs => Some(("npm", &["install", "-g", BASH_LS_SPEC])),
             Tool::TypeScriptLs => Some((
                 "npm",
-                &["install", "-g", "typescript-language-server", "typescript"],
+                &["install", "-g", TYPESCRIPT_LS_SPEC, TYPESCRIPT_SPEC],
             )),
             // `clangd`, `phpactor`, `lua-language-server`, Kotlin, Dart, Elixir,
             // Swift and Go tooling are installed by Koda's own managed plans.
@@ -623,10 +639,10 @@ impl Tool {
             // download plan rather than a single package-manager command.
             Tool::Jdtls | Tool::OmniSharp => None,
             Tool::HtmlLs | Tool::CssLs => {
-                Some(("npm", &["install", "-g", "vscode-langservers-extracted"]))
+                Some(("npm", &["install", "-g", VSCODE_LANGSERVERS_SPEC]))
             }
             Tool::Gofmt => None,
-            Tool::Prettier => Some(("npm", &["install", "-g", "prettier"])),
+            Tool::Prettier => Some(("npm", &["install", "-g", PRETTIER_SPEC])),
             Tool::Shfmt => None,
             // `clang-format` and `perltidy` ship with their language toolchains.
             Tool::ClangFormat | Tool::PerlTidy => None,
@@ -694,10 +710,10 @@ impl Tool {
             Tool::Rustfmt => component_attempts("rustfmt"),
             // Go tooling installs with `go install`, provisioning the official
             // Go toolchain when none is present.
-            Tool::Gopls => go_attempts(&["golang.org/x/tools/gopls"]),
+            Tool::Gopls => go_attempts(&[GOPLS_SPEC]),
             Tool::Pylsp => python_attempts(),
-            Tool::BashLs => npm_attempts(&["bash-language-server"]),
-            Tool::TypeScriptLs => npm_attempts(&["typescript-language-server", "typescript"]),
+            Tool::BashLs => npm_attempts(&[BASH_LS_SPEC]),
+            Tool::TypeScriptLs => npm_attempts(&[TYPESCRIPT_LS_SPEC, TYPESCRIPT_SPEC]),
             // The clangd project publishes a small, self-contained bundle, so
             // Koda does not need a full LLVM toolchain.
             Tool::Clangd => clangd_attempts(),
@@ -710,7 +726,7 @@ impl Tool {
             // `kotlin-language-server` needs a JDK whose version its bundled
             // compiler understands, so Koda installs a dedicated JDK 21.
             Tool::KotlinLs => kotlin_ls_attempts(),
-            Tool::Sqls => go_attempts(&["github.com/sqls-server/sqls"]),
+            Tool::Sqls => go_attempts(&[SQLS_SPEC]),
             // `solargraph` installs into a Koda-private gem home when a system
             // Ruby is available.
             Tool::RubyLs => ruby_attempts(),
@@ -731,11 +747,11 @@ impl Tool {
             Tool::SwiftLs => swift_attempts(),
             Tool::Jdtls => jdtls_attempts(),
             Tool::OmniSharp => omnisharp_attempts(),
-            Tool::HtmlLs | Tool::CssLs => npm_attempts(&["vscode-langservers-extracted"]),
+            Tool::HtmlLs | Tool::CssLs => npm_attempts(&[VSCODE_LANGSERVERS_SPEC]),
             // `gofmt` ships with Go, so Koda provisions the toolchain.
             Tool::Gofmt => go_toolchain_attempts(),
-            Tool::Prettier => npm_attempts(&["prettier"]),
-            Tool::Shfmt => go_attempts(&["mvdan.cc/sh/v3/cmd/shfmt"]),
+            Tool::Prettier => npm_attempts(&[PRETTIER_SPEC]),
+            Tool::Shfmt => go_attempts(&[SHFMT_SPEC]),
             // `clang-format` and `perltidy` ship with their toolchains.
             Tool::ClangFormat | Tool::PerlTidy => Vec::new(),
         }
@@ -923,8 +939,8 @@ fn component_attempts(component: &'static str) -> Vec<InstallAttempt> {
 }
 
 /// Install a Rust tool with `cargo`, bootstrapping the toolchain when absent.
-fn cargo_attempts(packages: &[&str]) -> Vec<InstallAttempt> {
-    let args = cargo_install_args(packages);
+fn cargo_attempts(package: &str, version: &str) -> Vec<InstallAttempt> {
+    let args = cargo_install_args(package, version);
     let mut attempts = vec![InstallAttempt::one(
         "cargo install",
         InstallCommand::with_args("cargo", args.clone()),
@@ -941,13 +957,14 @@ fn cargo_attempts(packages: &[&str]) -> Vec<InstallAttempt> {
     attempts
 }
 
-/// The `cargo install <crate>` arguments for a set of packages.
-fn cargo_install_args(packages: &[&str]) -> Vec<String> {
-    let mut args = vec!["install".to_string()];
-    for package in packages {
-        args.push((*package).to_string());
-    }
-    args
+/// The pinned `cargo install <crate> --version <version>` arguments.
+fn cargo_install_args(package: &str, version: &str) -> Vec<String> {
+    vec![
+        "install".to_string(),
+        package.to_string(),
+        "--version".to_string(),
+        version.to_string(),
+    ]
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -1063,12 +1080,12 @@ fn go_toolchain_attempts() -> Vec<InstallAttempt> {
     managed_go_attempt(None).into_iter().collect()
 }
 
-/// The `go install` command for a set of packages, with a Koda-private
-/// `GOPATH`/`GOBIN` so installations stay isolated.
-fn go_install_command(packages: &[&str]) -> InstallCommand {
+/// The `go install` command for a set of pinned `module@version` specs, with a
+/// Koda-private `GOPATH`/`GOBIN` so installations stay isolated.
+fn go_install_command(specs: &[&str]) -> InstallCommand {
     let mut args = vec!["install".to_string()];
-    for package in packages {
-        args.push(format!("{package}@latest"));
+    for spec in specs {
+        args.push((*spec).to_string());
     }
     let mut command = InstallCommand::with_args("go", args);
     if let (Some(gopath), Some(gobin)) = (go_path(), go_bin_dir()) {
@@ -1169,7 +1186,7 @@ fn asm_lsp_attempts() -> Vec<InstallAttempt> {
             ],
         ));
     }
-    attempts.extend(cargo_attempts(&["asm-lsp"]));
+    attempts.extend(cargo_attempts("asm-lsp", ASM_LSP_VERSION));
     attempts
 }
 
@@ -1221,6 +1238,8 @@ fn ruby_attempts() -> Vec<InstallAttempt> {
                 gems.to_string_lossy().into_owned(),
                 "--bindir".to_string(),
                 bindir.to_string_lossy().into_owned(),
+                "--version".to_string(),
+                SOLARGRAPH_VERSION.to_string(),
                 "solargraph".to_string(),
             ],
         ),
@@ -1234,11 +1253,11 @@ fn python_attempts() -> Vec<InstallAttempt> {
     let mut attempts = vec![
         InstallAttempt::one(
             "pipx",
-            InstallCommand::new("pipx", &["install", "python-lsp-server"]),
+            InstallCommand::new("pipx", &["install", PYTHON_LSP_SPEC]),
         ),
         InstallAttempt::one(
             "uv",
-            InstallCommand::new("uv", &["tool", "install", "python-lsp-server"]),
+            InstallCommand::new("uv", &["tool", "install", PYTHON_LSP_SPEC]),
         ),
     ];
 
@@ -1255,7 +1274,7 @@ fn python_attempts() -> Vec<InstallAttempt> {
                     ),
                     InstallCommand::with_args(
                         pip.clone(),
-                        vec!["install".into(), "python-lsp-server".into()],
+                        vec!["install".into(), PYTHON_LSP_SPEC.into()],
                     ),
                 ],
             ));
@@ -1268,23 +1287,17 @@ fn python_attempts() -> Vec<InstallAttempt> {
             "ensurepip",
             vec![
                 InstallCommand::new(python, &["-m", "ensurepip", "--user"]),
-                InstallCommand::new(
-                    python,
-                    &["-m", "pip", "install", "--user", "python-lsp-server"],
-                ),
+                InstallCommand::new(python, &["-m", "pip", "install", "--user", PYTHON_LSP_SPEC]),
             ],
         ));
         attempts.push(InstallAttempt::one(
             "pip --user",
-            InstallCommand::new(
-                python,
-                &["-m", "pip", "install", "--user", "python-lsp-server"],
-            ),
+            InstallCommand::new(python, &["-m", "pip", "install", "--user", PYTHON_LSP_SPEC]),
         ));
     }
     attempts.push(InstallAttempt::one(
         "pip3 --user",
-        InstallCommand::new("pip3", &["install", "--user", "python-lsp-server"]),
+        InstallCommand::new("pip3", &["install", "--user", PYTHON_LSP_SPEC]),
     ));
 
     attempts
@@ -3926,7 +3939,7 @@ fn kotlin_ls_attempts() -> Vec<InstallAttempt> {
 
 /// Install `Perl::LanguageServer` into an isolated `local::lib`.
 fn perl_attempts() -> Vec<InstallAttempt> {
-    perl_module_attempts("Perl::LanguageServer")
+    perl_module_attempts(PERL_LS_SPEC)
 }
 
 /// Install `PLS` into an isolated `local::lib`.
@@ -3934,7 +3947,7 @@ fn perl_attempts() -> Vec<InstallAttempt> {
 /// PLS is preferred over `Perl::LanguageServer` because it has no `Coro`
 /// dependency, so it builds and runs on current Perls.
 fn pls_attempts() -> Vec<InstallAttempt> {
-    perl_module_attempts("PLS")
+    perl_module_attempts(PLS_SPEC)
 }
 
 /// Bootstrap `cpanm` and install `package` into an isolated `local::lib`.
@@ -4530,8 +4543,8 @@ mod tests {
             })
             .expect("a go install run");
         assert!(
-            run.args.iter().any(|arg| arg.contains("gopls@latest")),
-            "the run must install gopls: {:?}",
+            run.args.iter().any(|arg| arg == GOPLS_SPEC),
+            "the run must install pinned gopls: {:?}",
             run.args
         );
         // Tool installations stay inside Koda's private GOPATH/GOBIN.
@@ -4734,7 +4747,7 @@ mod tests {
             steps
                 .iter()
                 .any(|step| matches!(step, InstallStep::Run(command)
-                if command.program == "perl" && command.args.iter().any(|arg| arg == "PLS"))),
+                if command.program == "perl" && command.args.iter().any(|arg| arg == PLS_SPEC))),
             "the PLS plan must install PLS: {steps:?}"
         );
         // Both Perl servers share the isolated local::lib.
@@ -4975,7 +4988,7 @@ mod tests {
         }
         assert_eq!(
             Tool::Prettier.install_command(),
-            Some(("npm", &["install", "-g", "prettier"][..]))
+            Some(("npm", &["install", "-g", PRETTIER_SPEC][..]))
         );
         // `shfmt` is installed by Koda's managed Go plan, not a package-manager
         // command.
@@ -5243,10 +5256,7 @@ mod tests {
             attempts.iter().any(|attempt| {
                 run_commands(attempt).into_iter().any(|command| {
                     command.args.iter().any(|arg| arg == "--prefix")
-                        && command
-                            .args
-                            .iter()
-                            .any(|arg| arg == "typescript-language-server")
+                        && command.args.iter().any(|arg| arg == TYPESCRIPT_LS_SPEC)
                 })
             }),
             "TypeScript should install with npm into Koda's own prefix: {attempts:?}"
@@ -5274,14 +5284,14 @@ mod tests {
         );
         assert_eq!(
             Tool::Pylsp.install_command(),
-            Some(("pipx", &["install", "python-lsp-server"][..]))
+            Some(("pipx", &["install", PYTHON_LSP_SPEC][..]))
         );
         // Go tooling is provisioned by Koda's managed Go plan.
         assert_eq!(Tool::Gopls.install_command(), None);
         assert_eq!(Tool::Sqls.install_command(), None);
         assert_eq!(
             Tool::BashLs.install_command(),
-            Some(("npm", &["install", "-g", "bash-language-server"][..]))
+            Some(("npm", &["install", "-g", BASH_LS_SPEC][..]))
         );
         // Python tooling has several fallbacks, so installation is attempted
         // even without pipx or a working `pip`.
