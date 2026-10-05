@@ -136,6 +136,16 @@ compatibility layer), a coordinated **Erlang/OTP + Elixir + ElixirLS** stack,
 Koda-private gem home. A system `clangd`, `php`, `ruby`, `perl` or `go` is reused
 when present, and each prerequisite that is genuinely required is reported
 plainly. Everything lives under Koda's own data directory.
+
+Not every managed component is checksum-verified yet. **Verified:** the official
+Go toolchain, clangd, asm-lsp, `phpactor.phar`, the Dart SDK, Node.js, the
+Eclipse Adoptium JDK, Erlang/OTP + Elixir + ElixirLS, the Swift toolchain (GPG
+signature) and `cpanm`. **Not yet verified by Koda:** Eclipse JDT (the floating
+`jdtls` `-latest` snapshot), `lua-language-server`, `kotlin-language-server` and
+OmniSharp (with its `dotnet-install.sh`) download a pinned release without a
+checksum. Package-manager installs delegate integrity to that manager. See
+[`SECURITY.md`](SECURITY.md) for the full trust model.
+
 **Language Setup…** in the command palette then lists every tool Koda knows
 about and installs a missing one with a single `Enter` — through the official
 channel, so provenance and integrity stay with the package manager:
@@ -184,19 +194,24 @@ installation by running the real tool — never just because a file exists.
 | Swift toolchain | `download.swift.org` | GPG signature (`all-keys.asc`), fail-closed | native builds for Ubuntu 22.04/24.04/26.04, Debian 12/13, Fedora 39/41, Amazon Linux 2/2023; the portable UBI10 build plus a compatibility layer on other glibc Linux |
 | Erlang/OTP + Elixir | `builds.hex.pm` (Erlang Ecosystem Foundation) | SHA-256 from `builds.txt`, fail-closed | glibc Linux (best-effort Ubuntu 24.04 target where unnamed; musl excluded) |
 | ElixirLS | official GitHub release | SHA-256 asset digest | same as Erlang/Elixir |
-| Go toolchain | `go.dev/dl` | SHA-256 from the release JSON, fail-closed | Linux/macOS/Windows, x86_64/arm64 |
+| Go toolchain | `go.dev/dl` | SHA-256 from the release JSON, fail-closed | Linux/macOS, x86_64/arm64 |
 | clangd | `clangd/clangd` release | SHA-256 asset digest | Linux/macOS (glibc); not musl |
 | asm-lsp | `bergercookie/asm-lsp` release (prebuilt) | SHA-256 asset digest | Linux x86_64, macOS x86_64/arm64; `cargo`/`rustup` elsewhere |
 | phpactor | `phpactor/phpactor` release (`phpactor.phar`) | SHA-256 asset digest | wherever a system `php` exists |
-| Dart SDK | Google `dart-archive` | sibling `.sha256sum`, fail-closed | Linux/macOS/Windows, x86_64/arm64 |
-| Node.js | `nodejs.org` | `SHASUMS256.txt` | Linux/macOS/Windows, x86_64/arm64 |
-| Eclipse Adoptium JDK | `api.adoptium.net` | checksum from the API | Linux/macOS/Windows |
-| Java (jdtls) | Eclipse snapshots + managed JDK 25 | — | with a managed JDK |
-| Kotlin | pinned server + managed JDK 21 | — | with a managed JDK |
-| Lua | `LuaLS` release | — | Linux/macOS/Windows |
-| OmniSharp | GitHub release + `dotnet-install.sh` | — | Linux/macOS/Windows |
+| Dart SDK | Google `dart-archive` | sibling `.sha256sum`, fail-closed | Linux/macOS, x86_64/arm64 |
+| Node.js | `nodejs.org` | `SHASUMS256.txt` | Linux/macOS, x86_64/arm64 |
+| Eclipse Adoptium JDK | `api.adoptium.net` | checksum from the API | Linux/macOS, x86_64/arm64 |
+| Java (jdtls) | Eclipse snapshots + managed JDK 25 | — (no checksum yet) | Linux/macOS, with a managed JDK |
+| Kotlin | pinned server + managed JDK 21 | — (no checksum yet) | Linux/macOS, with a managed JDK |
+| Lua | `LuaLS` release | — (no checksum yet) | Linux/macOS |
+| OmniSharp | GitHub release + `dotnet-install.sh` | — (no checksum yet) | Linux/macOS |
 | Perl (PLS, and `Perl::LanguageServer`) | CPAN, via a checksum-verified `cpanm` | SHA-256 (`App::cpanminus`), fail-closed | wherever a system `perl` exists |
 | solargraph | RubyGems, into a Koda-private gem home | RubyGems signatures/HTTPS | wherever a system `gem` exists |
+
+A `—` in the Integrity column means Koda downloads that component without
+verifying a checksum today. Those four rows (Java/jdtls, Kotlin, Lua and
+OmniSharp) are the outstanding provisioning gap, tracked in
+[`docs/LIMITATIONS.md`](docs/LIMITATIONS.md#provisioning).
 
 On a glibc distribution swift.org does not build for, Koda uses its **UBI10**
 toolchain and a **managed compatibility layer**: a `libncurses.so.6` alias to the
@@ -380,6 +395,35 @@ cargo run -- .                 # open the current directory
 cargo run -- src/main.rs       # open a file inside its detected project
 ```
 
+### Platforms
+
+**Linux and macOS are supported. Windows is not yet supported** — Koda has no
+Windows CI, several provisioning plans require a Unix `sh`, and the code has not
+been made correct for Windows path and launcher conventions. Do not expect a
+working build on Windows.
+
+Koda works on both glibc and musl Linux; the managed prebuilt bundles (clangd,
+asm-lsp) are glibc-only and are withheld on musl, where a system toolchain or the
+`cargo` fallback is used instead.
+
+### System requirements
+
+Koda itself needs only a terminal. Provisioning and git features shell out to a
+small set of tools; each is used only when the feature needs it:
+
+| Tool | Needed for | Optional? |
+| --- | --- | --- |
+| `curl` | every managed download | required to install managed tools |
+| `tar` | unpacking `.tar.gz`/`.tar.xz` downloads | required for those downloads |
+| `unzip`, `bsdtar` or `python3` | unpacking `.zip` downloads | any one of the three |
+| `gpg` | verifying the Swift toolchain signature | **only for Swift** |
+| `git` | branch, status, diff and commit features | optional; those features degrade to empty |
+| `sh` | `rustup`, Erlang/OTP `Install`, `dotnet-install.sh` | required for those installers |
+| `sha256sum`, `shasum`, `openssl` or `python3` | checking download hashes | any one of the four |
+
+Editing, built-in language intelligence and local search work with no external
+tool at all.
+
 ## ❯ Usage
 
 ```bash
@@ -388,9 +432,11 @@ koda .            # same, explicitly
 koda src/main.rs  # start beside the file's project
 ```
 
-Koda finds the project root (`Cargo.toml`, `go.mod`, or a `.git` directory),
-establishes the language context, and opens its welcome screen. A path you pass
-is offered there as an **Open <path>** action rather than being opened for you.
+Koda finds the nearest project root by walking up from the target through its
+project markers (`Cargo.toml`, `go.mod`, `pyproject.toml`, `pom.xml`,
+`Package.swift`, `mix.exs`, …) or a `.git` directory, establishes the language
+context, and opens its welcome screen. A path you pass is offered there as an
+**Open <path>** action rather than being opened for you.
 
 ## ✦ The welcome screen
 

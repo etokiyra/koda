@@ -257,20 +257,28 @@ If two languages are nearly tied, confidence is downgraded rather than guessed.
   coordinated Erlang/OTP + Elixir + ElixirLS stack for Elixir, and the official
   Swift toolchain for `sourcekit-lsp`. `Tool::launch_env` supplies the environment
   for both probing and launching; the user's system environment is never modified.
-- **Every managed install is verified and fail-closed.** `InstallStep` grew the
-  shared mechanisms the new languages needed rather than four one-off installers:
-  `DownloadGpg` (detached signature against a private keyring), `GithubRelease`
-  (the SHA-256 digest GitHub reports for a release asset), and `BobBuild` (the
-  checksum `builds.hex.pm` publishes for an Erlang/Elixir runtime). Downloads use
-  a stall-detecting, long-transfer timeout; an `InstallCommand` may set its own
-  environment and working directory, which is how ElixirLS is built with a private
-  `MIX_HOME`/`HEX_HOME`. Each install is bounded, locked and re-probed by launching
-  the **real server**, and a verified download that still cannot run (a missing
-  shared library, a broken launcher) reports the real reason instead of a generic
-  failure. Hashing goes through whichever tool the system has — `sha256sum`,
-  `shasum`, `openssl dgst -sha256` or a Python interpreter — and a value that is
-  not 64 hex characters is rejected, so a malformed tool output cannot pass
-  verification.
+- **Managed downloads are verified where upstream publishes a check — and four
+  are not.** Every fixed-artifact download is verified: `GithubRelease` (the
+  SHA-256 digest GitHub reports for a release asset), `BobBuild` (the checksum
+  `builds.hex.pm` publishes), `AdoptiumJdk` (the checksum in the Adoptium API
+  response), `NodeRuntime` (`SHASUMS256.txt`), `DartSdk` (the sibling
+  `.sha256sum`), `GoToolchain` (the `go.dev` release JSON), `DownloadGpg`
+  (Swift's detached signature, verified against a private keyring) and
+  `Download { sha256: Some(..) }` (the pinned `App::cpanminus`). **Four managed
+  components are not verified today**: Eclipse JDT downloads the floating
+  `jdtls` `-latest` snapshot with no digest, and `lua-language-server`,
+  `kotlin-language-server` and **OmniSharp** (with its `dotnet-install.sh`)
+  download a pinned release with no checksum. Package-manager installs
+  (`rustup`, `go install <pkg>@latest`, npm, pip, gem, cpan, `cargo install`)
+  delegate integrity to that manager. Closing the four gaps is a tracked
+  limitation — see `docs/LIMITATIONS.md` (provisioning). Downloads use a
+  stall-detecting, long-transfer timeout; each install is bounded, locked and
+  re-probed by launching the **real server**, and a verified download that still
+  cannot run (a missing shared library, a broken launcher) reports the real
+  reason instead of a generic failure. Hashing goes through whichever tool the
+  system has — `sha256sum`, `shasum`, `openssl dgst -sha256` or a Python
+  interpreter — and a value that is not 64 hex characters is rejected, so a
+  malformed tool output cannot pass verification.
 - **Platform support is resolved, never guessed.** `swift_platform` and
   `bob_platform` map the running distribution from `/etc/os-release` (including
   `ID_LIKE` derivatives) to the exact upstream artifact. A distribution upstream
