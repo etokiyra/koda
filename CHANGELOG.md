@@ -79,6 +79,10 @@ when it is tagged.
 - **Rust byte strings, byte literals and lifetimes are highlighted.** `b"…"`,
   `b'…'` and `br#"…"#` are one string span (prefix included), and `'a`/`'static`
   read as a lifetime rather than a stray operator followed by plain text.
+- **Rust and Go numeric literals scan as one token.** Exponents (`1e-5`), hex
+  floats (`0x1p-2`), suffixes (`0xFFu8`, `2.5i`) and digit separators (`1_000`)
+  stay with the number, while the range `1..=2` is no longer read as a single
+  number.
 
 ### Security
 

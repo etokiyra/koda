@@ -444,14 +444,46 @@ fn scan_number(chars: &[char], start: usize) -> usize {
         && matches!(chars[i + 1], 'x' | 'X' | 'b' | 'B' | 'o' | 'O')
     {
         i += 2;
-        while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+        while i < chars.len()
+            && (chars[i].is_ascii_hexdigit() || chars[i] == '_' || chars[i] == '.')
+        {
+            i += 1;
+        }
+        if i < chars.len() && matches!(chars[i], 'p' | 'P') {
+            i = scan_exponent(chars, i);
+        }
+        while i < chars.len() && chars[i].is_ascii_alphanumeric() {
             i += 1;
         }
         return i;
     }
-    while i < chars.len()
-        && (chars[i].is_ascii_alphanumeric() || chars[i] == '_' || chars[i] == '.')
-    {
+    while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '_') {
+        i += 1;
+    }
+    // A single `.` makes a float; a second one starts a range such as `1..=2`.
+    if i + 1 < chars.len() && chars[i] == '.' && chars[i + 1] != '.' {
+        i += 1;
+        while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '_') {
+            i += 1;
+        }
+    }
+    if i < chars.len() && matches!(chars[i], 'e' | 'E') {
+        i = scan_exponent(chars, i);
+    }
+    // A type suffix such as `u32`, `f64` or `i8`.
+    while i < chars.len() && chars[i].is_ascii_alphanumeric() {
+        i += 1;
+    }
+    i
+}
+
+/// Consume an exponent marker (`e`/`E`/`p`/`P`), an optional sign and its digits.
+fn scan_exponent(chars: &[char], marker: usize) -> usize {
+    let mut i = marker + 1;
+    if i < chars.len() && matches!(chars[i], '+' | '-') {
+        i += 1;
+    }
+    while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '_') {
         i += 1;
     }
     i
@@ -557,5 +589,28 @@ mod tests {
         let (spans, _) = RustProvider.highlight("let c = 'x';", HighlightState::default());
         assert!(spans.iter().any(|span| span.kind == TokenKind::String));
         assert!(!spans.iter().any(|span| span.kind == TokenKind::Type));
+    }
+
+    #[test]
+    fn numeric_exponents_and_ranges_are_scanned() {
+        for (source, expected) in [
+            ("1e10", "1e10"),
+            ("1e-5", "1e-5"),
+            ("1.5e+3f64", "1.5e+3f64"),
+            ("0x1p-2", "0x1p-2"),
+            ("0xFFu8", "0xFFu8"),
+        ] {
+            let (spans, _) = RustProvider.highlight(source, HighlightState::default());
+            let number = spans.iter().find(|span| span.kind == TokenKind::Number);
+            assert_eq!(
+                number.map(|span| &source[span.range.clone()]),
+                Some(expected),
+                "{source} was not one number: {spans:?}"
+            );
+        }
+
+        // `1..=2` is a range, so the number stops before the dots.
+        let (spans, _) = RustProvider.highlight("1..=2", HighlightState::default());
+        assert_eq!(spans[0].range, 0..1);
     }
 }

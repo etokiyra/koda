@@ -364,14 +364,46 @@ fn scan_number(chars: &[char], start: usize) -> usize {
         && matches!(chars[i + 1], 'x' | 'X' | 'b' | 'B' | 'o' | 'O')
     {
         i += 2;
-        while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+        while i < chars.len()
+            && (chars[i].is_ascii_hexdigit() || chars[i] == '_' || chars[i] == '.')
+        {
+            i += 1;
+        }
+        if i < chars.len() && matches!(chars[i], 'p' | 'P') {
+            i = scan_exponent(chars, i);
+        }
+        while i < chars.len() && chars[i].is_ascii_alphanumeric() {
             i += 1;
         }
         return i;
     }
-    while i < chars.len()
-        && (chars[i].is_ascii_alphanumeric() || chars[i] == '_' || chars[i] == '.')
-    {
+    while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '_') {
+        i += 1;
+    }
+    // A single `.` makes a float; a second one is not part of the number.
+    if i + 1 < chars.len() && chars[i] == '.' && chars[i + 1] != '.' {
+        i += 1;
+        while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '_') {
+            i += 1;
+        }
+    }
+    if i < chars.len() && matches!(chars[i], 'e' | 'E') {
+        i = scan_exponent(chars, i);
+    }
+    // An imaginary suffix (`2.5i`) or type suffix.
+    while i < chars.len() && chars[i].is_ascii_alphanumeric() {
+        i += 1;
+    }
+    i
+}
+
+/// Consume an exponent marker (`e`/`E`/`p`/`P`), an optional sign and its digits.
+fn scan_exponent(chars: &[char], marker: usize) -> usize {
+    let mut i = marker + 1;
+    if i < chars.len() && matches!(chars[i], '+' | '-') {
+        i += 1;
+    }
+    while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '_') {
         i += 1;
     }
     i
@@ -423,5 +455,23 @@ mod tests {
                 .iter()
                 .any(|s| s.kind == TokenKind::String && s.range == (5..len))
         );
+    }
+
+    #[test]
+    fn numeric_literals_include_exponents_and_suffixes() {
+        for (source, expected) in [
+            ("1e-9", "1e-9"),
+            ("0x1p-2", "0x1p-2"),
+            ("1_000", "1_000"),
+            ("2.5i", "2.5i"),
+        ] {
+            let (spans, _) = GoProvider.highlight(source, HighlightState::default());
+            let number = spans.iter().find(|span| span.kind == TokenKind::Number);
+            assert_eq!(
+                number.map(|span| &source[span.range.clone()]),
+                Some(expected),
+                "{source} was not one number: {spans:?}"
+            );
+        }
     }
 }
