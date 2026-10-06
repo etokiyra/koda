@@ -59,7 +59,8 @@ this file, and add or change a test.
 ## Language and detection
 
 - **Line-based highlight cache.** Providers return `(spans, next_state)` so
-  multi-line constructs work. `HighlightState` carries a block-comment flag plus a
+  multi-line constructs work. `HighlightState` carries a block-comment flag and
+  depth (Rust's comments nest, so the open level survives a line break) plus a
   small shared vocabulary — `LexMode` (template literals and their `${}`
   interpolation) and `Embed` (an open HTML `<script>`/`<style>` region) — rather
   than language-specific state on the editor. The HTML tokenizer delegates an

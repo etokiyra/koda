@@ -142,46 +142,44 @@ impl LanguageProvider for RustProvider {
         let mut spans = Vec::new();
         let mut i = 0;
 
-        // Finish a block comment carried over from the previous line.
+        // Finish a block comment carried over from the previous line. Rust block
+        // comments nest, so the carried depth decides where the comment really ends.
         if state.in_block_comment {
-            if let Some(end) = find_block_comment_end(&chars, 0) {
+            let (end, depth) = scan_block_comment(&chars, 0, state.block_comment_depth);
+            if end > 0 {
                 spans.push(HighlightSpan::new(0, end, TokenKind::Comment));
-                i = end;
-            } else {
-                if len > 0 {
-                    spans.push(HighlightSpan::new(0, len, TokenKind::Comment));
-                }
+            }
+            if depth > 0 {
                 return (
                     spans,
                     HighlightState {
                         in_block_comment: true,
+                        block_comment_depth: depth,
                         ..Default::default()
                     },
                 );
             }
+            i = end;
         }
 
         while i < len {
             let c = chars[i];
 
-            // Block comment.
+            // Block comment; Rust nests `/* */`, so the depth must balance.
             if c == '/' && i + 1 < len && chars[i + 1] == '*' {
-                match find_block_comment_end(&chars, i) {
-                    Some(end) => {
-                        spans.push(HighlightSpan::new(i, end, TokenKind::Comment));
-                        i = end;
-                    }
-                    None => {
-                        spans.push(HighlightSpan::new(i, len, TokenKind::Comment));
-                        return (
-                            spans,
-                            HighlightState {
-                                in_block_comment: true,
-                                ..Default::default()
-                            },
-                        );
-                    }
+                let (end, depth) = scan_block_comment(&chars, i, 0);
+                spans.push(HighlightSpan::new(i, end, TokenKind::Comment));
+                if depth > 0 {
+                    return (
+                        spans,
+                        HighlightState {
+                            in_block_comment: true,
+                            block_comment_depth: depth,
+                            ..Default::default()
+                        },
+                    );
                 }
+                i = end;
                 continue;
             }
 
@@ -308,15 +306,38 @@ fn classify_word(word: &str, followed_by_bang: bool) -> TokenKind {
     TokenKind::Plain
 }
 
-fn find_block_comment_end(chars: &[char], start: usize) -> Option<usize> {
+/// Scan a block comment from `start` with `depth` levels already open, returning
+/// the index just past the character that closed the outermost comment (or the
+/// line length if it stays open) and the depth still open.
+///
+/// Rust block comments nest, so `/* a /* b */ c */` closes only at the last `*/`;
+/// the same depth is carried across lines through
+/// [`HighlightState::block_comment_depth`].
+fn scan_block_comment(chars: &[char], start: usize, depth: u8) -> (usize, u8) {
     let mut i = start;
-    while i + 1 < chars.len() {
-        if chars[i] == '*' && chars[i + 1] == '/' {
-            return Some(i + 2);
+    let mut depth = depth;
+    while i < chars.len() {
+        if i + 1 < chars.len() {
+            match (chars[i], chars[i + 1]) {
+                ('/', '*') => {
+                    depth = depth.saturating_add(1);
+                    i += 2;
+                    continue;
+                }
+                ('*', '/') => {
+                    depth -= 1;
+                    i += 2;
+                    if depth == 0 {
+                        return (i, 0);
+                    }
+                    continue;
+                }
+                _ => {}
+            }
         }
         i += 1;
     }
-    None
+    (chars.len(), depth)
 }
 
 fn scan_quoted(chars: &[char], start: usize, quote: char) -> usize {
@@ -443,5 +464,31 @@ mod tests {
         let (spans, state) = RustProvider.highlight("still here */ code", state);
         assert!(!state.in_block_comment);
         assert_eq!(spans[0].kind, TokenKind::Comment);
+    }
+
+    #[test]
+    fn nested_block_comments_close_only_at_the_outer_end() {
+        let line = "/* a /* b */ c */ let x";
+        let (spans, state) = RustProvider.highlight(line, HighlightState::default());
+        assert!(!state.in_block_comment);
+        let outer_end = line.rfind("*/").expect("the line ends a comment") + 2;
+        assert_eq!(spans[0].kind, TokenKind::Comment);
+        assert_eq!(spans[0].range.end, outer_end);
+        assert!(spans.iter().any(|span| span.kind == TokenKind::Keyword));
+    }
+
+    #[test]
+    fn nested_block_comment_depth_carries_across_lines() {
+        let (spans, state) = RustProvider.highlight("/* outer /* inner", HighlightState::default());
+        assert!(state.in_block_comment);
+        assert_eq!(state.block_comment_depth, 2);
+        assert_eq!(spans[0].kind, TokenKind::Comment);
+
+        let (spans, state) = RustProvider.highlight("still */ outer */ let x", state);
+        assert!(!state.in_block_comment);
+        assert_eq!(state.block_comment_depth, 0);
+        assert_eq!(spans[0].kind, TokenKind::Comment);
+        // The `let` after the comment is code, not swallowed by the comment.
+        assert!(spans.iter().any(|span| span.kind == TokenKind::Keyword));
     }
 }

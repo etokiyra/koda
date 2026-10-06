@@ -71,6 +71,12 @@ when it is tagged.
   known capability-gating inconsistency. A test keeps it in sync with the
   provider registry.
 
+### Fixed
+
+- **Nested Rust block comments highlight correctly.** Because Rust block comments
+  nest, `/* a /* b */ c */` now stays a single comment instead of closing at the
+  inner `*/`, and the open nesting level is carried across lines.
+
 ### Security
 
 - **The download cache never bypasses verification.** Cache identity is the

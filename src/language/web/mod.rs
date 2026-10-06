@@ -325,6 +325,7 @@ impl LanguageProvider for WebProvider {
                         spans,
                         HighlightState {
                             in_block_comment: true,
+                            block_comment_depth: 0,
                             mode,
                             embed: state.embed,
                         },
@@ -398,6 +399,7 @@ impl LanguageProvider for WebProvider {
                             spans,
                             HighlightState {
                                 in_block_comment: true,
+                                block_comment_depth: 0,
                                 mode,
                                 embed: state.embed,
                             },
@@ -510,6 +512,7 @@ impl LanguageProvider for WebProvider {
             spans,
             HighlightState {
                 in_block_comment,
+                block_comment_depth: 0,
                 mode,
                 embed: state.embed,
             },

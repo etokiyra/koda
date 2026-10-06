@@ -114,6 +114,10 @@ pub enum Embed {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HighlightState {
     pub in_block_comment: bool,
+    /// How many block-comment levels are still open, for languages whose block
+    /// comments nest (Rust). Every other language leaves this at `0` and uses
+    /// [`in_block_comment`](Self::in_block_comment) alone.
+    pub block_comment_depth: u8,
     pub mode: LexMode,
     pub embed: Embed,
 }

@@ -252,6 +252,7 @@ impl HtmlProvider {
         };
         let sub_state = HighlightState {
             in_block_comment: state.in_block_comment,
+            block_comment_depth: state.block_comment_depth,
             mode: state.mode,
             embed: Embed::None,
         };
@@ -265,6 +266,7 @@ impl HtmlProvider {
                 spans,
                 HighlightState {
                     in_block_comment: embedded.in_block_comment,
+                    block_comment_depth: embedded.block_comment_depth,
                     mode: embedded.mode,
                     embed: kind,
                 },
