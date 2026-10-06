@@ -1,24 +1,60 @@
 name: CI
 
+# Paths that cannot affect compilation are skipped: a docs-only push should not
+# spend a runner. Anything that can change the build (source, Cargo.*, scripts,
+# this workflow) still runs the full suite.
 on:
   push:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - LICENSE
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - LICENSE
+
+# A newer push to the same branch supersedes an older run, so a queued runner is
+# never spent on a commit that has already been replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Incremental artefacts only bloat the cache for one-shot CI builds.
+  CARGO_INCREMENTAL: 0
 
 jobs:
   test:
     name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        os: [ubuntu-24.04, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Record the runner platform
         run: uname -s && uname -m
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - name: Formatting
         run: cargo fmt --check
       - name: Lints
@@ -31,14 +67,26 @@ jobs:
   # tool plan are exercised for real.
   arch:
     name: Library tests (Arch Linux container)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     container: archlinux:base-devel
     steps:
       - name: Install tooling
-        run: pacman -Syu --noconfirm git curl rustup
+        run: pacman -Syu --noconfirm git curl rustup zstd
       - name: Select the stable toolchain
         run: rustup default stable
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup
+            target
+          key: arch-linux-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            arch-linux-cargo-
       - name: Library tests
         run: cargo test --lib -- --test-threads=1
 
@@ -47,16 +95,30 @@ jobs:
   # reproducible musl environment.
   musl:
     name: Library tests (Alpine Linux, musl)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     container: alpine:latest
     steps:
       - name: Install tooling
-        run: apk add --no-cache git curl bash build-base
+        # GNU tar (not busybox) and zstd are what actions/cache requires inside a
+        # container; Alpine provides them as separate packages.
+        run: apk add --no-cache git curl bash build-base tar zstd
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
             | sh -s -- -y --profile minimal
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup
+            target
+          key: alpine-musl-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            alpine-musl-cargo-
       - name: Library tests
         run: |
           . "$HOME/.cargo/env"
