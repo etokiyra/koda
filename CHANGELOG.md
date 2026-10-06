@@ -76,6 +76,9 @@ when it is tagged.
 - **Nested Rust block comments highlight correctly.** Because Rust block comments
   nest, `/* a /* b */ c */` now stays a single comment instead of closing at the
   inner `*/`, and the open nesting level is carried across lines.
+- **Rust byte strings, byte literals and lifetimes are highlighted.** `b"…"`,
+  `b'…'` and `br#"…"#` are one string span (prefix included), and `'a`/`'static`
+  read as a lifetime rather than a stray operator followed by plain text.
 
 ### Security
 

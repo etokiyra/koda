@@ -216,6 +216,34 @@ impl LanguageProvider for RustProvider {
                 continue;
             }
 
+            // Byte string, byte literal and raw byte string: b"…", b'…', br"…",
+            // br#"…"#. Include the prefix in the string span.
+            if c == 'b' && i + 1 < len {
+                match chars[i + 1] {
+                    '"' => {
+                        let end = scan_quoted(&chars, i + 1, '"');
+                        spans.push(HighlightSpan::new(i, end, TokenKind::String));
+                        i = end;
+                        continue;
+                    }
+                    '\'' => {
+                        if let Some(end) = scan_char_literal(&chars, i + 1) {
+                            spans.push(HighlightSpan::new(i, end, TokenKind::String));
+                            i = end;
+                            continue;
+                        }
+                    }
+                    'r' if i + 2 < len && (chars[i + 2] == '"' || chars[i + 2] == '#') => {
+                        if let Some(end) = scan_raw_string(&chars, i + 1) {
+                            spans.push(HighlightSpan::new(i, end, TokenKind::String));
+                            i = end;
+                            continue;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
             // Raw string: r"..." or r#"..."# / r##"..."##
             if c == 'r'
                 && i + 1 < len
@@ -235,11 +263,20 @@ impl LanguageProvider for RustProvider {
                 continue;
             }
 
-            // Char literal (but not a lifetime such as `'a`).
+            // Char literal, or a lifetime/label such as `'a`, `'static`, `'_`.
             if c == '\'' {
                 if let Some(end) = scan_char_literal(&chars, i) {
                     spans.push(HighlightSpan::new(i, end, TokenKind::String));
                     i = end;
+                    continue;
+                }
+                if i + 1 < len && is_ident_start(chars[i + 1]) {
+                    let mut j = i + 1;
+                    while j < len && is_ident_continue(chars[j]) {
+                        j += 1;
+                    }
+                    push_merged(&mut spans, HighlightSpan::new(i, j, TokenKind::Type));
+                    i = j;
                     continue;
                 }
                 spans.push(HighlightSpan::new(i, i + 1, TokenKind::Operator));
@@ -490,5 +527,35 @@ mod tests {
         assert_eq!(spans[0].kind, TokenKind::Comment);
         // The `let` after the comment is code, not swallowed by the comment.
         assert!(spans.iter().any(|span| span.kind == TokenKind::Keyword));
+    }
+
+    #[test]
+    fn byte_strings_and_byte_literals_are_single_string_spans() {
+        for source in ["b\"bytes\"", "b'x'", "br\"raw\"", "br#\"raw # hash\"#"] {
+            let (spans, _) = RustProvider.highlight(source, HighlightState::default());
+            let len = source.chars().count();
+            assert!(
+                spans
+                    .iter()
+                    .any(|span| span.kind == TokenKind::String && span.range == (0..len)),
+                "{source} was not highlighted as one string span: {spans:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lifetimes_are_not_read_as_char_literals() {
+        let (spans, _) = RustProvider.highlight("fn f<'a>(x: &'a str)", HighlightState::default());
+        assert!(
+            spans
+                .iter()
+                .any(|span| span.kind == TokenKind::Type && span.range == (5..7)),
+            "the lifetime 'a should be a type span: {spans:?}"
+        );
+
+        // A real char literal stays a string, and adds no lifetime span.
+        let (spans, _) = RustProvider.highlight("let c = 'x';", HighlightState::default());
+        assert!(spans.iter().any(|span| span.kind == TokenKind::String));
+        assert!(!spans.iter().any(|span| span.kind == TokenKind::Type));
     }
 }
