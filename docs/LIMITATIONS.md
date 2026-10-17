@@ -187,6 +187,12 @@ describes the current state.
   compatibility layer is `cfg(unix)`, and `language/format.rs` builds a child
   `PATH` with a hard-coded `:` separator. The code compiles in places but has no
   end-to-end path.
+- **A `sudo` launch has the root account's tool context.** Koda deliberately
+  keeps its state in the root account's directory and only discovers tools on
+  the system path (including `/run/current-system/sw/bin` and
+  `/nix/var/nix/profiles/default/bin`); language servers installed only for the
+  invoking user are not executed as root. This is a safety boundary, not a
+  missing feature.
 - **Linux and macOS are supported.** CI builds and tests on Linux (glibc), in
   an Arch Linux container and on Alpine (musl), and on macOS. A job's presence
   is not proof it passed; see the "Platform and verification" matrix in the

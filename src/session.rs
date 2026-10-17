@@ -101,11 +101,7 @@ fn cursor_pair(item: &Value) -> Option<(usize, usize)> {
 
 /// The state file for a project root, if a state directory is available.
 pub fn session_path(root: &Path) -> Option<PathBuf> {
-    let base = if let Some(state) = std::env::var_os("XDG_STATE_HOME") {
-        PathBuf::from(state).join("koda")
-    } else {
-        PathBuf::from(std::env::var_os("HOME")?).join(".local/state/koda")
-    };
+    let base = crate::recent::state_dir()?;
     let key = fnv1a(root.to_string_lossy().as_bytes());
     Some(base.join(format!("session-{key:016x}.json")))
 }

@@ -22,6 +22,11 @@ when it is tagged.
   with `nix profile` into its own profile. `flake.nix` establishes a Nix
   project, Nix profile binaries are found even when launched from a GUI or
   `sudo`, and **Create a new project** can scaffold a flake.
+- **Running under `sudo`.** Koda keeps its state under the root account rather
+  than writing root-owned files into the invoking user's home, and an atomic save
+  preserves the original file's owner as well as its mode, so editing a user file
+  as root does not lock that user out afterwards. The system-wide NixOS profile
+  is searched for language tools under `sudo`.
 - **In-app Settings.** A keyboard-driven **Settings** screen (opened from the
   command palette) changes a small set of global preferences: theme, line
   numbers, animations, soft wrap, indentation width, spaces vs tabs, inline

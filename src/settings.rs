@@ -191,10 +191,7 @@ fn quarantine(path: &Path) -> std::io::Result<()> {
 
 /// The settings file under Koda's state directory, if a home directory exists.
 pub fn settings_path() -> Option<PathBuf> {
-    if let Some(state) = std::env::var_os("XDG_STATE_HOME") {
-        return Some(PathBuf::from(state).join("koda/settings.json"));
-    }
-    Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/state/koda/settings.json"))
+    crate::recent::state_dir().map(|dir| dir.join("settings.json"))
 }
 
 #[cfg(test)]

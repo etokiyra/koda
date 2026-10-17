@@ -95,11 +95,11 @@ fn string_list(value: Option<&Value>) -> Vec<PathBuf> {
 }
 
 /// The Koda state directory, if a home directory is available.
+///
+/// Shared with [`crate::settings`] and [`crate::session`] so all Koda state
+/// follows the same rule under `sudo` (see [`crate::privileges`]).
 pub fn state_dir() -> Option<PathBuf> {
-    if let Some(state) = std::env::var_os("XDG_STATE_HOME") {
-        return Some(PathBuf::from(state).join("koda"));
-    }
-    Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/state/koda"))
+    crate::privileges::current_state_base().map(|base| base.join("koda"))
 }
 
 fn state_path(name: &str) -> Option<PathBuf> {

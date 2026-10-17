@@ -468,6 +468,20 @@ project markers (`Cargo.toml`, `go.mod`, `pyproject.toml`, `pom.xml`,
 the language context, and opens its welcome screen. A path you pass is offered
 there as an **Open <path>** action rather than being opened for you.
 
+### Running with sudo
+
+Koda can edit system files, for example on NixOS:
+
+```bash
+sudo "$(command -v koda)" /etc/nixos/configuration.nix
+```
+
+Use the absolute path because `sudo`'s `secure_path` usually omits
+`~/.cargo/bin`. Koda keeps its own state under the root account (never
+root-owned files in your home), still searches the system-wide Nix profile for
+language tools, and preserves the original owner and mode when it saves a file
+you own.
+
 ## ✦ The welcome screen
 
 Koda always opens on its home screen. It is a small, atmospheric scene — the

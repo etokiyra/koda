@@ -106,7 +106,12 @@ pub fn write_string(path: &Path, contents: &str) -> std::io::Result<()> {
 /// Atomically replace `path` with `contents`.
 ///
 /// Writes a sibling temporary file, flushes it, preserves the destination's
-/// permissions when it already exists, and renames it into place.
+/// permissions and owner when it already exists, and renames it into place.
+///
+/// Preserving the owner matters when Koda is launched through `sudo`: editing a
+/// user's file as root must not leave it root-owned, or the user could no longer
+/// write to it afterwards. The call is best-effort; on a normal launch it is a
+/// no-op because the owner already matches.
 pub fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
     use std::io::Write;
 
@@ -120,12 +125,16 @@ pub fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
         .and_then(|name| name.to_str())
         .unwrap_or("koda");
     let temp = path.with_file_name(format!(".{name}.koda-{}.tmp", std::process::id()));
+    let existing = std::fs::metadata(path).ok();
 
     let write = (|| {
         let mut file = std::fs::File::create(&temp)?;
         file.write_all(contents.as_bytes())?;
         file.sync_all()?;
-        if let Ok(metadata) = std::fs::metadata(path) {
+        if let Some(metadata) = &existing {
+            // Set the owner first: changing it can clear setuid/setgid bits, so
+            // the mode is restored afterwards.
+            preserve_owner(&temp, metadata);
             let _ = std::fs::set_permissions(&temp, metadata.permissions());
         }
         drop(file);
@@ -136,6 +145,19 @@ pub fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
     }
     write
 }
+
+/// Give `temp` the same owner as `metadata`, when the platform exposes one.
+#[cfg(unix)]
+fn preserve_owner(temp: &Path, metadata: &std::fs::Metadata) {
+    use std::os::unix::fs::MetadataExt;
+
+    // A non-root process cannot change the owner; the failure is expected and
+    // harmless because it already owns the file it is replacing.
+    let _ = std::os::unix::fs::chown(temp, Some(metadata.uid()), Some(metadata.gid()));
+}
+
+#[cfg(not(unix))]
+fn preserve_owner(_temp: &Path, _metadata: &std::fs::Metadata) {}
 
 /// Create an empty file (and its parent directories), failing if it exists.
 pub fn create_empty_file(path: &Path) -> std::io::Result<()> {
@@ -286,6 +308,66 @@ mod tests {
         assert_eq!(fs::read_to_string(&existing).unwrap(), "b");
         assert_eq!(fs::read_to_string(&source).unwrap(), "a");
 
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_mode_and_owner() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let dir = std::env::temp_dir().join(format!("koda-fs-write-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.nix");
+        fs::write(&path, "{ }\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        let before = fs::metadata(&path).unwrap();
+
+        write_atomic(&path, "{ x = 1; }\n").unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{ x = 1; }\n");
+        let after = fs::metadata(&path).unwrap();
+        assert_eq!(after.permissions().mode() & 0o777, 0o640);
+        // A save makes a sibling temp file; it must not change ownership.
+        assert_eq!(after.uid(), before.uid());
+        assert_eq!(after.gid(), before.gid());
+        // The temp file was renamed, not left behind.
+        assert!(
+            !dir.join(format!(".config.nix.koda-{}.tmp", std::process::id()))
+                .exists()
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_a_different_owner_when_running_as_root() {
+        use std::os::unix::fs::MetadataExt;
+
+        // This is the `sudo` case: a root process replaces a file owned by
+        // somebody else. It can only be exercised with the privilege to change
+        // ownership in the first place, so a normal test run skips it.
+        if !crate::privileges::is_root() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("koda-fs-owner-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("configuration.nix");
+        fs::write(&path, "{ }\n").unwrap();
+        // The usual `nobody` uid/gid on Linux; the exact account is irrelevant.
+        if std::os::unix::fs::chown(&path, Some(65534), Some(65534)).is_err() {
+            fs::remove_dir_all(&dir).ok();
+            return;
+        }
+
+        write_atomic(&path, "{ users.users.alice = { }; }\n").unwrap();
+
+        let metadata = fs::metadata(&path).unwrap();
+        assert_eq!(metadata.uid(), 65534, "the original owner must survive");
+        assert_eq!(metadata.gid(), 65534, "the original group must survive");
         fs::remove_dir_all(&dir).ok();
     }
 
