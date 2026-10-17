@@ -593,6 +593,56 @@ fn bracket_match_is_highlighted() {
 }
 
 #[test]
+fn renders_nix_syntax_highlighting() {
+    let dir = std::env::temp_dir().join(format!("koda-render-nix-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("flake.nix");
+    fs::write(
+        &file,
+        "{ pkgs, ... }: let greeting = \"hi\"; in builtins.trace greeting pkgs\n",
+    )
+    .unwrap();
+
+    let mut app = app_with_file(&file);
+    assert_eq!(
+        app.editor.active_document().unwrap().buffer.language,
+        koda::language::LanguageId::Nix
+    );
+    let screen = draw(&mut app);
+    assert!(screen.contains("builtins"), "the buffer should be visible");
+
+    let backend = TestBackend::new(120, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| koda::ui::render(frame, &mut app))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let has_color = |color: Color| {
+        (0..buffer.area.height).any(|y| {
+            (0..buffer.area.width).any(|x| buffer.cell((x, y)).is_some_and(|cell| cell.fg == color))
+        })
+    };
+    assert!(
+        has_color(
+            theme::token_style(koda::language::TokenKind::Keyword)
+                .fg
+                .unwrap()
+        ),
+        "`let`/`in` should render with the keyword colour"
+    );
+    assert!(
+        has_color(
+            theme::token_style(koda::language::TokenKind::String)
+                .fg
+                .unwrap()
+        ),
+        "the string should render with the string colour"
+    );
+    cleanup(&dir);
+}
+
+#[test]
 fn editor_background_stays_transparent() {
     let dir = temp_project("transparent");
     let file = dir.join("src/main.rs");

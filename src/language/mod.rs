@@ -30,6 +30,7 @@ pub mod kotlin;
 pub mod lsp;
 pub mod lua;
 pub mod markdown;
+pub mod nix;
 pub mod perl;
 pub mod php;
 pub mod provider;

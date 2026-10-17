@@ -165,6 +165,13 @@ describes the current state.
   portable upstream distribution), so their servers are Complete-with-a-
   prerequisite rather than zero-config. Built-in editing works offline with no
   runtime. See [Provisioning](#provisioning).
+- **Nix's server needs Nix.** `nil` publishes no prebuilt release assets and is
+  not the crates.io `nil` crate, so Koda installs it (and `nixfmt`) from a pinned
+  nixpkgs commit with `nix profile` into a Koda-private profile. A system `nix`
+  is therefore a prerequisite; on NixOS it is already present. The install is
+  build/unit-verified here, not live-run because this host has no Nix. Nix
+  editing, highlighting, diagnostics, symbols, completion and navigation are
+  fully offline.
 
 ## Git
 

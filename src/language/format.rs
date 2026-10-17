@@ -105,6 +105,22 @@ pub fn shfmt(text: &str) -> FormatOutcome {
     )
 }
 
+/// Format Nix with `nixfmt` (the RFC 166 style formatter used by nixpkgs).
+///
+/// `nixfmt` reads a buffer from stdin and writes the formatted expression to
+/// stdout, including unsaved edits. On NixOS it is normally available from the
+/// system profile; elsewhere it comes from the distribution or
+/// `nix profile install nixpkgs#nixfmt-rfc-style`.
+pub fn nixfmt(text: &str) -> FormatOutcome {
+    run(
+        "nixfmt",
+        &[],
+        text,
+        "nixfmt",
+        "install it from Language Setup… (or your distribution's package manager)",
+    )
+}
+
 /// Format Perl with `perltidy`.
 pub fn perltidy(text: &str) -> FormatOutcome {
     run(

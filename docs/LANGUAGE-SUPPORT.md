@@ -60,6 +60,7 @@ Built-in provider capabilities, verified from each provider's `capabilities()`:
 | **Dart** | highlight, diagnostics, symbols, completion, hover, navigation, format | `dart language-server` | none (managed Dart SDK) | Linux, macOS | Complete |
 | **Elixir** | highlight, diagnostics, symbols, completion, hover, navigation, format | `ElixirLS` | none (managed OTP + Elixir) | **Linux only** | Platform-limited |
 | **Swift** | highlight, diagnostics, symbols, completion, hover, navigation, format | `sourcekit-lsp` | none (managed toolchain) | glibc Linux (native or portable UBI10); discovery elsewhere | Platform-limited |
+| **Nix** | highlight, diagnostics, symbols, completion, hover, navigation, format | `nil` (rename, code actions, LSP format) | `nix` (Koda installs from a pinned nixpkgs revision) | Linux glibc/musl, macOS | Complete (prerequisite) |
 | **Markdown** | highlight, symbols, format | — | none | all | Offline only |
 | **JSON** | highlight, diagnostics, symbols, completion, format | — | none | all | Offline only |
 | **TOML** | highlight, diagnostics, symbols, completion | — | none | all | Offline only |
@@ -93,6 +94,7 @@ artifact is glibc-only; those are called out explicitly.
 | Dart | Dart SDK | `3.13.5` | sibling `.sha256sum` | managed SDK |
 | Elixir | `ElixirLS` + OTP + Elixir | `0.31.1` + `27.3.4` + `1.18.4` | GitHub asset SHA-256; `builds.hex.pm` checksums; Hex `2.5.1` pinned; rebar3 `3.24.0` Koda-verified | managed runtime |
 | Swift | `sourcekit-lsp` | `6.4.0` | detached GPG signature | managed toolchain |
+| Nix | `nil`, `nixfmt` | nixpkgs `55bfb4d7437bd4e09ab7cba58a43bd68eb310044` | exact nixpkgs commit; Nix verifies every store path | system `nix` |
 
 Full provisioning semantics (cache, atomicity, pre-flight, offline reuse) are in
 [DECISIONS.md](DECISIONS.md#provisioning) and
@@ -104,12 +106,13 @@ Live server handshakes (and, where noted, completion/diagnostics round-trips) we
 run on **Linux glibc x86_64** for: `gopls`, `clangd`, `asm-lsp`, `PLS`, `sqls`,
 `dart language-server`, `ElixirLS`, `lua-language-server`,
 `kotlin-language-server`, `vscode-html-language-server` and
-`vscode-css-language-server`.
+`vscode-css-language-server`. Nix's built-in provider is covered by unit tests;
+`nil` has not been live-verified.
 
 **Not live-verified** anywhere in this repository's audits: `rust-analyzer`,
 `pylsp`, `bash-language-server`, `typescript-language-server`, `jdtls`,
-`OmniSharp`, `phpactor`, `solargraph`, `sourcekit-lsp` (macOS), and every server
-on **Linux musl** and **macOS**. They are build/unit-verified and, for some, were
+`OmniSharp`, `phpactor`, `solargraph`, `sourcekit-lsp` (macOS), `nil`, and every
+server on **Linux musl** and **macOS**. They are build/unit-verified and, for some, were
 installed successfully, but a handshake was not run. Treat their runtime status
 as unverified until a live test covers it.
 

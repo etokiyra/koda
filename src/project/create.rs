@@ -35,6 +35,7 @@ pub const CREATABLE: &[LanguageId] = &[
     LanguageId::Assembly,
     LanguageId::Html,
     LanguageId::Shell,
+    LanguageId::Nix,
     LanguageId::C,
     LanguageId::Cpp,
 ];
@@ -66,6 +67,7 @@ pub fn describe(language: LanguageId) -> &'static str {
         LanguageId::Assembly => "main.asm + Makefile",
         LanguageId::Html => "index.html + style.css",
         LanguageId::Shell => "an executable <name>.sh",
+        LanguageId::Nix => "flake.nix + .gitignore",
         LanguageId::C => "CMakeLists.txt + src/main.c",
         LanguageId::Cpp => "CMakeLists.txt + src/main.cpp",
         _ => "a minimal project structure",
@@ -181,6 +183,7 @@ pub fn create(parent: &Path, name: &str, language: LanguageId) -> CreateOutcome 
         LanguageId::Assembly => assembly(&root, name),
         LanguageId::Html => html(&root, name),
         LanguageId::Shell => shell(&root, name),
+        LanguageId::Nix => nix(&root, name),
         LanguageId::C => c(&root, name),
         LanguageId::Cpp => cpp(&root, name),
         _ => Ok(Vec::new()),
@@ -252,6 +255,16 @@ fn shell(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
     let script_path = write(root, &format!("{name}.sh"), &script)?;
     make_executable(&script_path);
     Ok(vec![script_path, write(root, "README.md", &readme)?])
+}
+
+fn nix(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let flake = format!(
+        "{{\n  description = \"A Nix flake created with Koda ({name})\";\n\n  inputs.nixpkgs.url = \"github:NixOS/nixpkgs/nixos-unstable\";\n\n  outputs =\n    {{ self, nixpkgs }}:\n    let\n      systems = [\n        \"x86_64-linux\"\n        \"aarch64-linux\"\n        \"x86_64-darwin\"\n        \"aarch64-darwin\"\n      ];\n      forAllSystems = nixpkgs.lib.genAttrs systems;\n    in\n    {{\n      packages = forAllSystems (system: {{\n        default = nixpkgs.legacyPackages.${{system}}.hello;\n      }});\n    }};\n}}\n"
+    );
+    Ok(vec![
+        write(root, "flake.nix", &flake)?,
+        write(root, ".gitignore", "result\nresult-*\n")?,
+    ])
 }
 
 fn typescript(root: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
@@ -716,6 +729,24 @@ mod tests {
             let mode = std::fs::metadata(&script).unwrap().permissions().mode();
             assert_eq!(mode & 0o111, 0o111, "script should be executable");
         }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scaffolds_a_nix_flake() {
+        let dir = scratch("nix");
+        let parent = dir.join("parent");
+        std::fs::create_dir_all(&parent).unwrap();
+        let outcome = create(&parent, "My System", LanguageId::Nix);
+        let CreateOutcome::Created { root, files } = outcome else {
+            panic!("expected success, got {outcome:?}");
+        };
+        assert!(files.iter().any(|file| file.ends_with("flake.nix")));
+        let flake = std::fs::read_to_string(root.join("flake.nix")).unwrap();
+        assert!(flake.contains("description ="));
+        assert!(flake.contains("github:NixOS/nixpkgs/nixos-unstable"));
+        assert!(flake.contains("forAllSystems"));
+        assert!(root.join(".gitignore").is_file());
         std::fs::remove_dir_all(&dir).ok();
     }
 

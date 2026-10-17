@@ -17,6 +17,8 @@ pub enum LanguageId {
     Shell,
     /// Markdown prose and documentation.
     Markdown,
+    /// Nix expressions and NixOS modules.
+    Nix,
     /// JSON (and its JSONC/GeoJSON relatives).
     Json,
     /// TOML configuration.
@@ -66,12 +68,13 @@ pub enum LanguageId {
 
 impl LanguageId {
     /// Every language Koda understands today. Keep this in sync with [`crate::language::provider`].
-    pub const ALL: [LanguageId; 26] = [
+    pub const ALL: [LanguageId; 27] = [
         LanguageId::Rust,
         LanguageId::Go,
         LanguageId::Python,
         LanguageId::Shell,
         LanguageId::Markdown,
+        LanguageId::Nix,
         LanguageId::Json,
         LanguageId::Toml,
         LanguageId::Yaml,
@@ -103,6 +106,7 @@ impl LanguageId {
             LanguageId::Python => "Python",
             LanguageId::Shell => "Shell",
             LanguageId::Markdown => "Markdown",
+            LanguageId::Nix => "Nix",
             LanguageId::Json => "JSON",
             LanguageId::Toml => "TOML",
             LanguageId::Yaml => "YAML",
@@ -136,6 +140,7 @@ impl LanguageId {
             LanguageId::Python => "python",
             LanguageId::Shell => "shell",
             LanguageId::Markdown => "markdown",
+            LanguageId::Nix => "nix",
             LanguageId::Json => "json",
             LanguageId::Toml => "toml",
             LanguageId::Yaml => "yaml",

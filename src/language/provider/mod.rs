@@ -96,6 +96,11 @@ pub enum LexMode {
     TemplateInterpolation(u16),
     /// Inside an open JSX tag (`<Component` …) that has not reached `>` yet.
     JsxTag,
+    /// Inside a string literal that continues on the next line.
+    ///
+    /// `indented` distinguishes an indented/heredoc form (`''…''` in Nix) from a
+    /// quoted one (`"…"`), so the tokenizer knows which delimiter closes it.
+    MultiLineString { indented: bool },
 }
 
 /// Which embedded sub-language an HTML region holds.
@@ -251,6 +256,7 @@ impl ProviderRegistry {
         registry.register(Box::new(crate::language::python::PythonProvider));
         registry.register(Box::new(crate::language::shell::ShellProvider));
         registry.register(Box::new(crate::language::markdown::MarkdownProvider));
+        registry.register(Box::new(crate::language::nix::NixProvider));
         registry.register(Box::new(crate::language::json::JsonProvider));
         registry.register(Box::new(crate::language::toml::TomlProvider));
         registry.register(Box::new(crate::language::yaml::YamlProvider));

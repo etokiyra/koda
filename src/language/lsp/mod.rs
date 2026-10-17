@@ -84,6 +84,7 @@ pub fn lsp_language_id(language: LanguageId) -> &'static str {
         LanguageId::Python => "python",
         LanguageId::Shell => "shellscript",
         LanguageId::Markdown => "markdown",
+        LanguageId::Nix => "nix",
         LanguageId::Json => "json",
         LanguageId::Toml => "toml",
         LanguageId::Yaml => "yaml",

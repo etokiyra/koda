@@ -2442,6 +2442,11 @@ fn detects_markup_and_config_languages() {
         ("notes.md", "# Title\n", LanguageId::Markdown),
         ("data.json", "{\"a\": 1}\n", LanguageId::Json),
         ("config.yaml", "a: true\n", LanguageId::Yaml),
+        (
+            "configuration.nix",
+            "{ pkgs, ... }: { environment.systemPackages = [ ]; }\n",
+            LanguageId::Nix,
+        ),
     ];
     for (name, content, expected) in cases {
         let file = dir.join(name);

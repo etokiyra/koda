@@ -119,6 +119,14 @@ const ASM_LSP_VERSION: &str = "0.10.1";
 /// single executable phar, so Composer is not required.
 const PHPACTOR_VERSION: &str = "2026.06.23.0";
 
+/// The nixpkgs revision Koda pins for Nix tooling (`nil`, `nixfmt`).
+///
+/// `nil` publishes no release assets and is not on crates.io, so Nix itself is
+/// the only trustworthy source. A commit is immutable and Nix verifies every
+/// store path it builds, so the install is reproducible without a Koda-side
+/// checksum.
+const NIXPKGS_REV: &str = "55bfb4d7437bd4e09ab7cba58a43bd68eb310044";
+
 /// The SHA-256 of the pinned `kotlin-language-server` `server.zip`.
 ///
 /// GitHub publishes no asset digest for this release, so the value is a
@@ -189,6 +197,7 @@ pub enum Tool {
     KotlinLs,
     Phpactor,
     LuaLs,
+    Nil,
     Sqls,
     RubyLs,
     AsmLsp,
@@ -205,6 +214,7 @@ pub enum Tool {
     ClangFormat,
     Shfmt,
     PerlTidy,
+    Nixfmt,
 }
 
 /// What a tool is for.
@@ -228,6 +238,7 @@ impl Tool {
         Tool::KotlinLs,
         Tool::Phpactor,
         Tool::LuaLs,
+        Tool::Nil,
         Tool::Sqls,
         Tool::RubyLs,
         Tool::AsmLsp,
@@ -246,6 +257,7 @@ impl Tool {
         Tool::ClangFormat,
         Tool::Shfmt,
         Tool::PerlTidy,
+        Tool::Nixfmt,
     ];
 
     pub fn program(self) -> &'static str {
@@ -261,6 +273,7 @@ impl Tool {
             Tool::KotlinLs => "kotlin-language-server",
             Tool::Phpactor => "phpactor",
             Tool::LuaLs => "lua-language-server",
+            Tool::Nil => "nil",
             Tool::Sqls => "sqls",
             Tool::RubyLs => "solargraph",
             Tool::AsmLsp => "asm-lsp",
@@ -279,6 +292,7 @@ impl Tool {
             Tool::ClangFormat => "clang-format",
             Tool::Shfmt => "shfmt",
             Tool::PerlTidy => "perltidy",
+            Tool::Nixfmt => "nixfmt",
         }
     }
 
@@ -308,6 +322,7 @@ impl Tool {
             Tool::KotlinLs => "kotlin-language-server",
             Tool::Phpactor => "phpactor",
             Tool::LuaLs => "lua-language-server",
+            Tool::Nil => "nil",
             Tool::Sqls => "sqls",
             Tool::RubyLs => "solargraph",
             Tool::AsmLsp => "asm-lsp",
@@ -324,6 +339,7 @@ impl Tool {
             Tool::ClangFormat => "clang-format",
             Tool::Shfmt => "shfmt",
             Tool::PerlTidy => "perltidy",
+            Tool::Nixfmt => "nixfmt",
         }
     }
 
@@ -340,6 +356,7 @@ impl Tool {
             Tool::KotlinLs => LanguageId::Kotlin,
             Tool::Phpactor => LanguageId::Php,
             Tool::LuaLs => LanguageId::Lua,
+            Tool::Nil | Tool::Nixfmt => LanguageId::Nix,
             Tool::Sqls => LanguageId::Sql,
             Tool::RubyLs => LanguageId::Ruby,
             Tool::AsmLsp => LanguageId::Assembly,
@@ -390,6 +407,7 @@ impl Tool {
             | Tool::KotlinLs
             | Tool::Phpactor
             | Tool::LuaLs
+            | Tool::Nil
             | Tool::Sqls
             | Tool::RubyLs
             | Tool::AsmLsp
@@ -405,7 +423,8 @@ impl Tool {
             | Tool::Prettier
             | Tool::ClangFormat
             | Tool::Shfmt
-            | Tool::PerlTidy => ToolPurpose::Formatter,
+            | Tool::PerlTidy
+            | Tool::Nixfmt => ToolPurpose::Formatter,
         }
     }
 
@@ -422,6 +441,7 @@ impl Tool {
             | Tool::KotlinLs
             | Tool::Phpactor
             | Tool::LuaLs
+            | Tool::Nil
             | Tool::Sqls
             | Tool::RubyLs
             | Tool::AsmLsp
@@ -435,7 +455,8 @@ impl Tool {
             | Tool::Prettier
             | Tool::ClangFormat
             | Tool::Shfmt
-            | Tool::PerlTidy => &["--version"],
+            | Tool::PerlTidy
+            | Tool::Nixfmt => &["--version"],
             Tool::Gopls => &["version"],
             // `jdtls` and `OmniSharp` have no `--version`; `--help` proves they
             // launch (and, for OmniSharp, that the .NET runtime is present).
@@ -522,6 +543,10 @@ impl Tool {
             Tool::ClangFormat => "it ships with the Clang/LLVM toolchain",
             Tool::Shfmt => "install it with `go install mvdan.cc/sh/v3/cmd/shfmt@v3.14.1`",
             Tool::PerlTidy => "install it with `cpan Perl::Tidy`",
+            Tool::Nil => "Koda installs nil from a pinned nixpkgs revision with `nix profile`",
+            Tool::Nixfmt => {
+                "Koda installs nixfmt from a pinned nixpkgs revision with `nix profile`"
+            }
         }
     }
 
@@ -671,8 +696,11 @@ impl Tool {
             Tool::Gofmt => None,
             Tool::Prettier => Some(("npm", &["install", "-g", PRETTIER_SPEC])),
             Tool::Shfmt => None,
-            // `clang-format` and `perltidy` ship with their language toolchains.
-            Tool::ClangFormat | Tool::PerlTidy => None,
+            // `clang-format`, `perltidy` and `nixfmt` ship with their language
+            // toolchains or distributions.
+            Tool::ClangFormat | Tool::PerlTidy | Tool::Nixfmt => None,
+            // `nil` is built from source by Koda's managed plan.
+            Tool::Nil => None,
         }
     }
 
@@ -708,6 +736,9 @@ impl Tool {
             // Dart, Erlang/Elixir and the Swift toolchain are provided by
             // Koda's managed download plans.
             Tool::DartAnalyzer | Tool::ElixirLs | Tool::SwiftLs => &[],
+            // Nix tooling comes from Nix itself; Koda never installs a package
+            // manager for it.
+            Tool::Nil | Tool::Nixfmt => &["nix"],
             // Formatters.
             Tool::Prettier => &[],
             Tool::ClangFormat | Tool::PerlTidy => &[],
@@ -779,7 +810,12 @@ impl Tool {
             Tool::Gofmt => go_toolchain_attempts(),
             Tool::Prettier => npm_attempts(&[PRETTIER_SPEC]),
             Tool::Shfmt => go_attempts(&[SHFMT_SPEC]),
-            // `clang-format` and `perltidy` ship with their toolchains.
+            // `nil` has no prebuilt assets; a pinned nixpkgs revision is the
+            // only exact, integrity-checked source.
+            Tool::Nil => nix_attempts("nil"),
+            // `clang-format` and `perltidy` ship with their toolchains;
+            // `nixfmt` comes from the same pinned nixpkgs revision as `nil`.
+            Tool::Nixfmt => nix_attempts("nixfmt"),
             Tool::ClangFormat | Tool::PerlTidy => Vec::new(),
         }
     }
@@ -971,6 +1007,38 @@ fn component_attempts(component: &'static str) -> Vec<InstallAttempt> {
         }
     }
     attempts
+}
+
+/// Install a Nix package from the pinned nixpkgs revision into a Koda-private
+/// Nix profile.
+///
+/// Nix is the only practical source for `nil`/`nixfmt` (no prebuilt release, not
+/// on crates.io), and it verifies every store path it builds. The profile is
+/// kept under Koda's tools directory so the user's own profile is untouched.
+fn nix_attempts(package: &'static str) -> Vec<InstallAttempt> {
+    let Some(profile) = nix_profile_dir() else {
+        return Vec::new();
+    };
+    let installable = format!("github:NixOS/nixpkgs/{NIXPKGS_REV}#{package}");
+    let command = InstallCommand::with_args(
+        "nix",
+        vec![
+            "--extra-experimental-features".to_string(),
+            "nix-command flakes".to_string(),
+            "profile".to_string(),
+            "install".to_string(),
+            "--profile".to_string(),
+            profile.to_string_lossy().into_owned(),
+            installable,
+        ],
+    );
+    vec![InstallAttempt::one("nix profile", command)]
+}
+
+/// The Nix profile Koda installs Nix tooling into, when a tools directory is
+/// available.
+fn nix_profile_dir() -> Option<PathBuf> {
+    Some(tools_dir()?.join("nix-profile"))
 }
 
 /// Install a Rust tool with `cargo`, bootstrapping the toolchain when absent.
@@ -1663,6 +1731,7 @@ fn managed_path() -> Option<String> {
         dirs.push(tools.join("clangd/bin"));
         dirs.push(tools.join("asm-lsp"));
         dirs.push(tools.join("phpactor"));
+        dirs.push(tools.join("nix-profile/bin"));
         dirs.push(tools.join("gems/bin"));
         dirs.push(tools.join("kotlin-jdk/bin"));
         dirs.push(tools.join("jdk/bin"));
@@ -3900,7 +3969,18 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         dirs.push(home.join(".swiftly/bin"));
         dirs.push(home.join("development/flutter/bin/cache/dart-sdk/bin"));
         dirs.push(home.join(".pub-cache/bin"));
+        // Nix profiles: `nil`, `nixfmt` and language toolchains are commonly
+        // installed through them, and a GUI launch or `sudo` may not inherit the
+        // shell's Nix profile on `PATH`.
+        dirs.push(home.join(".nix-profile/bin"));
+        dirs.push(home.join(".local/state/nix/profile/bin"));
+        dirs.push(home.join(".local/state/nix/profiles/profile/bin"));
     }
+    // The system-wide NixOS profile and the daemon's default profile are not
+    // per-user, so they are searched even when HOME points at another account
+    // (for example under `sudo`).
+    dirs.push(PathBuf::from("/run/current-system/sw/bin"));
+    dirs.push(PathBuf::from("/nix/var/nix/profiles/default/bin"));
     // Tools Koda installed itself, plus the npm prefix, Python virtualenv,
     // managed Node.js and managed runtimes it maintains.
     if let Some(tools) = tools_dir() {
@@ -3931,6 +4011,7 @@ fn known_bin_dirs() -> Vec<PathBuf> {
         dirs.push(tools.join("clangd/bin"));
         dirs.push(tools.join("asm-lsp"));
         dirs.push(tools.join("phpactor"));
+        dirs.push(tools.join("nix-profile/bin"));
         dirs.push(tools.join("gems/bin"));
         dirs.push(tools.join("jdk/bin"));
         dirs.push(tools.join("dotnet"));
@@ -4812,6 +4893,7 @@ mod tests {
                     | LanguageId::Swift
                     | LanguageId::Html
                     | LanguageId::Css
+                    | LanguageId::Nix
             ));
         }
     }
@@ -4945,6 +5027,23 @@ mod tests {
                         "{tool:?} must pin its cargo input: {command:?}"
                     );
                 }
+            }
+            "nix" => {
+                // `github:NixOS/nixpkgs/<40-hex-commit>#<package>` is immutable
+                // and Nix verifies every store path it builds.
+                assert!(
+                    args.iter().any(|arg| {
+                        arg.strip_prefix("github:NixOS/nixpkgs/")
+                            .is_some_and(|rest| {
+                                rest.split_once('#').is_some_and(|(rev, package)| {
+                                    rev.len() == 40
+                                        && rev.chars().all(|c| c.is_ascii_hexdigit())
+                                        && !package.is_empty()
+                                })
+                            })
+                    }),
+                    "{tool:?} must pin its nixpkgs revision: {command:?}"
+                );
             }
             "perl" if args.iter().any(|arg| arg.ends_with("cpanm")) => {
                 let spec = args.last().copied().unwrap_or("");
@@ -5722,6 +5821,46 @@ mod tests {
     }
 
     #[test]
+    fn nix_profiles_are_part_of_tool_discovery() {
+        let dirs = known_bin_dirs();
+        assert!(dirs.contains(&PathBuf::from("/run/current-system/sw/bin")));
+        assert!(dirs.contains(&PathBuf::from("/nix/var/nix/profiles/default/bin")));
+        if let Some(tools) = tools_dir() {
+            assert!(dirs.contains(&tools.join("nix-profile/bin")));
+        }
+    }
+
+    #[test]
+    fn nix_tools_target_the_pinned_nixpkgs_revision() {
+        for (tool, package) in [(Tool::Nil, "nil"), (Tool::Nixfmt, "nixfmt")] {
+            let attempts = tool.install_attempts();
+            let attempt = attempts.first().expect("a nix install plan");
+            let commands = run_commands(attempt);
+            let command = commands.first().expect("a nix command");
+            assert_eq!(command.program, "nix");
+            let expected = format!("github:NixOS/nixpkgs/{NIXPKGS_REV}#{package}");
+            assert!(
+                command.args.iter().any(|arg| arg == &expected),
+                "{tool:?} must install {expected}: {command:?}"
+            );
+            assert!(
+                command
+                    .args
+                    .windows(2)
+                    .any(|pair| { pair[0] == "--profile" && pair[1].ends_with("nix-profile") })
+            );
+        }
+        assert_eq!(
+            Tool::for_language(LanguageId::Nix, ToolPurpose::LanguageServer),
+            Some(Tool::Nil)
+        );
+        assert_eq!(
+            Tool::for_language(LanguageId::Nix, ToolPurpose::Formatter),
+            Some(Tool::Nixfmt)
+        );
+    }
+
+    #[test]
     fn formatters_map_to_languages_and_install_safely() {
         for (language, tool) in [
             (LanguageId::JavaScript, Tool::Prettier),
@@ -5735,6 +5874,7 @@ mod tests {
             (LanguageId::Cpp, Tool::ClangFormat),
             (LanguageId::Shell, Tool::Shfmt),
             (LanguageId::Perl, Tool::PerlTidy),
+            (LanguageId::Nix, Tool::Nixfmt),
         ] {
             assert_eq!(
                 Tool::for_language(language, ToolPurpose::Formatter),

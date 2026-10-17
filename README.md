@@ -247,6 +247,7 @@ status — is [docs/LANGUAGE-SUPPORT.md](docs/LANGUAGE-SUPPORT.md).
 | Swift | built-in | — | built-in | built-in | built-in | built-in | built-in | LSP | `sourcekit-lsp` | GPG-verified toolchain (platform-limited) |
 | Assembly | built-in | — | — | built-in (labels) | built-in | built-in | built-in | — | `asm-lsp` | prebuilt release; `cargo` fallback |
 | Shell | built-in | `shfmt` | LSP | built-in (functions) | built-in | built-in | built-in | — | `bash-language-server` | `npm`, managed prefix |
+| Nix | built-in | `nixfmt` | built-in + LSP | built-in (attributes) | built-in + LSP | built-in + LSP | built-in + LSP | LSP | `nil` | `nix profile` from a pinned nixpkgs revision (needs `nix`) |
 | Markdown | built-in | `prettier` | — | built-in (headings) | — | — | — | — | — | offline only |
 | JSON | built-in | `prettier` | built-in | built-in (top-level keys) | built-in (literals) | — | — | — | — | offline only |
 | TOML | built-in | — | built-in | built-in (tables & keys) | built-in (literals) | — | — | — | — | offline only |
@@ -441,6 +442,7 @@ as verification. **Windows is not supported.**
 | Swift | skipped (needs `libxml2.so.2`, see below) | untested | untested | — |
 | Perl | live (`PLS` handshake + completion; `Perl::LanguageServer` skipped) | untested | untested | — |
 | HTML / CSS | live (both handshakes) | untested | untested | — |
+| Nix | tests (offline provider; `nil` not live-run) | untested | untested | — |
 | Markdown / JSON / TOML / YAML | tests (offline only) | untested | untested | — |
 
 The Linux-glibc column was measured on the audit host (x86_64, Arch-based
@@ -462,9 +464,9 @@ koda src/main.rs  # start beside the file's project
 
 Koda finds the nearest project root by walking up from the target through its
 project markers (`Cargo.toml`, `go.mod`, `pyproject.toml`, `pom.xml`,
-`Package.swift`, `mix.exs`, …) or a `.git` directory, establishes the language
-context, and opens its welcome screen. A path you pass is offered there as an
-**Open <path>** action rather than being opened for you.
+`Package.swift`, `mix.exs`, `flake.nix`, …) or a `.git` directory, establishes
+the language context, and opens its welcome screen. A path you pass is offered
+there as an **Open <path>** action rather than being opened for you.
 
 ## ✦ The welcome screen
 
@@ -517,7 +519,7 @@ the home screen back.
    the chosen folder so an existing project is never overwritten.
 3. **Pick a language** — Rust, Go, Python, TypeScript, JavaScript, Java, C#,
    PHP, Kotlin, Lua, Ruby, Elixir, Dart, Swift, Perl, SQL, Assembly, HTML,
-   Shell, C or C++, each shown with what Koda will generate. `Esc` steps back
+   Shell, Nix, C or C++, each shown with what Koda will generate. `Esc` steps back
    at any point.
 
 Koda then scaffolds the project without a network connection or a toolchain and
@@ -544,6 +546,7 @@ opens it, ready to edit:
 | **Assembly** | `main.asm`, `Makefile`, `.gitignore` |
 | **HTML** | `index.html` and `style.css` |
 | **Shell** | an executable `<name>.sh` (plus a `README.md`) |
+| **Nix** | `flake.nix`, `.gitignore` |
 | **C** | `CMakeLists.txt`, `src/main.c`, `.gitignore` |
 | **C++** | `CMakeLists.txt`, `src/main.cpp`, `.gitignore` |
 

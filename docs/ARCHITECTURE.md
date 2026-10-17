@@ -82,9 +82,9 @@ src/
 ```
 
 Language providers: `asm`, `c`, `csharp`, `css`, `dart`, `elixir`, `go`,
-`html`, `java`, `json`, `kotlin`, `lua`, `markdown`, `perl`, `php`, `python`,
-`ruby`, `rust`, `shell`, `sql`, `swift`, `toml`, `web` (TypeScript/JavaScript),
-`yaml`.
+`html`, `java`, `json`, `kotlin`, `lua`, `markdown`, `nix`, `perl`, `php`,
+`python`, `ruby`, `rust`, `shell`, `sql`, `swift`, `toml`, `web`
+(TypeScript/JavaScript), `yaml`.
 
 ---
 

@@ -29,6 +29,7 @@ pub enum ProjectKind {
     Dart,
     Swift,
     Perl,
+    Nix,
     Generic,
 }
 
@@ -58,6 +59,9 @@ pub const KNOWN_MARKERS: &[(&str, ProjectKind)] = &[
     ("Package.swift", ProjectKind::Swift),
     ("cpanfile", ProjectKind::Perl),
     ("Makefile.PL", ProjectKind::Perl),
+    ("flake.nix", ProjectKind::Nix),
+    ("default.nix", ProjectKind::Nix),
+    ("shell.nix", ProjectKind::Nix),
 ];
 
 /// Markers identified by a file-name suffix rather than an exact name, which
@@ -83,6 +87,7 @@ impl ProjectKind {
             ProjectKind::Dart => "Dart",
             ProjectKind::Swift => "Swift",
             ProjectKind::Perl => "Perl",
+            ProjectKind::Nix => "Nix",
             ProjectKind::Generic => "Workspace",
         }
     }
@@ -102,6 +107,7 @@ impl ProjectKind {
             ProjectKind::Dart => LanguageId::Dart,
             ProjectKind::Swift => LanguageId::Swift,
             ProjectKind::Perl => LanguageId::Perl,
+            ProjectKind::Nix => LanguageId::Nix,
             ProjectKind::Generic => LanguageId::Unknown,
         }
     }
@@ -360,6 +366,8 @@ mod tests {
             ("pubspec.yaml", ProjectKind::Dart),
             ("Package.swift", ProjectKind::Swift),
             ("cpanfile", ProjectKind::Perl),
+            ("flake.nix", ProjectKind::Nix),
+            ("default.nix", ProjectKind::Nix),
         ] {
             let dir = std::env::temp_dir().join(format!(
                 "koda-proj-{}-{}",

@@ -39,6 +39,7 @@ mod tests {
                 LanguageId::Python => &["py"],
                 LanguageId::Shell => &["sh", "bash"],
                 LanguageId::Markdown => &["md"],
+                LanguageId::Nix => &["nix"],
                 LanguageId::Json => &["json"],
                 LanguageId::Toml => &["toml"],
                 LanguageId::Yaml => &["yaml", "yml"],

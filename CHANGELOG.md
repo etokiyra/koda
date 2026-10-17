@@ -14,6 +14,14 @@ when it is tagged.
 
 ### Added
 
+- **Nix language support.** `.nix` files are detected, highlighted (including
+  nested block comments, multi-line quoted and `''…''` strings, search paths,
+  paths and URIs), diagnosed for unbalanced brackets, outlined by attribute
+  binding, completed, hovered and navigated offline. `nil` is the language server
+  and `nixfmt` the formatter; Koda installs both from a pinned nixpkgs commit
+  with `nix profile` into its own profile. `flake.nix` establishes a Nix
+  project, Nix profile binaries are found even when launched from a GUI or
+  `sudo`, and **Create a new project** can scaffold a flake.
 - **In-app Settings.** A keyboard-driven **Settings** screen (opened from the
   command palette) changes a small set of global preferences: theme, line
   numbers, animations, soft wrap, indentation width, spaces vs tabs, inline
