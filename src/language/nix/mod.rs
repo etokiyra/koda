@@ -8,9 +8,9 @@
 //! (`services.nginx.enable = true;`) drive the symbol outline, navigation and
 //! hover.
 //!
-//! `nil` is the language server Koda uses when it is available. It is a Rust
-//! program, so Koda can build it with `cargo` (bootstrapping Rust itself when
-//! needed), and `nixfmt` formats a buffer from stdin.
+//! `nil` is the language server Koda uses when it is available, and `nixfmt`
+//! formats a buffer from stdin. Koda installs both from a pinned nixpkgs
+//! revision through a Koda-private Nix profile.
 
 use std::path::Path;
 

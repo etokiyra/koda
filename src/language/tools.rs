@@ -699,7 +699,7 @@ impl Tool {
             // `clang-format`, `perltidy` and `nixfmt` ship with their language
             // toolchains or distributions.
             Tool::ClangFormat | Tool::PerlTidy | Tool::Nixfmt => None,
-            // `nil` is built from source by Koda's managed plan.
+            // `nil` is installed by Koda's managed Nix profile plan.
             Tool::Nil => None,
         }
     }

@@ -109,8 +109,8 @@ pub fn shfmt(text: &str) -> FormatOutcome {
 ///
 /// `nixfmt` reads a buffer from stdin and writes the formatted expression to
 /// stdout, including unsaved edits. On NixOS it is normally available from the
-/// system profile; elsewhere it comes from the distribution or
-/// `nix profile install nixpkgs#nixfmt-rfc-style`.
+/// system profile; otherwise Koda installs it from a pinned nixpkgs revision,
+/// and a distribution package works too.
 pub fn nixfmt(text: &str) -> FormatOutcome {
     run(
         "nixfmt",
