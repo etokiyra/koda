@@ -33,3 +33,43 @@ unicode-width = "0.2.2"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# Debian/Ubuntu package (cargo deb). The binary is still `koda`; the package is
+# named `koda` so `apt install koda` and `sudo koda` are unsurprising.
+[package.metadata.deb]
+name = "koda"
+maintainer = "Kiyra <kiyrai@proton.me>"
+copyright = "2026, Koda contributors"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+Koda is a terminal-native IDE: it detects a project's languages, provisions
+the language servers it needs, and provides editing, search, git integration
+and language intelligence without a configuration file."""
+section = "editors"
+priority = "optional"
+depends = "libc6 (>= 2.35), libgcc-s1"
+recommends = ["git", "curl"]
+suggests = ["unzip", "gnupg"]
+assets = [
+    ["target/release/koda", "usr/bin/koda", "755"],
+    ["LICENSE", "usr/share/doc/koda/LICENSE", "644"],
+    ["README.md", "usr/share/doc/koda/README.md", "644"],
+    ["CHANGELOG.md", "usr/share/doc/koda/CHANGELOG.md", "644"],
+    ["SECURITY.md", "usr/share/doc/koda/SECURITY.md", "644"],
+    ["docs/*.md", "usr/share/doc/koda/docs/", "644"],
+]
+
+# RPM package (cargo generate-rpm). auto-req discovers libc/libgcc from ldd.
+[package.metadata.generate-rpm]
+name = "koda"
+assets = [
+    { source = "target/release/koda", dest = "/usr/bin/koda", mode = "755" },
+    { source = "LICENSE", dest = "/usr/share/licenses/koda/LICENSE", mode = "644" },
+    { source = "README.md", dest = "/usr/share/doc/koda/README.md", mode = "644", doc = true },
+    { source = "CHANGELOG.md", dest = "/usr/share/doc/koda/CHANGELOG.md", mode = "644", doc = true },
+    { source = "SECURITY.md", dest = "/usr/share/doc/koda/SECURITY.md", mode = "644", doc = true },
+    { source = "docs/*.md", dest = "/usr/share/doc/koda/docs/", mode = "644", doc = true },
+]
+release = "1"
+vendor = "Koda contributors"
+auto-req = "builtin"

@@ -114,9 +114,56 @@ jobs:
             koda-*.tar.gz.sha256
           if-no-files-found: error
 
+  # Linux packages are built on Ubuntu 22.04 (glibc 2.35) so the .deb remains
+  # installable on Debian 12, Ubuntu 22.04 and newer. The .rpm is architecture
+  # compatible with current Fedora/RHEL-family systems.
+  packages:
+    name: Build Linux packages
+    needs: verify
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install package inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes dpkg-dev rpm
+      - name: Install cargo-deb and cargo-generate-rpm
+        run: |
+          cargo install cargo-deb --locked
+          cargo install cargo-generate-rpm --locked
+      - name: Build the release binary
+        run: cargo build --release --locked
+      - name: Build the .deb
+        run: cargo deb --no-build
+      - name: Build the .rpm
+        run: cargo generate-rpm
+      - name: Check the packages contain the binary
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          deb="target/debian/koda_${VERSION}-1_amd64.deb"
+          rpm="target/generate-rpm/koda-${VERSION}-1.x86_64.rpm"
+          test -f "$deb"
+          test -f "$rpm"
+          dpkg-deb --contents "$deb" | grep -qE '\./usr/bin/koda$'
+          rpm -qpl "$rpm" | grep -qx '/usr/bin/koda'
+          dpkg-deb --field "$deb" Package Version Depends
+          rpm -qp --qf '%{NAME} %{VERSION}-%{RELEASE} %{ARCH}\n' "$rpm"
+          mkdir -p dist
+          cp "$deb" dist/
+          cp "$rpm" dist/
+      - name: Upload the packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: koda-linux-packages
+          path: dist/koda*
+          if-no-files-found: error
+
   publish:
     name: Publish the GitHub Release
-    needs: [verify, build]
+    needs: [verify, build, packages]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -124,6 +171,10 @@ jobs:
         with:
           merge-multiple: true
           path: dist
+      - name: Install RPM inspection tool
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes rpm
       - name: Verify every artifact
         env:
           VERSION: ${{ needs.verify.outputs.version }}
@@ -133,7 +184,12 @@ jobs:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
           set -euo pipefail
-          ( cd dist && sha256sum koda-"$VERSION"-*.tar.gz > SHA256SUMS )
+          (
+            cd dist
+            sha256sum koda-"$VERSION"-*.tar.gz \
+              koda_"$VERSION"-*_amd64.deb \
+              koda-"$VERSION"-*.x86_64.rpm > SHA256SUMS
+          )
           cat dist/SHA256SUMS
       - name: Create or refresh the release
         env:
@@ -145,6 +201,8 @@ jobs:
           assets=(
             dist/koda-"$VERSION"-*.tar.gz
             dist/koda-"$VERSION"-*.tar.gz.sha256
+            dist/koda_"$VERSION"-*_amd64.deb
+            dist/koda-"$VERSION"-*.x86_64.rpm
             dist/SHA256SUMS
           )
           if gh release view "$tag" >/dev/null 2>&1; then
