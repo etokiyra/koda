@@ -407,7 +407,8 @@ make install DESTDIR="$pkgdir" PREFIX=/usr
 
 `sudo make uninstall` removes the installed files. The Makefile builds with
 `cargo build --release --locked` and does not need network access after that
-build completes.
+build completes. It uses GNU `install -D` and targets Linux; macOS users should
+use the prebuilt archive or `cargo install`.
 
 ### Prebuilt binaries
 
