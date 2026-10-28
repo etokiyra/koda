@@ -192,8 +192,27 @@ describes the current state.
   the system path (including `/run/current-system/sw/bin` and
   `/nix/var/nix/profiles/default/bin`); language servers installed only for the
   invoking user are not executed as root. This is a safety boundary, not a
-  missing feature.
+  missing feature. System-wide packages make `sudo koda` work, but running the
+  whole IDE as root is still discouraged; see
+  [README.md](../README.md#running-with-sudo).
 - **Linux and macOS are supported.** CI builds and tests on Linux (glibc), in
   an Arch Linux container and on Alpine (musl), and on macOS. A job's presence
   is not proof it passed; see the "Platform and verification" matrix in the
   [README](../README.md#platform-and-verification) for what was observed.
+
+## Packaging
+
+- **Distribution packages cover Linux x86_64 only.** The release workflow
+  builds `.deb` and `.rpm` on Ubuntu 22.04 (glibc 2.35) for x86_64, and the AUR
+  packages declare `x86_64`. Linux aarch64 and macOS are served by the prebuilt
+  tarballs or a source build, not by distro packages.
+- **`.deb` and `.rpm` bundle the glibc build.** The musl archive remains the
+  static option for other Linux environments. The distro packages do not
+  include language servers or runtimes; those stay optional and are provisioned
+  or discovered at runtime.
+- **The AUR `koda` package pins a release tag.** Its checksum must be refreshed
+  for every release with `updpkgsums` and `.SRCINFO` regenerated; `koda-git`
+  follows `master` and uses `git describe` for its version.
+- **Running the whole IDE as root is discouraged**, even though `sudo koda`
+  resolves from `/usr/bin` after a system-wide install. Use it only for files
+  that need elevated privileges.

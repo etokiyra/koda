@@ -152,9 +152,15 @@ offers per project instead of per language.
 
 **Goal.** Install Koda without a Rust toolchain, and update it easily.
 
-**Acceptance.**
-- `cargo install koda-ide` works from crates.io metadata.
-- A one-line installer (`curl … | sh`) installs the right prebuilt binary.
+**Done (0.1.x).** `cargo install koda-ide` works from crates.io; a `Makefile`
+installs to `/usr/local` (or a staged `PREFIX`/`DESTDIR`); AUR packages (`koda`
+and `koda-git`) install `/usr/bin/koda`; and the release workflow attaches
+`.deb`/`.rpm` packages plus checksummed prebuilt tarballs. The README install
+section covers every path and the `sudo`/`secure_path` behaviour.
+
+**Remaining.**
+- A one-line installer (`curl … | sh`) installs the right prebuilt binary and
+  can update it.
 - The README install section stays the single authoritative source.
 
 **Depends on:** the release workflow (shipped in 0.1.0).

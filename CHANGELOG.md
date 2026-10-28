@@ -12,6 +12,32 @@ when it is tagged.
 
 ## [Unreleased]
 
+### Added
+
+- **System-wide installation.** A `Makefile` installs to `/usr/local` by default
+  and honours `PREFIX`/`DESTDIR`; AUR packages (`koda` and `koda-git`) install
+  `/usr/bin/koda`; the release workflow now builds and attaches a `.deb` and an
+  `.rpm` (and checksums every artifact). Distro packages make plain `sudo koda`
+  work through `secure_path` without an absolute path.
+- **Packaging metadata.** `Cargo.toml` carries `[package.metadata.deb]` and
+  `[package.metadata.generate-rpm]`; Debian packages depend on `libc6` and
+  `libgcc-s1`, and RPM dependencies are generated from the binary.
+- **Packaging documentation.** The README installation section documents the
+  AUR, `.deb`, `.rpm`, `make install` and `cargo install` paths, including the
+  `secure_path` caveat and a warning that running the whole IDE as root is
+  discouraged.
+
+### Changed
+
+- **`koda-git` tracks `master` without a pinned version.** Its `pkgver()` uses
+  `git describe`; the stable AUR package remains pinned to the release tag.
+
+### Security
+
+- **Root use is documented as exceptional.** The system-wide packages make
+  `sudo koda` convenient, but the README now states that it should be used only
+  for files that need elevated privileges.
+
 ## [0.1.1] - 2026-10-28
 
 ### Added

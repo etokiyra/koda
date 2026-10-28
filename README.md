@@ -339,6 +339,76 @@ koda .
 The crate is called `koda-ide` because `koda` was already taken on crates.io;
 the command it installs is still **`koda`**.
 
+`cargo install` writes to `~/.cargo/bin`, which is usually **not** in `sudo`'s
+`secure_path`. To edit a system file with that install, use the absolute path:
+
+```bash
+sudo "$(command -v koda)" /etc/nixos/configuration.nix
+```
+
+For an ordinary `sudo koda`, use the AUR package, a `.deb`/`.rpm`, or
+`make install` below.
+
+### Arch Linux (AUR)
+
+The AUR packages install `/usr/bin/koda`, so `sudo koda` resolves through the
+default `secure_path`:
+
+```bash
+yay -S koda        # tagged release
+yay -S koda-git    # latest master
+```
+
+or use `paru` in place of `yay`. The packaging sources are in
+[`packaging/aur/`](packaging/aur/).
+
+### Debian and Ubuntu (.deb)
+
+Download `koda_<version>-1_amd64.deb` from the
+[Releases page](https://github.com/etokiyra/koda/releases), then:
+
+```bash
+sudo apt install ./koda_<version>-1_amd64.deb
+koda .
+```
+
+The package needs glibc 2.35 or newer (Debian 12, Ubuntu 22.04 and later) and
+installs `/usr/bin/koda`.
+
+### Fedora and RHEL-family (.rpm)
+
+Download `koda-<version>-1.x86_64.rpm` from the same Releases page, then:
+
+```bash
+sudo dnf install ./koda-<version>-1.x86_64.rpm
+koda .
+```
+
+On systems without `dnf`, `sudo rpm -i` works as well. The package installs
+`/usr/bin/koda`.
+
+### system-wide from source (make)
+
+The Makefile installs the binary and the documentation under `PREFIX`
+(`/usr/local` by default). Building needs no root; only `make install` writes
+outside the build tree:
+
+```bash
+make
+sudo make install
+# /usr/local/bin/koda
+```
+
+Packagers can stage the install:
+
+```bash
+make install DESTDIR="$pkgdir" PREFIX=/usr
+```
+
+`sudo make uninstall` removes the installed files. The Makefile builds with
+`cargo build --release --locked` and does not need network access after that
+build completes.
+
 ### Prebuilt binaries
 
 Every tagged release publishes prebuilt archives on the
@@ -422,7 +492,8 @@ small set of tools; each is used only when the feature needs it:
 | `sha256sum`, `shasum`, `openssl` or `python3` | checking download hashes | any one of the four |
 
 Editing, built-in language intelligence and local search work with no external
-tool at all.
+tool at all. The AUR, `.deb` and `.rpm` packages declare only `glibc` and
+`libgcc`; every tool in the table above is optional.
 
 ### Platform and verification
 
@@ -486,14 +557,28 @@ there as an **Open <path>** action rather than being opened for you.
 Koda can edit system files, for example on NixOS:
 
 ```bash
+sudo koda /etc/nixos/configuration.nix
+```
+
+That works out of the box when Koda came from the AUR, a `.deb`/`.rpm`, or
+`make install`, because `/usr/bin/koda` or `/usr/local/bin/koda` is in the
+normal `sudo` `secure_path`.
+
+With `cargo install`, use the absolute path because `sudo`'s `secure_path`
+usually omits `~/.cargo/bin`:
+
+```bash
 sudo "$(command -v koda)" /etc/nixos/configuration.nix
 ```
 
-Use the absolute path because `sudo`'s `secure_path` usually omits
-`~/.cargo/bin`. Koda keeps its own state under the root account (never
-root-owned files in your home), still searches the system-wide Nix profile for
-language tools, and preserves the original owner and mode when it saves a file
-you own.
+Koda keeps its own state under the root account (never root-owned files in your
+home), still searches the system-wide Nix profile for language tools, and
+preserves the original owner and mode when it saves a file you own.
+
+**Running the whole IDE as root is discouraged.** Use `sudo koda` only for the
+system files that genuinely need elevated privileges; keep normal project work
+in an unprivileged session. Root sessions are inherently more dangerous, and a
+mistake there can affect the whole machine.
 
 ## ✦ The welcome screen
 
