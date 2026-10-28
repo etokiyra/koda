@@ -22,8 +22,8 @@ namcap <built-package>.pkg.tar.zst
 ```
 
 - `koda 0.1.1-1` built successfully; its package contains `/usr/bin/koda`.
-- `koda-git 0.1.1.r0.g8a9ca59-1` built successfully; it provides and conflicts
-  with `koda`.
+- `koda-git` built successfully; its `pkgver()` derives the version from
+  `git describe`, and the package provides and conflicts with `koda`.
 - `namcap` reported no findings for either PKGBUILD or package.
 - Runtime dependencies are `glibc` and `libgcc`; language runtimes and servers
   are `optdepends`, because Koda itself provisions or discovers them.
