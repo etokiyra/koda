@@ -1,0 +1,66 @@
+# Maintainer: Kiyra <kiyrai@proton.me>
+pkgname=koda-git
+pkgver=0.1.1.r0.g8a9ca59
+pkgrel=1
+pkgdesc='A modern, lightweight, terminal-native IDE (git checkout)'
+arch=('x86_64')
+url='https://github.com/etokiyra/koda'
+license=('MPL-2.0')
+depends=('glibc' 'libgcc')
+makedepends=('cargo' 'git')
+provides=('koda')
+conflicts=('koda')
+optdepends=(
+  'git: git integration'
+  'curl: download managed language tools'
+  'tar: unpack managed .tar archives'
+  'unzip: unpack managed .zip archives'
+  'gnupg: verify Swift toolchain signatures'
+  'rustup: Rust language server, formatter and asm-lsp fallback'
+  'go: fallback for Go-installed language servers'
+  'nodejs: fallback for npm-installed language servers'
+  'python: Python language server and hashing fallback'
+  'clang: C and C++ language server'
+  'jdk-openjdk: Java language server runtime'
+  'lua-language-server: Lua language server'
+  'php: PHP language server runtime'
+  'ruby: Ruby language server runtime'
+  'perl: Perl language server runtime'
+  'dotnet-sdk: C# language server runtime'
+  'dart: Dart language server'
+  'elixir: Elixir language server runtime'
+  'nix: Nix language server and formatter'
+)
+source=('git+https://github.com/etokiyra/koda.git')
+sha256sums=('SKIP')
+
+pkgver() {
+  cd koda
+  git describe --long --tags --abbrev=7 --always | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+}
+
+prepare() {
+  cd koda
+  cargo fetch --locked
+}
+
+build() {
+  cd koda
+  cargo build --frozen --release
+}
+
+check() {
+  cd koda
+  cargo test --frozen
+}
+
+package() {
+  cd koda
+  install -Dm755 target/release/koda "$pkgdir/usr/bin/koda"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 CHANGELOG.md "$pkgdir/usr/share/doc/$pkgname/CHANGELOG.md"
+  install -Dm644 SECURITY.md "$pkgdir/usr/share/doc/$pkgname/SECURITY.md"
+  install -d "$pkgdir/usr/share/doc/$pkgname/docs"
+  install -m644 docs/*.md "$pkgdir/usr/share/doc/$pkgname/docs/"
+}

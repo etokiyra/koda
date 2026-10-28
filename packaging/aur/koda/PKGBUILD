@@ -1,0 +1,59 @@
+# Maintainer: Kiyra <kiyrai@proton.me>
+pkgname=koda
+pkgver=0.1.1
+pkgrel=1
+pkgdesc='A modern, lightweight, terminal-native IDE'
+arch=('x86_64')
+url='https://github.com/etokiyra/koda'
+license=('MPL-2.0')
+depends=('glibc' 'libgcc')
+makedepends=('cargo')
+optdepends=(
+  'git: git integration'
+  'curl: download managed language tools'
+  'tar: unpack managed .tar archives'
+  'unzip: unpack managed .zip archives'
+  'gnupg: verify Swift toolchain signatures'
+  'rustup: Rust language server, formatter and asm-lsp fallback'
+  'go: fallback for Go-installed language servers'
+  'nodejs: fallback for npm-installed language servers'
+  'python: Python language server and hashing fallback'
+  'clang: C and C++ language server'
+  'jdk-openjdk: Java language server runtime'
+  'lua-language-server: Lua language server'
+  'php: PHP language server runtime'
+  'ruby: Ruby language server runtime'
+  'perl: Perl language server runtime'
+  'dotnet-sdk: C# language server runtime'
+  'dart: Dart language server'
+  'elixir: Elixir language server runtime'
+  'nix: Nix language server and formatter'
+)
+source=("$pkgname-$pkgver.tar.gz::https://github.com/etokiyra/koda/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('29cc0b2beeb4a8b3d9686fc62d4fdcc0acbcb8ce87c896bdfeaac71de0e44c4d')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  cargo fetch --locked
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  cargo test --frozen
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/koda "$pkgdir/usr/bin/koda"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 CHANGELOG.md "$pkgdir/usr/share/doc/$pkgname/CHANGELOG.md"
+  install -Dm644 SECURITY.md "$pkgdir/usr/share/doc/$pkgname/SECURITY.md"
+  install -d "$pkgdir/usr/share/doc/$pkgname/docs"
+  install -m644 docs/*.md "$pkgdir/usr/share/doc/$pkgname/docs/"
+}
