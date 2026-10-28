@@ -12,8 +12,14 @@ when it is tagged.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-28
+
 ### Added
 
+- **crates.io packaging.** Koda is published as the **`koda-ide`** crate because
+  `koda` was already taken on crates.io; the installed command is still `koda`,
+  so `cargo install koda-ide` is enough. The manifest now carries the
+  repository, homepage, docs.rs, keyword and category metadata crates.io needs.
 - **Nix language support.** `.nix` files are detected, highlighted (including
   nested block comments, multi-line quoted and `''…''` strings, search paths,
   paths and URIs), diagnosed for unbalanced brackets, outlined by attribute
@@ -227,5 +233,6 @@ starts working.
 > tool. See [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md#provisioning). Windows is
 > not supported.
 
-[Unreleased]: https://github.com/etokiyra/koda/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/etokiyra/koda/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/etokiyra/koda/releases/tag/v0.1.1
 [0.1.0]: https://github.com/etokiyra/koda/releases/tag/v0.1.0

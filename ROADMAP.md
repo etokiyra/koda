@@ -153,7 +153,7 @@ offers per project instead of per language.
 **Goal.** Install Koda without a Rust toolchain, and update it easily.
 
 **Acceptance.**
-- `cargo install koda` works from crates.io metadata.
+- `cargo install koda-ide` works from crates.io metadata.
 - A one-line installer (`curl … | sh`) installs the right prebuilt binary.
 - The README install section stays the single authoritative source.
 

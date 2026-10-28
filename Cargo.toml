@@ -1,9 +1,18 @@
 [package]
-name = "koda"
-version = "0.1.0"
+# The crate is `koda-ide` because `koda` is already taken on crates.io; the
+# installed binary is still `koda`.
+name = "koda-ide"
+version = "0.1.1"
 edition = "2024"
+rust-version = "1.88"
 description = "A modern, lightweight, terminal-native IDE"
 license = "MPL-2.0"
+repository = "https://github.com/etokiyra/koda"
+homepage = "https://github.com/etokiyra/koda"
+documentation = "https://docs.rs/koda-ide"
+readme = "README.md"
+keywords = ["ide", "tui", "editor", "lsp", "terminal"]
+categories = ["command-line-utilities", "development-tools", "text-editors"]
 default-run = "koda"
 
 [lib]

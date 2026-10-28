@@ -4,6 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MPL 2.0" src="https://img.shields.io/badge/license-MPL--2.0-90b99f?style=flat-square"></a>
+  <a href="https://crates.io/crates/koda-ide"><img alt="crates.io" src="https://img.shields.io/crates/v/koda-ide?style=flat-square&color=e6b99d"></a>
   <img alt="Rust 2024" src="https://img.shields.io/badge/rust-2024-ea83a5?style=flat-square&logo=rust&logoColor=white">
   <a href="https://github.com/etokiyra/koda/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/etokiyra/koda/actions/workflows/ci.yml/badge.svg?branch=master"></a>
   <a href="https://github.com/etokiyra/koda/commits/master"><img alt="Last commit" src="https://img.shields.io/github/last-commit/etokiyra/koda?style=flat-square&color=e29eca"></a>
@@ -325,6 +326,18 @@ Koda has a personality, but the code always comes first.
 [mellow]: https://github.com/helix-editor/helix/blob/master/runtime/themes/mellow.toml
 
 ## ✦ Install
+
+### crates.io
+
+If you have a Rust toolchain (1.88 or newer), the quickest install is:
+
+```bash
+cargo install koda-ide
+koda .
+```
+
+The crate is called `koda-ide` because `koda` was already taken on crates.io;
+the command it installs is still **`koda`**.
 
 ### Prebuilt binaries
 
