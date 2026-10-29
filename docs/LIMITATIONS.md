@@ -127,9 +127,13 @@ describes the current state.
   selectable at runtime; users cannot supply their own theme. The light theme is
   covered by deterministic render tests but has **not** been viewed on a real
   light terminal, so its readability is argued from contrast, not verified.
-- **Terminal coverage is narrow.** `Ctrl+Shift` chords rely on the kitty
-  keyboard protocol (there is no fallback), there is no `NO_COLOR` or 16-colour
-  mode, and the UI has not been interactively checked on light backgrounds.
+- **Terminal coverage is partial.** Colour support is detected once at startup
+  (`NO_COLOR`, `COLORTERM`, `TERM`): a 16-colour terminal gets the bundled
+  **Ansi** theme unless the user stored a choice, and `NO_COLOR` suppresses
+  every colour code, with selections falling back to reversed text. Still
+  open: a `Ctrl+Shift` chord fallback for terminals without the kitty keyboard
+  protocol, and an interactive check on a real light terminal (the Daylight
+  theme is covered by deterministic render tests only).
 - **No file iconography.** The tree uses text only.
 - **No interactive diff/merge view.** The git diff is a read-only overlay; a
   conflicting-file merge view does not exist.

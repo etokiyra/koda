@@ -400,7 +400,18 @@ impl App {
     /// Run Koda. `target` is the optional CLI path argument.
     pub fn start(target: Option<String>) -> io::Result<()> {
         let target = target.map(PathBuf::from);
-        let mut app = App::new_with_settings(target.as_deref(), crate::settings::Settings::load())?;
+        // Colour support is a terminal capability, detected once: everything
+        // rendered afterwards consults the recorded depth.
+        let mut settings = crate::settings::Settings::load();
+        let depth = ui::theme::ColorDepth::detect();
+        ui::theme::set_color_depth(depth);
+        // The RGB themes cannot render faithfully on a 16-colour terminal, so a
+        // user who never chose a theme gets the bundled 16-colour palette. A
+        // deliberate choice from the Settings screen is always honoured.
+        if depth == ui::theme::ColorDepth::Palette16 && !crate::settings::theme_is_stored() {
+            settings.theme = crate::settings::ThemeId::Ansi;
+        }
+        let mut app = App::new_with_settings(target.as_deref(), settings)?;
         let mut terminal = terminal::init()?;
         let result = app.run(&mut terminal);
         terminal::restore();

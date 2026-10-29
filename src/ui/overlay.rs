@@ -176,7 +176,7 @@ pub fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
 
         let mut line = Line::from(spans).style(on_panel);
         if selected {
-            line = line.style(Style::default().bg(theme::menu_selected_bg()));
+            line = line.style(theme::selectable(theme::menu_selected_bg()));
         }
         lines.push(line);
     }
@@ -366,7 +366,7 @@ pub fn render_completion(
         ])
         .style(Style::default().bg(theme::panel_bg()));
         if selected {
-            line = line.style(Style::default().bg(theme::menu_selected_bg()));
+            line = line.style(theme::selectable(theme::menu_selected_bg()));
         }
         lines.push(line);
     }
@@ -552,7 +552,7 @@ fn render_settings_rows(frame: &mut Frame, list: Rect, state: &SettingsState, se
         }
         let mut line = Line::from(spans).style(on_panel);
         if highlighted {
-            line = line.style(Style::default().bg(theme::menu_selected_bg()));
+            line = line.style(theme::selectable(theme::menu_selected_bg()));
         }
         lines.push(line);
     }
@@ -1084,7 +1084,7 @@ fn render_panel_rows(frame: &mut Frame, list: Rect, rows: &[(String, String)], s
         }
         let mut line = Line::from(spans).style(on_panel);
         if highlighted {
-            line = line.style(Style::default().bg(theme::menu_selected_bg()));
+            line = line.style(theme::selectable(theme::menu_selected_bg()));
         }
         lines.push(line);
     }

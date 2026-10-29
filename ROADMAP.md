@@ -114,16 +114,23 @@ detail, never a requirement.
 **Goal.** Koda is readable and fully usable on the terminals and setups people
 actually use.
 
-**Acceptance.**
+**Done (0.2).** Colour support is detected once at startup from `NO_COLOR`,
+`COLORTERM` and `TERM`, and every rendered colour routes through the theme. A
+16-colour terminal gets the bundled **Ansi** theme unless the user stored a
+theme choice; `NO_COLOR` suppresses every colour code, keeping emphasis through
+bold modifiers, and selection highlights fall back to reversed text so menus,
+the file tree and text selections stay usable. Theme-level tests cover both
+depths.
+
+**Acceptance, remaining.**
 - `Ctrl+Shift` chords work when the kitty keyboard protocol is unavailable
   (verified under `tmux`), with a documented fallback.
-- `NO_COLOR` and a 16-colour fallback produce a legible UI.
-- Koda is legible on a light terminal background.
+- Koda is legible on a light terminal background: **Daylight** has
+  deterministic render coverage but has not been viewed on a real light
+  terminal.
 
 **Direction.** Detect capability once at startup and expose a fallback keymap;
 route colour through the theme so a fallback theme can be chosen.
-
-**Depends on:** item 3 for the fallback theme.
 
 ### 5. First-run and project setup
 

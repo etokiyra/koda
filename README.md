@@ -305,12 +305,17 @@ Koda has a personality, but the code always comes first.
   mappings of [Mellow][mellow], the separate named colorscheme shipped with
   Helix — not Helix's default theme. Blue keywords, bright-blue types, green
   strings, magenta numbers, grey italic comments.
-- **Three bundled themes, one Settings screen.** Mellow is joined by
-  **Midnight** (high-contrast dark) and **Daylight** (light), selectable at
-  runtime. A small **Settings** screen (palette → **Settings**) also remembers
-  line numbers, animations, soft wrap, indentation width, spaces vs tabs, inline
-  diagnostics and automatic completion. Everything applies immediately, nothing
-  needs a config file, and a fresh install is fully usable untouched.
+- **Four bundled themes, one Settings screen.** Mellow is joined by
+  **Midnight** (high-contrast dark), **Daylight** (light) and **Ansi**, the
+  16-colour fallback, selectable at runtime. A small **Settings** screen
+  (palette → **Settings**) also remembers line numbers, animations, soft wrap,
+  indentation width, spaces vs tabs, inline diagnostics and automatic
+  completion. Everything applies immediately, nothing needs a config file, and
+  a fresh install is fully usable untouched.
+- **Honest about the terminal.** Koda detects colour support once at startup:
+  a 16-colour terminal gets the **Ansi** theme unless you chose one, and
+  `NO_COLOR` suppresses every colour code — emphasis survives as text
+  attributes, and selections fall back to reversed text so menus stay usable.
 - **Transparency first.** Plain surfaces use your terminal's own background;
   only the statusline, popups and the current line carry a soft panel.
 - **A little familiar.** A star-cat keeps you company on the welcome screen and

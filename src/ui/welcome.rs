@@ -8,7 +8,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 
@@ -163,7 +163,7 @@ fn action_list(
         }
         let mut line = Line::from(spans);
         if highlighted {
-            line = line.style(Style::default().bg(theme::menu_selected_bg()));
+            line = line.style(theme::selectable(theme::menu_selected_bg()));
         }
         lines.push(line.centered());
     }

@@ -12,6 +12,16 @@ when it is tagged.
 
 ## [Unreleased]
 
+### Added
+
+- **Terminal colour compatibility.** Koda now detects colour support once at
+  startup (`NO_COLOR`, `COLORTERM`, `TERM`) and routes every rendered colour
+  through the theme. A 16-colour terminal gets the new bundled **Ansi** theme
+  — palette indices only — unless the user already chose a theme; a `NO_COLOR`
+  environment suppresses every colour code, keeping emphasis through bold text
+  and rendering selections as reversed text so menus, the file tree and the
+  editor stay usable.
+
 ### Fixed
 
 - **The command palette now advertises server-backed commands correctly.**

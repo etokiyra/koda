@@ -20,11 +20,20 @@ pub enum ThemeId {
     Mellow,
     Midnight,
     Daylight,
+    /// The 16-colour fallback: only ANSI palette indices, so it renders
+    /// faithfully on terminals (and under settings like `NO_COLOR`) that cannot
+    /// represent true-colour themes.
+    Ansi,
 }
 
 impl ThemeId {
     /// Every bundled theme, in the order they are offered.
-    pub const ALL: [ThemeId; 3] = [ThemeId::Mellow, ThemeId::Midnight, ThemeId::Daylight];
+    pub const ALL: [ThemeId; 4] = [
+        ThemeId::Mellow,
+        ThemeId::Midnight,
+        ThemeId::Daylight,
+        ThemeId::Ansi,
+    ];
 
     /// The display name shown in Settings.
     pub fn name(self) -> &'static str {
@@ -32,6 +41,7 @@ impl ThemeId {
             ThemeId::Mellow => "Mellow",
             ThemeId::Midnight => "Midnight",
             ThemeId::Daylight => "Daylight",
+            ThemeId::Ansi => "Ansi",
         }
     }
 
@@ -41,6 +51,7 @@ impl ThemeId {
             ThemeId::Mellow => "mellow",
             ThemeId::Midnight => "midnight",
             ThemeId::Daylight => "daylight",
+            ThemeId::Ansi => "ansi",
         }
     }
 
@@ -192,6 +203,25 @@ fn quarantine(path: &Path) -> std::io::Result<()> {
 /// The settings file under Koda's state directory, if a home directory exists.
 pub fn settings_path() -> Option<PathBuf> {
     crate::recent::state_dir().map(|dir| dir.join("settings.json"))
+}
+
+/// Whether the user stored an explicit theme choice.
+///
+/// A fresh install has no settings file at all, so Koda may pick a theme for
+/// the terminal it found (the 16-colour fallback) without ever overruling a
+/// deliberate choice from the Settings screen.
+pub fn theme_is_stored() -> bool {
+    let Some(text) = settings_path().and_then(|path| std::fs::read_to_string(path).ok()) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+        return false;
+    };
+    value
+        .get("theme")
+        .and_then(Value::as_str)
+        .map(|slug| ThemeId::from_slug(slug).is_some())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

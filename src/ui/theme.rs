@@ -229,7 +229,131 @@ const DAYLIGHT: Theme = Theme {
     },
 };
 
-const THEMES: [Theme; 3] = [MELLOW, MIDNIGHT, DAYLIGHT];
+/// Ansi — the 16-colour fallback. Every colour is a palette index, so the theme
+/// renders faithfully on terminals that have no true-colour canvas: the linux
+/// console, tmux's default palette, serial or dumb terminals. Colours sit in
+/// the bright (8–15) range so they stay legible on a dark background, which is
+/// where those terminals usually live; the vague-truecoloured themes are the
+/// wrong tool for that canvas.
+const ANSI: Theme = Theme {
+    bg_dark: Color::Indexed(0),
+    accent: Color::Indexed(12),
+    accent_soft: Color::Indexed(14),
+    star: Color::Indexed(11),
+    text: Color::Indexed(7),
+    text_bright: Color::Indexed(15),
+    muted: Color::Indexed(8),
+    faint: Color::Indexed(8),
+    success: Color::Indexed(10),
+    warn: Color::Indexed(11),
+    error: Color::Indexed(9),
+    info: Color::Indexed(12),
+    hint: Color::Indexed(14),
+    selection_bg: Color::Indexed(8),
+    multi_cursor: Color::Indexed(12),
+    menu_selected_bg: Color::Indexed(8),
+    sidebar_selected_bg: Color::Indexed(8),
+    cursorline_bg: Color::Indexed(0),
+    panel_bg: Color::Indexed(0),
+    border: Color::Indexed(8),
+    border_focus: Color::Indexed(12),
+    search_bg: Color::Indexed(3),
+    search_current_bg: Color::Indexed(11),
+    bracket_match: Color::Indexed(11),
+    syntax: Syntax {
+        plain: Color::Indexed(7),
+        keyword: Color::Indexed(12),
+        type_: Color::Indexed(14),
+        function: Color::Indexed(15),
+        string: Color::Indexed(10),
+        number: Color::Indexed(13),
+        comment: Color::Indexed(8),
+        macro_: Color::Indexed(14),
+        constant: Color::Indexed(6),
+        operator: Color::Indexed(11),
+        attribute: Color::Indexed(12),
+    },
+};
+
+const THEMES: [Theme; 4] = [MELLOW, MIDNIGHT, DAYLIGHT, ANSI];
+
+// ---------------------------------------------------------------------------
+// Terminal colour depth
+// ---------------------------------------------------------------------------
+
+/// How much colour the terminal can express, detected once at startup.
+///
+/// Detection is environmental, so it has no unit test; the *rendering* of every
+/// depth is covered by the theme tests below.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ColorDepth {
+    /// RGB canvas supported (`COLORTERM=truecolor`, or 256-colour terminals,
+    /// which approximate RGB well enough that no fallback is needed).
+    #[default]
+    Full,
+    /// Only the 16 standard ANSI colours.
+    Palette16,
+    /// `NO_COLOR`: no ANSI colour is emitted; emphasis survives through text
+    /// modifiers alone.
+    None,
+}
+
+impl ColorDepth {
+    /// Detect the colour support of the current terminal from the environment.
+    pub fn detect() -> Self {
+        let set = |name: &str| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+        let term = std::env::var("TERM").unwrap_or_default();
+        let color_term = std::env::var("COLORTERM").unwrap_or_default();
+        if set("NO_COLOR") {
+            return ColorDepth::None;
+        }
+        // `COLORTERM` reports true color where it exists, and a 256-colour
+        // `TERM` approximates RGB well enough that no fallback is needed.
+        if color_term.contains("color") || term.contains("truecolor") {
+            return ColorDepth::Full;
+        }
+        if term.contains("256color") || term.contains("direct") {
+            return ColorDepth::Full;
+        }
+        // Everything else — linux console, tmux defaults, vt100, serial — gets
+        // the faithful 16-colour palette rather than guessed-at RGB.
+        ColorDepth::Palette16
+    }
+}
+
+thread_local! {
+    static DEPTH: Cell<ColorDepth> = const { Cell::new(ColorDepth::Full) };
+}
+
+/// Record the terminal's colour depth; every rendered colour consults it.
+pub fn set_color_depth(depth: ColorDepth) {
+    DEPTH.with(|cell| cell.set(depth));
+}
+
+/// The detected colour depth.
+pub fn color_depth() -> ColorDepth {
+    DEPTH.with(Cell::get)
+}
+
+fn resolve(color: Color) -> Color {
+    match color_depth() {
+        ColorDepth::Full | ColorDepth::Palette16 => color,
+        ColorDepth::None => Color::Reset,
+    }
+}
+
+/// Style for a row or region that is visually *selected*.
+///
+/// Normally that is a background panel; with colour switched off the panel
+/// would be invisible, so the selection falls back to `Reversed`, which is not
+/// a colour and keeps menus, the file tree and text selections usable.
+pub fn selectable(bg: Color) -> Style {
+    let mut style = Style::default().bg(resolve(bg));
+    if color_depth() == ColorDepth::None {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+    style
+}
 
 thread_local! {
     static CURRENT: Cell<ThemeId> = const { Cell::new(ThemeId::Mellow) };
@@ -241,6 +365,7 @@ pub fn theme_for(id: ThemeId) -> &'static Theme {
         ThemeId::Mellow => &THEMES[0],
         ThemeId::Midnight => &THEMES[1],
         ThemeId::Daylight => &THEMES[2],
+        ThemeId::Ansi => &THEMES[3],
     }
 }
 
@@ -264,76 +389,76 @@ pub fn set_theme(id: ThemeId) {
 // ---------------------------------------------------------------------------
 
 pub fn bg_dark() -> Color {
-    current().bg_dark
+    resolve(current().bg_dark)
 }
 pub fn accent_color() -> Color {
-    current().accent
+    resolve(current().accent)
 }
 pub fn accent_soft() -> Color {
-    current().accent_soft
+    resolve(current().accent_soft)
 }
 pub fn star_color() -> Color {
-    current().star
+    resolve(current().star)
 }
 pub fn text_color() -> Color {
-    current().text
+    resolve(current().text)
 }
 pub fn text_bright() -> Color {
-    current().text_bright
+    resolve(current().text_bright)
 }
 pub fn muted_color() -> Color {
-    current().muted
+    resolve(current().muted)
 }
 pub fn faint() -> Color {
-    current().faint
+    resolve(current().faint)
 }
 pub fn success_color() -> Color {
-    current().success
+    resolve(current().success)
 }
 pub fn warn_color() -> Color {
-    current().warn
+    resolve(current().warn)
 }
 pub fn error_color() -> Color {
-    current().error
+    resolve(current().error)
 }
 pub fn info_color() -> Color {
-    current().info
+    resolve(current().info)
 }
 pub fn hint_color() -> Color {
-    current().hint
+    resolve(current().hint)
 }
 pub fn selection_bg() -> Color {
-    current().selection_bg
+    resolve(current().selection_bg)
 }
 pub fn multi_cursor() -> Color {
-    current().multi_cursor
+    resolve(current().multi_cursor)
 }
 pub fn menu_selected_bg() -> Color {
-    current().menu_selected_bg
+    resolve(current().menu_selected_bg)
 }
 pub fn sidebar_selected_bg() -> Color {
-    current().sidebar_selected_bg
+    resolve(current().sidebar_selected_bg)
 }
 pub fn cursorline_bg() -> Color {
-    current().cursorline_bg
+    resolve(current().cursorline_bg)
 }
 pub fn panel_bg() -> Color {
-    current().panel_bg
+    resolve(current().panel_bg)
 }
 pub fn border_color() -> Color {
-    current().border
+    resolve(current().border)
 }
 pub fn border_focus() -> Color {
-    current().border_focus
+    resolve(current().border_focus)
 }
 pub fn search_bg() -> Color {
-    current().search_bg
+    resolve(current().search_bg)
 }
 pub fn search_current_bg() -> Color {
-    current().search_current_bg
+    resolve(current().search_current_bg)
 }
 pub fn bracket_match_color() -> Color {
-    current().bracket_match
+    resolve(current().bracket_match)
 }
 
 // ---------------------------------------------------------------------------
@@ -341,68 +466,68 @@ pub fn bracket_match_color() -> Color {
 // ---------------------------------------------------------------------------
 
 pub fn accent() -> Style {
-    Style::default().fg(current().accent)
+    Style::default().fg(resolve(current().accent))
 }
 
 pub fn accent_bold() -> Style {
     Style::default()
-        .fg(current().accent)
+        .fg(resolve(current().accent))
         .add_modifier(Modifier::BOLD)
 }
 
 pub fn soft() -> Style {
-    Style::default().fg(current().accent_soft)
+    Style::default().fg(resolve(current().accent_soft))
 }
 
 pub fn star() -> Style {
-    Style::default().fg(current().star)
+    Style::default().fg(resolve(current().star))
 }
 
 pub fn text() -> Style {
-    Style::default().fg(current().text)
+    Style::default().fg(resolve(current().text))
 }
 
 pub fn bright() -> Style {
-    Style::default().fg(current().text_bright)
+    Style::default().fg(resolve(current().text_bright))
 }
 
 pub fn bright_bold() -> Style {
     Style::default()
-        .fg(current().text_bright)
+        .fg(resolve(current().text_bright))
         .add_modifier(Modifier::BOLD)
 }
 
 pub fn muted() -> Style {
-    Style::default().fg(current().muted)
+    Style::default().fg(resolve(current().muted))
 }
 
 pub fn dim() -> Style {
-    Style::default().fg(current().faint)
+    Style::default().fg(resolve(current().faint))
 }
 
 pub fn success() -> Style {
-    Style::default().fg(current().success)
+    Style::default().fg(resolve(current().success))
 }
 
 pub fn warn() -> Style {
-    Style::default().fg(current().warn)
+    Style::default().fg(resolve(current().warn))
 }
 
 pub fn error() -> Style {
-    Style::default().fg(current().error)
+    Style::default().fg(resolve(current().error))
 }
 
 pub fn info() -> Style {
-    Style::default().fg(current().info)
+    Style::default().fg(resolve(current().info))
 }
 
 pub fn hint() -> Style {
-    Style::default().fg(current().hint)
+    Style::default().fg(resolve(current().hint))
 }
 
 /// A solid panel surface with optional foreground.
 pub fn panel(styled_fg: Style) -> Style {
-    styled_fg.bg(current().panel_bg)
+    styled_fg.bg(resolve(current().panel_bg))
 }
 
 /// Border style that subtly indicates focus.
@@ -412,18 +537,24 @@ pub fn border(focused: bool) -> Style {
     } else {
         current().border
     };
-    Style::default().fg(color)
+    Style::default().fg(resolve(color))
 }
 
 /// A pill: solid background with a contrasting foreground.
+///
+/// Without colour the pill falls back to `Reversed`, which reproduces the same
+/// "stands out from the line" promise without emitting any colour code.
 pub fn pill(bg: Color, fg: Color) -> Style {
-    Style::default().bg(bg).fg(fg).add_modifier(Modifier::BOLD)
+    if color_depth() == ColorDepth::None {
+        return Style::default().add_modifier(Modifier::REVERSED);
+    }
+    Style::default().bg(resolve(bg)).fg(resolve(fg))
 }
 
 /// The matching bracket is yellow in Mellow: bold and underlined.
 pub fn bracket_match() -> Style {
     Style::default()
-        .fg(current().bracket_match)
+        .fg(resolve(current().bracket_match))
         .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
 }
 
@@ -431,20 +562,20 @@ pub fn bracket_match() -> Style {
 pub fn token_style(kind: TokenKind) -> Style {
     let syntax = current().syntax;
     match kind {
-        TokenKind::Plain => Style::default().fg(syntax.plain),
-        TokenKind::Keyword => Style::default().fg(syntax.keyword),
-        TokenKind::Type => Style::default().fg(syntax.type_),
-        TokenKind::Function => Style::default().fg(syntax.function),
-        TokenKind::String => Style::default().fg(syntax.string),
-        TokenKind::Number => Style::default().fg(syntax.number),
+        TokenKind::Plain => Style::default().fg(resolve(syntax.plain)),
+        TokenKind::Keyword => Style::default().fg(resolve(syntax.keyword)),
+        TokenKind::Type => Style::default().fg(resolve(syntax.type_)),
+        TokenKind::Function => Style::default().fg(resolve(syntax.function)),
+        TokenKind::String => Style::default().fg(resolve(syntax.string)),
+        TokenKind::Number => Style::default().fg(resolve(syntax.number)),
         TokenKind::Comment => Style::default()
-            .fg(syntax.comment)
+            .fg(resolve(syntax.comment))
             .add_modifier(Modifier::ITALIC),
-        TokenKind::Macro => Style::default().fg(syntax.macro_),
-        TokenKind::Constant => Style::default().fg(syntax.constant),
-        TokenKind::Operator => Style::default().fg(syntax.operator),
+        TokenKind::Macro => Style::default().fg(resolve(syntax.macro_)),
+        TokenKind::Constant => Style::default().fg(resolve(syntax.constant)),
+        TokenKind::Operator => Style::default().fg(resolve(syntax.operator)),
         TokenKind::Attribute => Style::default()
-            .fg(syntax.attribute)
+            .fg(resolve(syntax.attribute))
             .add_modifier(Modifier::ITALIC),
     }
 }
@@ -485,7 +616,7 @@ mod tests {
 
     #[test]
     fn every_bundled_theme_is_registered_and_complete() {
-        assert_eq!(ThemeId::ALL.len(), 3);
+        assert_eq!(ThemeId::ALL.len(), 4);
         for id in ThemeId::ALL {
             let theme = theme_for(id);
             for color in roles(theme) {
@@ -568,5 +699,74 @@ mod tests {
             }
         }
         set_theme(ThemeId::Mellow);
+    }
+
+    /// The ANSI theme serves only palette indices: it renders faithfully on a
+    /// 16-colour terminal and never guesses at RGB the terminal cannot show.
+    #[test]
+    fn the_ansi_theme_uses_only_palette_indices() {
+        let theme = theme_for(ThemeId::Ansi);
+        for color in roles(theme) {
+            assert!(
+                matches!(color, Color::Indexed(_)),
+                "the Ansi theme must not use {color:?}"
+            );
+        }
+        let syntax = theme.syntax;
+        for color in [
+            syntax.plain,
+            syntax.keyword,
+            syntax.type_,
+            syntax.function,
+            syntax.string,
+            syntax.number,
+            syntax.comment,
+            syntax.macro_,
+            syntax.constant,
+            syntax.operator,
+            syntax.attribute,
+        ] {
+            assert!(
+                matches!(color, Color::Indexed(_)),
+                "the Ansi syntax must not use {color:?}"
+            );
+        }
+    }
+
+    /// With colour switched off nothing renders a real colour, so a `NO_COLOR`
+    /// environment still produces legible text, and selection falls back to the
+    /// reversed text that menus and the editor need to stay usable.
+    #[test]
+    fn no_color_renders_no_colour_but_stays_selectable() {
+        set_color_depth(ColorDepth::None);
+        set_theme(ThemeId::Mellow);
+        assert_eq!(accent().fg, Some(Color::Reset));
+        assert_eq!(token_style(TokenKind::Keyword).fg, Some(Color::Reset));
+        assert_eq!(token_style(TokenKind::Comment).fg, Some(Color::Reset));
+        assert_eq!(border(true).fg, Some(Color::Reset));
+
+        // Selection: reversed instead of coloured.
+        let selected = selectable(menu_selected_bg());
+        assert_eq!(selected.bg, Some(Color::Reset));
+        assert!(selected.add_modifier.contains(Modifier::REVERSED));
+        let region = selectable(selection_bg());
+        assert!(region.add_modifier.contains(Modifier::REVERSED));
+        // Emphasis, which text modifiers provide, survives untouched.
+        assert!(accent_bold().add_modifier.contains(Modifier::BOLD));
+
+        set_theme(ThemeId::Mellow);
+        set_color_depth(ColorDepth::Full);
+    }
+
+    /// With full colour on, a selectable style is a plain background exactly as
+    /// before — the fallback only exists for the depth below.
+    #[test]
+    fn a_colour_terminal_selects_with_a_background() {
+        set_color_depth(ColorDepth::Full);
+        set_theme(ThemeId::Mellow);
+        let selected = selectable(menu_selected_bg());
+        assert_eq!(selected.bg, Some(MELLOW.menu_selected_bg));
+        assert!(!selected.add_modifier.contains(Modifier::REVERSED));
+        set_color_depth(ColorDepth::Full);
     }
 }

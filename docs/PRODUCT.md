@@ -97,9 +97,16 @@ edit.
   `~/.local/state/koda/settings.json`). A missing file loads the defaults; a
   malformed file is set aside as `settings.json.corrupt` and the defaults load.
   The file is an implementation detail, never a requirement.
-- **Themes.** Three are bundled and selectable at runtime: **Mellow** (the
-  default), **Midnight** (high-contrast dark) and **Daylight** (light). They are
-  data-driven from one semantic role set; users cannot yet add their own.
+- **Themes.** Four are bundled and selectable at runtime: **Mellow** (the
+  default), **Midnight** (high-contrast dark), **Daylight** (light) and
+  **Ansi** (the 16-colour fallback). They are data-driven from one semantic
+  role set; users cannot yet add their own.
+
+Colour is a terminal capability, detected once at startup from `NO_COLOR`,
+`COLORTERM` and `TERM`. A 16-colour terminal gets **Ansi** unless the user
+stored a theme of their own; a `NO_COLOR` environment suppresses every colour
+code, keeping emphasis through bold and reversed text so menus, the file tree
+and text selections stay usable.
 
 Settings are global. Koda does not create project-level configuration, and the
 zero-configuration project experience is unchanged.

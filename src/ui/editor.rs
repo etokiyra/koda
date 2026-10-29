@@ -542,10 +542,10 @@ fn render_segment(
             style = with_bg(theme::bracket_match(), base_bg);
         }
         if context.selected.get(original).copied().unwrap_or(false) {
-            style = style.bg(theme::selection_bg());
+            style = style.patch(theme::selectable(theme::selection_bg()));
         }
         if context.matched.get(original).copied().unwrap_or(false) {
-            style = style.bg(
+            style = style.patch(theme::selectable(
                 if context
                     .current_match
                     .get(original)
@@ -556,16 +556,18 @@ fn render_segment(
                 } else {
                     theme::search_bg()
                 },
-            );
+            ));
         }
         // A secondary caret is a solid accent block over whatever is beneath it.
+        // With colour switched off it degrades to reversed text, so every
+        // cursor stays visible.
         if context
             .secondary_caret
             .get(original)
             .copied()
             .unwrap_or(false)
         {
-            style = style.bg(theme::multi_cursor()).fg(theme::bg_dark());
+            style = theme::selectable(theme::multi_cursor()).fg(theme::bg_dark());
         }
 
         if run_style == Some(style) {
@@ -587,9 +589,7 @@ fn render_segment(
     if last && context.trailing_caret {
         spans.push(Span::styled(
             " ",
-            Style::default()
-                .bg(theme::multi_cursor())
-                .fg(theme::bg_dark()),
+            theme::selectable(theme::multi_cursor()).fg(theme::bg_dark()),
         ));
     }
 
