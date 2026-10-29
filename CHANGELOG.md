@@ -12,6 +12,16 @@ when it is tagged.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The command palette now advertises server-backed commands correctly.**
+  `Format Document`, `Rename Symbol` and `Code Actions` are LSP-backed, but the
+  palette gated them on each provider's *built-in* capability list, so rename
+  and code actions were advertised for Rust and Go alone even though the
+  servers for Python, Java, C#, Kotlin, Lua, PHP, Ruby, Swift and others
+  provide them too. An attached server that advertises the request now makes
+  the command available and the palette shows it.
+
 ## [0.1.2] - 2026-10-29
 
 ### Added

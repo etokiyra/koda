@@ -141,14 +141,6 @@ describes the current state.
   It records, per language, the built-in offline capabilities, the server and its
   pin and verification, the runtime prerequisite, the platforms and the
   verification status. This section lists only the known gaps.
-- **Server-backed commands are gated on the built-in provider.** `Format
-  Document`, `Rename Symbol` and `Code Actions` are LSP-backed, but the command
-  palette enables them from the provider's declared capabilities. Only Rust and
-  Go declare `Rename`/`Code Actions`, so the palette under-reports them for
-  Python, Java, C#, Kotlin, Lua, PHP, Ruby and Swift even when their server
-  supports them; the keybindings still work. Same for `Format Document` where
-  the provider has no built-in formatter. See
-  [LANGUAGE-SUPPORT.md](LANGUAGE-SUPPORT.md#known-inconsistency-the-capability-gate).
 - **Built-in depth varies.** Several languages have built-in highlighting,
   symbols and completion but thin or no built-in diagnostics; their quality
   comes from the language server where one is installed.

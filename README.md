@@ -256,9 +256,10 @@ status — is [docs/LANGUAGE-SUPPORT.md](docs/LANGUAGE-SUPPORT.md).
 
 `LSP` in the Format column means the attached server formats the file when it
 offers formatting. `Rename` and code actions are LSP-backed too; they work for
-any attached server that supports them, although the command palette currently
-only *advertises* them where the built-in provider declares the capability (see
-the note in [docs/LANGUAGE-SUPPORT.md](docs/LANGUAGE-SUPPORT.md#known-inconsistency-the-capability-gate)).
+any attached server that supports them, and the command palette advertises them
+whenever the attached server advertises the request — provider capabilities
+cover built-in features only (see
+[docs/LANGUAGE-SUPPORT.md](docs/LANGUAGE-SUPPORT.md#the-capability-gate)).
 
 Editing, highlighting and every built-in provider work offline with no server at
 all. Adding a language means implementing one trait and registering it — no

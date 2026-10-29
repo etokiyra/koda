@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use crate::language::Capability;
+use crate::language::lsp::RequestKind;
 
 /// Stable command identifiers.
 pub mod ids {
@@ -144,6 +145,21 @@ impl Command {
     /// The label shown in the command palette, e.g. `File: Save`.
     pub fn palette_label(&self) -> String {
         format!("{}: {}", self.category, self.title)
+    }
+
+    /// The language-server request this command can be served through.
+    ///
+    /// `Format Document`, `Rename Symbol` and `Code Actions` are LSP-backed:
+    /// any attached server that advertises the request serves them, even when
+    /// the provider declares no matching built-in [`Capability`]. The provider
+    /// capability list describes built-in features only.
+    pub fn server_request(&self) -> Option<RequestKind> {
+        match self.id {
+            ids::FORMAT => Some(RequestKind::Formatting),
+            ids::RENAME => Some(RequestKind::Rename),
+            ids::CODE_ACTIONS => Some(RequestKind::CodeActions),
+            _ => None,
+        }
     }
 }
 

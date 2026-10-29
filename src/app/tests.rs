@@ -2388,6 +2388,118 @@ done
     fs::remove_dir_all(&dir).ok();
 }
 
+#[cfg(unix)]
+#[test]
+fn the_palette_advertises_server_served_commands() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    // A mock server that advertises rename and code actions — enough to prove
+    // the palette consults the attached server, not just the provider's
+    // built-in capability list.
+    const MOCK: &str = r#"#!/bin/sh
+while read -r header; do
+  header=$(printf '%s' "$header" | tr -d '\r')
+  case "$header" in
+    Content-Length:*) len=${header#Content-Length: } ;;
+    *) continue ;;
+  esac
+  read -r blank
+  body=$(dd bs=1 count="$len" 2>/dev/null)
+  id=$(printf '%s' "$body" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  method=$(printf '%s' "$body" | sed -n 's/.*"method":"\([^"]*\)".*/\1/p')
+  [ -z "$id" ] && continue
+  case "$method" in
+    initialize) result='{"capabilities":{"renameProvider":true,"codeActionProvider":true}}' ;;
+    *) result='null' ;;
+  esac
+  resp=$(printf '{"jsonrpc":"2.0","id":%s,"result":%s}' "$id" "$result")
+  printf 'Content-Length: %s\r\n\r\n%s' "${#resp}" "$resp"
+done
+"#;
+
+    let dir = temp_project("palette-server-backed");
+    // Python's provider declares no Rename or CodeActions capability, so only
+    // an attached server can make those commands available.
+    let file = dir.join("src/main.py");
+    fs::write(&file, "def main():\n    pass\n").unwrap();
+    let script = dir.join("mock-lsp.sh");
+    {
+        let mut handle = fs::File::create(&script).unwrap();
+        handle.write_all(MOCK.as_bytes()).unwrap();
+    }
+    let mut perms = fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script, perms).unwrap();
+
+    let mut app = app_with_file(&file);
+    app.editor
+        .active_document_mut()
+        .unwrap()
+        .set_language(LanguageId::Python);
+
+    let enabled_for = |app: &App, needle: &str| -> bool {
+        let Overlay::Picker(picker) = &app.overlay else {
+            panic!("expected the command palette");
+        };
+        (0..picker.filtered.len())
+            .filter_map(|index| picker.item(index))
+            .find(|item| item.label.contains(needle))
+            .map(|item| item.enabled)
+            .unwrap_or(false)
+    };
+
+    // Without a server, rename and code actions are unavailable for Python.
+    app.execute_command(ids::PALETTE);
+    assert!(
+        !enabled_for(&app, "Rename Symbol"),
+        "rename must stay hidden without a server"
+    );
+    assert!(
+        !enabled_for(&app, "Code Actions"),
+        "code actions must stay hidden without a server"
+    );
+
+    let wait = |app: &mut App, predicate: &dyn Fn(&App) -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while Instant::now() < deadline {
+            app.poll_lsp();
+            if predicate(app) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        false
+    };
+    app.start_lsp(
+        LanguageId::Python,
+        script.to_str().unwrap(),
+        &[file.to_str().unwrap()],
+    );
+    assert!(
+        wait(&mut app, &|app| app
+            .lsp
+            .get(&LanguageId::Python)
+            .and_then(|job| job.server.as_ref())
+            .is_some_and(|server| server.is_ready())),
+        "server should become ready"
+    );
+
+    // The server advertises both requests, so the palette advertises them even
+    // though the provider never did.
+    app.execute_command(ids::PALETTE);
+    assert!(
+        enabled_for(&app, "Rename Symbol"),
+        "an attached rename server must un-hide rename"
+    );
+    assert!(
+        enabled_for(&app, "Code Actions"),
+        "an attached code-action server must un-hide code actions"
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn captures_and_restores_open_files() {
     let dir = temp_project("session-restore");

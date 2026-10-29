@@ -674,11 +674,20 @@ impl App {
             let language = document
                 .map(|doc| doc.buffer.language)
                 .unwrap_or(LanguageId::Unknown);
-            if !self
-                .language
-                .provider(language)
-                .capabilities()
-                .contains(&capability)
+            // A server-backed command works through the attached server even
+            // when the provider declares no built-in capability, so an
+            // advertised request overrides the provider gate. Without this the
+            // palette under-reported rename and code actions for every
+            // language whose server provides them.
+            let served_by_server = command
+                .server_request()
+                .is_some_and(|kind| self.lsp_supports(kind));
+            if !served_by_server
+                && !self
+                    .language
+                    .provider(language)
+                    .capabilities()
+                    .contains(&capability)
             {
                 return (
                     false,

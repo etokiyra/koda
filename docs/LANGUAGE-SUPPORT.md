@@ -128,23 +128,19 @@ as unverified until a live test covers it.
 - **Other architectures.** Only where upstream publishes an artifact; otherwise
   Koda reuses the user's tool. Linux aarch64 has no prebuilt `asm-lsp`.
 
-## Known inconsistency: the capability gate
+## The capability gate
 
-`Capability` is used for two different jobs, and they disagree:
+Commands and capabilities used to disagree: providers declare **built-in**
+features, but `Format Document`, `Rename Symbol` and `Code Actions` are
+**LSP-backed** and work for any attached server that advertises the request. The
+palette consulted only the provider list, so rename and code actions were
+advertised for Rust and Go alone, and formatting under-reported where no built-in
+formatter was declared.
 
-- Providers declare **built-in** capabilities, and `command_availability` gates
-  the palette on that list for `Format Document`, `Rename Symbol` and
-  `Code Actions`.
-- Those three are actually **LSP-backed** and work for any attached server that
-  advertises the request (the keybindings do not consult the capability list).
-
-Consequently `Rename`/`Code actions` are only *advertised* for Rust and Go, and
-`Format Document` is only advertised when the provider declares built-in
-formatting — even though `jdtls`, `OmniSharp`, `pylsp` and others provide them
-over LSP. The features work; the palette under-reports them. This is recorded
-here rather than fixed in this phase; the fix is to consult the attached server's
-advertised capabilities for server-backed commands and keep provider
-capabilities for built-in features.
+This is resolved: [`Command::server_request`](../src/commands/mod.rs) names the
+request a command can be served through, and `command_availability` treats an
+attached server advertising it as authority — the provider capability list stays
+about built-in features.
 
 ## PHP and Ruby
 
