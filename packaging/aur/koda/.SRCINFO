@@ -1,6 +1,6 @@
 pkgbase = koda
 	pkgdesc = A modern, lightweight, terminal-native IDE
-	pkgver = 0.1.1
+	pkgver = 0.1.2
 	pkgrel = 1
 	url = https://github.com/etokiyra/koda
 	arch = x86_64
@@ -27,7 +27,7 @@ pkgbase = koda
 	optdepends = dart: Dart language server
 	optdepends = elixir: Elixir language server runtime
 	optdepends = nix: Nix language server and formatter
-	source = koda-0.1.1.tar.gz::https://github.com/etokiyra/koda/archive/refs/tags/v0.1.1.tar.gz
-	sha256sums = 29cc0b2beeb4a8b3d9686fc62d4fdcc0acbcb8ce87c896bdfeaac71de0e44c4d
+	source = koda-0.1.2.tar.gz::https://github.com/etokiyra/koda/archive/refs/tags/v0.1.2.tar.gz
+	sha256sums = ca4dfaba127c0691cd3ecc31c581341c974ac110d7fe2e370e05fe93d50b3f82
 
 pkgname = koda

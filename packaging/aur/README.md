@@ -21,7 +21,7 @@ namcap PKGBUILD
 namcap <built-package>.pkg.tar.zst
 ```
 
-- `koda 0.1.1-1` built successfully; its package contains `/usr/bin/koda`.
+- `koda 0.1.2-1` built successfully; its package contains `/usr/bin/koda`.
 - `koda-git` built successfully; its `pkgver()` derives the version from
   `git describe`, and the package provides and conflicts with `koda`.
 - `namcap` reported no findings for either PKGBUILD or package.
@@ -38,7 +38,7 @@ cp ~/Projects/koda/packaging/aur/koda/PKGBUILD /tmp/aur-koda/
 cp ~/Projects/koda/packaging/aur/koda/.SRCINFO /tmp/aur-koda/
 cd /tmp/aur-koda
 git add PKGBUILD .SRCINFO
-git commit -m "Initial import: koda 0.1.1"
+git commit -m "Initial import: koda 0.1.2"
 git push
 ```
 
