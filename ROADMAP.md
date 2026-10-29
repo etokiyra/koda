@@ -174,24 +174,18 @@ section covers every path and the `sudo`/`secure_path` behaviour.
 
 ### 7. Run and test tasks
 
-**Goal.** Run a project's own command with no config.
-
-**Done (0.2, in progress).** `Run Task…` in the palette lists the commands the
-project's markers imply — `cargo build`/`test`, `go build`/`test`, `make`,
+**Done (0.2).** `Run Task…` in the palette lists the commands the project's
+markers imply — `cargo build`/`test`, `go build`/`test`, `make`,
 `python3 -m pytest`, `mix test` and the declared `npm` scripts (lifecycle hooks
 skipped) — and runs the chosen one in the project root on the background worker
-with a deadline, a bounded output cap and no shell, then opens a scrollable
-output panel with the exit verdict.
+with a deadline, a bounded output cap and no shell, then opens an output panel
+with the exit verdict. `Up`/`Down` move a row cursor and `Enter` jumps to the
+`file:line[:column]` reference on the selected line, opening the file at that
+position; the cwd the task ran in anchors relative paths.
 
-**Remaining.**
-- `file:line` references in the output should jump to the source.
-- More project kinds can be added where they have an unambiguous zero-config
-  command (`.csproj` → `dotnet build`, `pom.xml` → `mvn test`, `pubspec.yaml`).
-
-**Acceptance for the remaining work.** A detected task's output reveals the
-source position it names, without blocking the UI while it runs.
-
-**Depends on:** nothing.
+**Remaining.** More project kinds can be added where they have an unambiguous
+zero-config command (`pom.xml` → `mvn test`, `pubspec.yaml` → `flutter test`,
+`.csproj` → `dotnet build`) — one branch in the detection module each.
 
 ---
 

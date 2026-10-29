@@ -620,28 +620,35 @@ impl App {
             Overlay::TaskRun(run) => match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => Outcome::Close,
                 KeyCode::Up => {
-                    run.scroll_by(-1);
+                    run.select_by(-1);
                     Outcome::Nothing
                 }
                 KeyCode::Down => {
-                    run.scroll_by(1);
+                    run.select_by(1);
                     Outcome::Nothing
                 }
                 KeyCode::PageUp => {
-                    run.scroll_by(-16);
+                    run.select_by(-16);
                     Outcome::Nothing
                 }
                 KeyCode::PageDown => {
-                    run.scroll_by(16);
+                    run.select_by(16);
                     Outcome::Nothing
                 }
                 KeyCode::Home => {
-                    run.scroll = 0;
+                    run.selected = 0;
                     Outcome::Nothing
                 }
                 KeyCode::End => {
-                    run.scroll = run.lines.len();
+                    run.select_by(i64::MAX);
                     Outcome::Nothing
+                }
+                KeyCode::Enter => {
+                    if let Some((path, position)) = run.jump_target() {
+                        Outcome::Run(PickerAction::Reveal { path, position }, None)
+                    } else {
+                        Outcome::Nothing
+                    }
                 }
                 _ => Outcome::Nothing,
             },

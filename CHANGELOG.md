@@ -25,8 +25,9 @@ when it is tagged.
   build`/`test`, `go build`/`test`, `make`, `python3 -m pytest`, `mix test`
   and every declared `npm` script — and runs the chosen one in the project
   root on the background worker, with a deadline, a bounded output cap and no
-  shell. The captured output opens in a scrollable panel with the exit
-  verdict.
+  shell. The captured output opens in a panel with the exit verdict; the row
+  cursor moves with the arrows and `Enter` jumps to the `file:line[:column]`
+  reference under it.
 
 ### Fixed
 

@@ -769,7 +769,8 @@ pub fn render_diff(frame: &mut Frame, area: Rect, diff: &DiffState) {
     );
 }
 
-/// Render the captured output of a run task in a scrollable panel.
+/// Render the captured output of a run task in a scrollable panel, with a row
+/// cursor that `Enter` can turn into a source jump.
 pub fn render_task_run(frame: &mut Frame, area: Rect, run: &TaskRunState) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -797,14 +798,26 @@ pub fn render_task_run(frame: &mut Frame, area: Rect, run: &TaskRunState) {
     }
 
     let visible = (inner.height as usize).saturating_sub(1).max(1);
+    // Keep the row cursor inside the viewport; the user moves along the output.
     let max_scroll = run.lines.len().saturating_sub(visible);
-    let scroll = run.scroll.min(max_scroll);
+    let mut scroll = run.selected.min(max_scroll);
+    if run.selected >= scroll + visible {
+        scroll = (run.selected + 1 - visible).min(max_scroll);
+    }
     let lines: Vec<Line> = run
         .lines
         .iter()
+        .enumerate()
         .skip(scroll)
         .take(visible)
-        .map(|line| Line::from(Span::styled(format!(" {line}"), theme::text())))
+        .map(|(index, line)| {
+            let style = if index == run.selected {
+                theme::selectable(theme::menu_selected_bg())
+            } else {
+                theme::text()
+            };
+            Line::from(Span::styled(format!(" {line}"), style))
+        })
         .collect();
     let content_area = Rect {
         height: inner.height.saturating_sub(1),
@@ -816,7 +829,10 @@ pub fn render_task_run(frame: &mut Frame, area: Rect, run: &TaskRunState) {
     );
 
     let footer = Line::from(vec![
-        Span::styled(" ↑↓ scroll ", theme::muted()),
+        Span::styled(" ↑↓ move ", theme::muted()),
+        Span::styled("·", theme::dim()),
+        Span::styled(" Enter jump ", theme::muted()),
+        Span::styled(format!(" {} line(s) ", run.lines.len()), theme::muted()),
         Span::styled("·", theme::dim()),
         Span::styled(format!(" {} ", run.command), theme::muted()),
         Span::styled("·", theme::dim()),

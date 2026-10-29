@@ -35,9 +35,7 @@ describes the current state.
   **Language Setup…** for individual tools).
 - **Run Task output is a single bounded batch.** A task runs to completion (or
   its deadline) on the background worker, and stdout and stderr are shown apart
-  when both were captured — there is no live streaming. `file:line` references
-  in the output do not jump to the source yet; that is the remaining work in
-  [ROADMAP.md](../ROADMAP.md) item 7.
+  when both were captured — there is no live streaming.
 
 - **`.gitignore` discovery is capped.** At most 256 nested `.gitignore` files and
   4096 directories are read per project; in an enormous monorepo a deeper rule

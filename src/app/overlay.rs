@@ -325,8 +325,9 @@ fn classify_diff_line(line: &str) -> DiffLine {
 /// The captured output of a run task: plain text with a known exit result.
 ///
 /// Output arrives in one bounded batch from the background worker, so the view
-/// is a simple scrolling read-only panel — the task is abstracted by Koda, not
-/// streamed live.
+/// is a read-only panel — the task is abstracted by Koda, not streamed live.
+/// `Up`/`Down` move a row cursor instead of scrolling freely, because the row
+/// the user is on is what `Enter` can turn into a source jump.
 pub struct TaskRunState {
     pub title: String,
     /// The task's command line, shown in the footer.
@@ -335,13 +336,17 @@ pub struct TaskRunState {
     pub outcome: String,
     /// Whether the task exited cleanly; the footer is coloured from it.
     pub success: bool,
+    /// The project root, so a relative `file:line` reference can be resolved.
+    pub root: PathBuf,
     pub lines: Vec<String>,
-    pub scroll: usize,
+    pub selected: usize,
 }
 
 impl TaskRunState {
-    /// Build state from captured output, trimming to a bounded set of lines.
+    /// Build state from captured output, with the cursor on the interesting
+    /// first line (the first line with an output at all).
     pub fn from_output(
+        root: &Path,
         title: impl Into<String>,
         command: &str,
         outcome: &str,
@@ -357,14 +362,79 @@ impl TaskRunState {
             command: command.to_string(),
             outcome: outcome.to_string(),
             success,
+            root: root.to_path_buf(),
             lines,
-            scroll: 0,
+            selected: 0,
         }
     }
 
-    pub fn scroll_by(&mut self, delta: i64) {
-        self.scroll = (self.scroll as i64 + delta).max(0) as usize;
+    /// Move the row cursor by `delta` lines, clamped to the output.
+    pub fn select_by(&mut self, delta: i64) {
+        if self.lines.is_empty() {
+            self.selected = 0;
+        } else {
+            let next = self.selected as i64 + delta;
+            self.selected = next.clamp(0, self.lines.len() as i64 - 1) as usize;
+        }
     }
+
+    /// The file and position the selected line references, resolved against the
+    /// project root (an absolute reference wins), e.g. `src/main.rs:5:9`.
+    pub fn jump_target(&self) -> Option<(PathBuf, Position)> {
+        let line = self.lines.get(self.selected)?;
+        let (path, row, col) = reference_position(line)?;
+        let path = PathBuf::from(&path);
+        let path = if path.is_absolute() {
+            path
+        } else {
+            self.root.join(path)
+        };
+        // A compiler points at 1-based lines and 1-based columns; Koda stores
+        // 0-based characters.
+        let column = col.as_ref().map_or(0, |col| col.saturating_sub(1));
+        let row = row.saturating_sub(1);
+        Some((path, Position::new(row, column)))
+    }
+}
+
+/// A `path:line[:column]` reference in a task output line.
+///
+/// Only the first whitespace-delimited token is considered, which keeps rustc,
+/// go vet and pytest output (most of which start the problem line this way)
+/// parseable without regular-expression machinery. The line position comes
+/// *before* the column, so `src/main.rs:5:9` is line 5, column 9. The path must
+/// contain a separator or an extension dot, so `make:13` or `exit code 1` is
+/// not mistaken for a file.
+pub(super) fn reference_position(line: &str) -> Option<(String, usize, Option<usize>)> {
+    let token = line.split_whitespace().next()?;
+    // rustc ends the reference with a colon before the message, and a dangling
+    // empty segment would stop the numeric drain below.
+    let token = token.trim_end_matches(':');
+    let mut segments: Vec<&str> = token.split(':').collect();
+    // Drain the trailing numeric segments: they are the column, then the row.
+    let mut numbers: Vec<usize> = Vec::new();
+    while let Some(last) = segments.last() {
+        match last.parse::<usize>() {
+            Ok(number) => {
+                numbers.push(number);
+                segments.pop();
+            }
+            Err(_) => break,
+        }
+    }
+    let (row, column) = match numbers.as_slice() {
+        [row] => (*row, None),
+        [col, row, ..] => (*row, Some(*col)),
+        _ => return None,
+    };
+    if segments.is_empty() {
+        return None;
+    }
+    let path = segments.join(":");
+    if !path.contains('/') && !path.contains('.') {
+        return None;
+    }
+    Some((path, row, column))
 }
 
 // ---------------------------------------------------------------------------

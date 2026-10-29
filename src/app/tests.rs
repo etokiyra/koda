@@ -495,6 +495,60 @@ fn a_run_task_executes_and_shows_its_output() {
 }
 
 #[test]
+fn the_task_output_parser_reads_compiler_style_references() {
+    use crate::app::overlay::{TaskRunState, reference_position};
+
+    // rustc's "path:line:col" form, the most common.
+    assert_eq!(
+        reference_position("src/main.rs:5:9: warning: unused variable"),
+        Some(("src/main.rs".to_string(), 5, Some(9)))
+    );
+    // Line-only form.
+    assert_eq!(
+        reference_position("tests/render.rs:41 ok"),
+        Some(("tests/render.rs".to_string(), 41, None))
+    );
+    // A plain line number is not a file reference.
+    assert_eq!(reference_position("exit code 1: something"), None);
+    assert_eq!(reference_position("(no output)"), None);
+    assert_eq!(reference_position("── stderr ──"), None);
+    // Resolved against the project root, 1-based, into a character position.
+    let dir = temp_project("task-jump");
+    let run = TaskRunState::from_output(
+        &dir,
+        "Test",
+        "cargo test",
+        "exit code 1",
+        false,
+        "src/main.rs:2:5: note: this is the call",
+    );
+    let (path, position) = run.jump_target().unwrap();
+    assert_eq!(path, dir.join("src/main.rs"));
+    assert_eq!(position, Position::new(1, 4));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_run_state_builder_and_jump_target_work_together() {
+    let dir = temp_project("task-jump-run");
+    let file = dir.join("src/main.rs");
+    let run = crate::app::overlay::TaskRunState::from_output(
+        &dir,
+        "Build",
+        "make",
+        "success",
+        true,
+        "hello\nsrc/main.rs:3:1\nbye",
+    );
+    let mut run = run;
+    run.select_by(1); // move the row cursor onto the reference
+    let (path, position) = run.jump_target().expect("expected a reference");
+    assert_eq!(path, file);
+    assert_eq!(position, Position::new(2, 0));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn quick_open_lists_recent_files_first() {
     let dir = temp_project("recents");
     let a = dir.join("src/main.rs");

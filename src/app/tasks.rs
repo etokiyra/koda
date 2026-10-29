@@ -81,6 +81,7 @@ impl App {
             text
         };
         self.overlay = Overlay::TaskRun(TaskRunState::from_output(
+            self.workspace.root(),
             task.label.clone(),
             &task.command_line(),
             &verdict,
