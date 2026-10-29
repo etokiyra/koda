@@ -1,0 +1,4 @@
+# The AUR recipes are maintained in the repository but are not needed in a
+# release source archive. Excluding them keeps the archive checksum independent
+# of the AUR PKGBUILD itself, so the checksum can be fixed before tagging.
+packaging/ export-ignore

@@ -12,6 +12,8 @@ when it is tagged.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-29
+
 ### Added
 
 - **System-wide installation.** A `Makefile` installs to `/usr/local` by default
@@ -259,6 +261,7 @@ starts working.
 > tool. See [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md#provisioning). Windows is
 > not supported.
 
-[Unreleased]: https://github.com/etokiyra/koda/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/etokiyra/koda/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/etokiyra/koda/releases/tag/v0.1.2
 [0.1.1]: https://github.com/etokiyra/koda/releases/tag/v0.1.1
 [0.1.0]: https://github.com/etokiyra/koda/releases/tag/v0.1.0
