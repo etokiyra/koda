@@ -6,6 +6,7 @@
 
 pub mod create;
 pub mod file_tree;
+pub mod tasks;
 
 use std::path::{Path, PathBuf};
 
