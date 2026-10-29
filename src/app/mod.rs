@@ -20,6 +20,7 @@ mod search;
 mod session;
 mod settings;
 mod status;
+mod tasks;
 mod view;
 
 use std::cmp::Reverse;
@@ -369,6 +370,8 @@ pub struct App {
     pending_install: Option<Tool>,
     /// Whether a git commit is running on the worker.
     pending_commit: bool,
+    /// Whether a background run task is in flight, guarding a second run.
+    pending_task: bool,
     /// Whether a stage/unstage is running and the changed-files picker should
     /// be rebuilt when the refreshed snapshot arrives.
     pending_stage_refresh: bool,
@@ -506,6 +509,7 @@ impl App {
             pending_copy_file: None,
             pending_install: None,
             pending_commit: false,
+            pending_task: false,
             pending_stage_refresh: false,
             pending_code_actions: Vec::new(),
             last_disk_check: Instant::now(),

@@ -294,6 +294,10 @@ The editor is the heart of Koda, and it is built for real projects.
   edits.
 - Project-wide symbol search, session persistence (open files, cursors and
   expanded folders come back next launch) and external-change detection.
+- **Run Task…** runs one of the project's own commands — `cargo build`/`test`,
+  `go build`/`test`, `make`, `python3 -m pytest`, `mix test` or any declared
+  `npm` script — detected from the project's markers with no configuration, and
+  shows its output in a bounded, scrollable panel.
 - A background worker keeps detection, diagnostics, formatting and git off the
   UI thread.
 

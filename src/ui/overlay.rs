@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use crate::app::overlay::{
     CompletionState, DiffLineKind, DiffState, DirEntryKind, DirPicker, Help, HoverState,
     NewProject, NewProjectStep, Picker, Prompt, SETTINGS_ROWS, Search, SearchField, SettingsRow,
-    SettingsState,
+    SettingsState, TaskRunState,
 };
 use crate::app::{Toast, ToastKind};
 use crate::commands::CommandRegistry;
@@ -756,6 +756,79 @@ pub fn render_diff(frame: &mut Frame, area: Rect, diff: &DiffState) {
         Span::styled("·", theme::dim()),
         Span::styled(format!(" {last} line(s) "), theme::muted()),
         Span::styled("·", theme::dim()),
+        Span::styled(" Esc close ", theme::muted()),
+    ]);
+    let footer_area = Rect {
+        y: inner.y + inner.height.saturating_sub(1),
+        height: 1,
+        ..inner
+    };
+    frame.render_widget(
+        Paragraph::new(footer).style(Style::default().bg(theme::panel_bg())),
+        footer_area,
+    );
+}
+
+/// Render the captured output of a run task in a scrollable panel.
+pub fn render_task_run(frame: &mut Frame, area: Rect, run: &TaskRunState) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let width = ((area.width as u32 * 4 / 5) as u16)
+        .clamp(40, 140)
+        .min(area.width.max(1));
+    let height = area.height.saturating_sub(2).max(3).min(area.height);
+    let rect = centered(area, width, height);
+
+    frame.render_widget(Clear, rect);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme::accent())
+        .style(Style::default().bg(theme::panel_bg()))
+        .title(Line::from(vec![
+            Span::styled("✦ ", theme::star()),
+            Span::styled(run.title.clone(), theme::accent_bold()),
+            Span::styled(" ✦", theme::star()),
+        ]));
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+    if inner.height == 0 {
+        return;
+    }
+
+    let visible = (inner.height as usize).saturating_sub(1).max(1);
+    let max_scroll = run.lines.len().saturating_sub(visible);
+    let scroll = run.scroll.min(max_scroll);
+    let lines: Vec<Line> = run
+        .lines
+        .iter()
+        .skip(scroll)
+        .take(visible)
+        .map(|line| Line::from(Span::styled(format!(" {line}"), theme::text())))
+        .collect();
+    let content_area = Rect {
+        height: inner.height.saturating_sub(1),
+        ..inner
+    };
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(theme::panel_bg())),
+        content_area,
+    );
+
+    let footer = Line::from(vec![
+        Span::styled(" ↑↓ scroll ", theme::muted()),
+        Span::styled("·", theme::dim()),
+        Span::styled(format!(" {} ", run.command), theme::muted()),
+        Span::styled("·", theme::dim()),
+        Span::styled(
+            run.outcome.clone(),
+            if run.success {
+                theme::success()
+            } else {
+                theme::error()
+            },
+        ),
+        Span::styled(" ", theme::muted()),
         Span::styled(" Esc close ", theme::muted()),
     ]);
     let footer_area = Rect {

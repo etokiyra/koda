@@ -21,6 +21,12 @@ when it is tagged.
   environment suppresses every colour code, keeping emphasis through bold text
   and rendering selections as reversed text so menus, the file tree and the
   editor stay usable.
+- **Run Task…** Detects a project's own commands from its markers — `cargo
+  build`/`test`, `go build`/`test`, `make`, `python3 -m pytest`, `mix test`
+  and every declared `npm` script — and runs the chosen one in the project
+  root on the background worker, with a deadline, a bounded output cap and no
+  shell. The captured output opens in a scrollable panel with the exit
+  verdict.
 
 ### Fixed
 

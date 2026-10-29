@@ -18,6 +18,7 @@ impl App {
             Overlay::Settings(_) => return,
             Overlay::DirPicker(_) => return,
             Overlay::Diff(_) => return,
+            Overlay::TaskRun(_) => return,
             Overlay::NewProject(flow) => {
                 if flow.step == NewProjectStep::Name {
                     flow.name.push_str(text);
@@ -612,6 +613,34 @@ impl App {
                 }
                 KeyCode::End => {
                     diff.scroll = diff.lines.len();
+                    Outcome::Nothing
+                }
+                _ => Outcome::Nothing,
+            },
+            Overlay::TaskRun(run) => match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => Outcome::Close,
+                KeyCode::Up => {
+                    run.scroll_by(-1);
+                    Outcome::Nothing
+                }
+                KeyCode::Down => {
+                    run.scroll_by(1);
+                    Outcome::Nothing
+                }
+                KeyCode::PageUp => {
+                    run.scroll_by(-16);
+                    Outcome::Nothing
+                }
+                KeyCode::PageDown => {
+                    run.scroll_by(16);
+                    Outcome::Nothing
+                }
+                KeyCode::Home => {
+                    run.scroll = 0;
+                    Outcome::Nothing
+                }
+                KeyCode::End => {
+                    run.scroll = run.lines.len();
                     Outcome::Nothing
                 }
                 _ => Outcome::Nothing,

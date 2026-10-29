@@ -172,6 +172,27 @@ section covers every path and the `sudo`/`secure_path` behaviour.
 
 **Depends on:** the release workflow (shipped in 0.1.0).
 
+### 7. Run and test tasks
+
+**Goal.** Run a project's own command with no config.
+
+**Done (0.2, in progress).** `Run Task…` in the palette lists the commands the
+project's markers imply — `cargo build`/`test`, `go build`/`test`, `make`,
+`python3 -m pytest`, `mix test` and the declared `npm` scripts (lifecycle hooks
+skipped) — and runs the chosen one in the project root on the background worker
+with a deadline, a bounded output cap and no shell, then opens a scrollable
+output panel with the exit verdict.
+
+**Remaining.**
+- `file:line` references in the output should jump to the source.
+- More project kinds can be added where they have an unambiguous zero-config
+  command (`.csproj` → `dotnet build`, `pom.xml` → `mvn test`, `pubspec.yaml`).
+
+**Acceptance for the remaining work.** A detected task's output reveals the
+source position it names, without blocking the UI while it runs.
+
+**Depends on:** nothing.
+
 ---
 
 ## Next
@@ -180,9 +201,6 @@ Valuable, but not what defines the first impression.
 
 - **Code folding.** *Goal:* collapse and expand ranges (`za`/`zo`/`zc`).
   *Acceptance:* ranges fold from LSP or blank-line heuristics and survive edits.
-- **Run and test tasks.** *Goal:* run a project's own command with no config.
-  *Acceptance:* the task is detected per project kind, runs with bounded output,
-  and `file:line` in its output jumps to the source.
 - **Managed-tool lifecycle.** *Goal:* keep provisioned tools current safely.
   *Acceptance:* Update re-resolves the pinned version, an optional auto-update
   preference exists, and Remove never touches a user/system install.

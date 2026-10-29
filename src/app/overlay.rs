@@ -43,6 +43,8 @@ pub enum PickerAction {
         path: PathBuf,
         staged: bool,
     },
+    /// Run one of the project's own tasks in the project root.
+    RunTask(crate::project::tasks::Task),
 }
 
 /// A single row in a picker.
@@ -245,6 +247,8 @@ pub enum Overlay {
     NewProject(NewProject),
     /// A read-only unified diff.
     Diff(DiffState),
+    /// The captured output of a task the project provided.
+    TaskRun(TaskRunState),
 }
 
 impl Overlay {
@@ -281,7 +285,6 @@ pub struct DiffState {
     pub lines: Vec<DiffLine>,
     pub scroll: usize,
 }
-
 impl DiffState {
     /// Build state from the output of `git diff`, classifying each line.
     pub fn from_unified(title: impl Into<String>, text: &str) -> Self {
@@ -316,6 +319,51 @@ fn classify_diff_line(line: &str) -> DiffLine {
     DiffLine {
         kind,
         text: line.to_string(),
+    }
+}
+
+/// The captured output of a run task: plain text with a known exit result.
+///
+/// Output arrives in one bounded batch from the background worker, so the view
+/// is a simple scrolling read-only panel — the task is abstracted by Koda, not
+/// streamed live.
+pub struct TaskRunState {
+    pub title: String,
+    /// The task's command line, shown in the footer.
+    pub command: String,
+    /// How the task ended, shown in the footer: the exit code, or a reason.
+    pub outcome: String,
+    /// Whether the task exited cleanly; the footer is coloured from it.
+    pub success: bool,
+    pub lines: Vec<String>,
+    pub scroll: usize,
+}
+
+impl TaskRunState {
+    /// Build state from captured output, trimming to a bounded set of lines.
+    pub fn from_output(
+        title: impl Into<String>,
+        command: &str,
+        outcome: &str,
+        success: bool,
+        text: &str,
+    ) -> Self {
+        let lines: Vec<String> = text
+            .lines()
+            .map(|line| line.trim_end().to_string())
+            .collect();
+        TaskRunState {
+            title: title.into(),
+            command: command.to_string(),
+            outcome: outcome.to_string(),
+            success,
+            lines,
+            scroll: 0,
+        }
+    }
+
+    pub fn scroll_by(&mut self, delta: i64) {
+        self.scroll = (self.scroll as i64 + delta).max(0) as usize;
     }
 }
 

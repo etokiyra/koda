@@ -68,6 +68,7 @@ pub mod ids {
 
     pub const WORKSPACE_SYMBOLS: &str = "project.symbols";
     pub const PROJECT_SEARCH: &str = "project.search";
+    pub const RUN_TASKS: &str = "project.tasks";
     pub const OPEN_PROJECT: &str = "project.openDir";
     pub const NEW_PROJECT: &str = "project.new";
     pub const SETUP_PROJECT: &str = "project.setup";
@@ -400,6 +401,8 @@ impl CommandRegistry {
                 .describes("Scaffold a new Rust, Go, Python or Shell project"),
             Command::new(SETUP_PROJECT, "Set Up Project…", "Project", None)
                 .describes("Install the language tooling this project needs"),
+            Command::new(RUN_TASKS, "Run Task…", "Project", None)
+                .describes("Run one of the project's own commands"),
             Command::new(CHANGED_FILES, "Changed Files…", "Git", Some("Ctrl+Shift+G"))
                 .describes("List the files changed in the working tree"),
             Command::new(GIT_COMMIT, "Commit Changes…", "Git", None)

@@ -22,6 +22,7 @@ impl App {
             PickerAction::ApplyCodeAction(index) => self.apply_code_action(index),
             PickerAction::DeletePath(path) => self.delete_path(&path),
             PickerAction::ShowDiff { path, staged } => self.show_diff(path, Some(staged)),
+            PickerAction::RunTask(task) => self.run_task(task),
         }
     }
 
@@ -240,6 +241,7 @@ impl App {
             ids::RESTART_SERVER => self.restart_language_server(),
             ids::WORKSPACE_SYMBOLS => self.open_workspace_symbols(),
             ids::PROJECT_SEARCH => self.open_project_search(),
+            ids::RUN_TASKS => self.open_task_picker(),
             ids::CHANGED_FILES => self.open_changed_files(),
             ids::GIT_COMMIT => self.commit_changes(),
             ids::GIT_TOGGLE_STAGE => self.toggle_stage_target(),
@@ -729,6 +731,10 @@ impl App {
             ids::GIT_COMMIT if !self.workspace.git.available => {
                 (false, Some("not a git repository".to_string()))
             }
+            ids::RUN_TASKS if crate::project::tasks::detect(self.workspace.root()).is_empty() => (
+                false,
+                Some("no tasks detected for this project".to_string()),
+            ),
             ids::GIT_COMMIT if self.workspace.git.files.is_empty() => {
                 (false, Some("nothing to commit".to_string()))
             }

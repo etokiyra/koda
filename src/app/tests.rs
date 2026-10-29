@@ -442,6 +442,58 @@ fn palette_marks_unavailable_commands() {
     fs::remove_dir_all(&dir).ok();
 }
 
+#[cfg(unix)]
+#[test]
+fn a_run_task_executes_and_shows_its_output() {
+    // A Makefile is the one marker whose "task" requires no ecosystem tool
+    // beyond `make`, so the whole rail runs without cargo or npm.
+    let dir = temp_project("run-task");
+    fs::write(dir.join("Makefile"), "all:\n\t@echo KODA_TASK_RAN\n").unwrap();
+    let file = dir.join("notes.txt");
+    fs::write(&file, "hello\n").unwrap();
+
+    let mut app = app_with_file(&file);
+    app.execute_command(ids::RUN_TASKS);
+    let task = match &app.overlay {
+        Overlay::Picker(picker) => {
+            let item = (0..picker.filtered.len())
+                .filter_map(|index| picker.item(index))
+                .find(|item| item.label.contains("make"))
+                .expect("expected the make task in the picker");
+            item.action.clone()
+        }
+        _ => panic!("expected the task picker"),
+    };
+    assert!(matches!(task, PickerAction::RunTask(_)));
+
+    app.overlay = Overlay::None;
+    app.run_picker_action(task);
+    assert!(
+        app.status_message()
+            .is_some_and(|message| message.contains("Running")),
+        "the statusline should say the task is running"
+    );
+
+    // The make script finishes quickly; wait for the result overlay.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !matches!(app.overlay, Overlay::TaskRun(_)) && Instant::now() < deadline {
+        app.pump_background(Duration::from_millis(50));
+    }
+    match &app.overlay {
+        Overlay::TaskRun(run) => {
+            assert!(run.success, "the task should have exited cleanly");
+            assert_eq!(run.command, "make");
+            assert!(
+                run.lines.iter().any(|line| line.contains("KODA_TASK_RAN")),
+                "the output should contain the make script's echo"
+            );
+        }
+        _ => panic!("expected the task output view"),
+    }
+    assert!(!app.pending_task, "the pending flag must clear");
+    fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn quick_open_lists_recent_files_first() {
     let dir = temp_project("recents");

@@ -220,6 +220,11 @@ impl App {
                 self.project_languages = Some(languages);
                 true
             }
+            BackgroundEvent::TaskRun(outcome) => {
+                self.pending_task = false;
+                self.show_task_run(outcome);
+                true
+            }
             BackgroundEvent::ToolInstalled { tool, result } => {
                 self.pending_install = None;
                 let in_setup = self.project_setup.is_some();

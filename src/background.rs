@@ -19,6 +19,7 @@ use crate::language::diagnostics::Diagnostic;
 use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
 use crate::language::tools::{Tool, ToolRegistry};
+use crate::project::tasks::Task;
 
 /// Work sent to the background thread.
 enum Request {
@@ -68,6 +69,8 @@ enum Request {
         name: String,
         language: LanguageId,
     },
+    /// Run a run/test task provided by the project.
+    RunTask { root: PathBuf, task: Task },
 }
 
 /// A finished piece of background work.
@@ -122,6 +125,23 @@ pub enum Event {
         language: LanguageId,
         outcome: crate::project::create::CreateOutcome,
     },
+    /// The captured output of a run task.
+    TaskRun(TaskRunOutcome),
+}
+
+/// How a run task ended and what it printed.
+pub struct TaskRunOutcome {
+    pub task: Task,
+    /// Success when the process exited cleanly; `None` means killed or lost.
+    pub exit_code: Option<i32>,
+    /// True when the task ran past Koda's deadline and was killed.
+    pub timed_out: bool,
+    /// True when the child could not be spawned at all.
+    pub spawn_error: Option<String>,
+    /// stdout and stderr, each capped, stdout first.
+    pub text: String,
+    /// Whether the capped stream was truncated before the task ended.
+    pub truncated: bool,
 }
 
 /// Handle to the background worker.
@@ -142,6 +162,15 @@ const REQUEST_QUEUE: usize = 128;
 /// The most files a project-language scan reads. The walk is `.gitignore`-aware
 /// and skips generated directories; the cap keeps a huge tree predictable.
 const PROJECT_SCAN_LIMIT: usize = 4000;
+
+/// How long a run task may execute before the background worker kills it. A
+/// blocked worker is acceptable (the UI stays responsive); an unbounded child
+/// is not.
+const TASK_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// The most output bytes a run task may leave behind, beyond which the tail is
+/// drained and dropped.
+const TASK_OUTPUT_CAP: usize = 256 * 1024;
 
 impl Background {
     /// Spawn the workers, sharing the language service with the UI thread.
@@ -274,6 +303,11 @@ impl Background {
         });
     }
 
+    /// Ask for a project task to run in the project root.
+    pub fn run_task(&self, root: PathBuf, task: Task) {
+        let _ = self.requests.send(Request::RunTask { root, task });
+    }
+
     /// Take the next finished event, if any.
     pub fn try_recv(&self) -> Option<Event> {
         self.events.try_recv().ok()
@@ -383,5 +417,67 @@ fn handle_request(request: Request, language: &LanguageService, events: &Sender<
                 outcome,
             });
         }
+        Request::RunTask { root, task } => {
+            let _ = events.send(Event::TaskRun(run_task(&root, task)));
+        }
     }
+}
+
+/// Run one task in `root`, with bounded output and a deadline.
+///
+/// The command is spawned exactly as named: no shell, so project-provided
+/// arguments cannot be reinterpreted. stdout and stderr are captured on their
+/// own threads by [`crate::process::wait_captured`].
+fn run_task(root: &std::path::Path, task: Task) -> TaskRunOutcome {
+    use std::process::{Command, Stdio};
+
+    let mut outcome = TaskRunOutcome {
+        task: task.clone(),
+        exit_code: None,
+        timed_out: false,
+        spawn_error: None,
+        text: String::new(),
+        truncated: false,
+    };
+    let mut child = match Command::new(&task.program)
+        .args(&task.args)
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) => {
+            outcome.spawn_error = Some(format!(
+                "`{}' could not be started: {err}",
+                task.command_line()
+            ));
+            return outcome;
+        }
+    };
+    let captured = match crate::process::wait_captured(&mut child, TASK_TIMEOUT, TASK_OUTPUT_CAP) {
+        Ok(captured) => captured,
+        Err(err) => {
+            outcome.spawn_error = Some(err.to_string());
+            return outcome;
+        }
+    };
+    let status = captured.status;
+    outcome.exit_code = status.as_ref().and_then(|status| status.code());
+    outcome.timed_out = status.is_none();
+    outcome.truncated =
+        captured.stdout.len() >= TASK_OUTPUT_CAP || captured.stderr.len() >= TASK_OUTPUT_CAP;
+    let stdout_text = String::from_utf8_lossy(&captured.stdout);
+    let stderr_text = String::from_utf8_lossy(&captured.stderr);
+    match (stdout_text.trim().is_empty(), stderr_text.trim().is_empty()) {
+        (true, true) => {}
+        (false, true) => outcome.text += stdout_text.trim_end(),
+        (true, false) => outcome.text += stderr_text.trim_end(),
+        // Kept apart: the capture threads raced, so interleaving is fiction.
+        (false, false) => {
+            outcome.text = format!("{stdout_text}\n── stderr ──\n{stderr_text}");
+        }
+    }
+    outcome
 }
