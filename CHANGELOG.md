@@ -10,7 +10,7 @@ first release; it is written from the code's final state — superseded interim
 entries have been collapsed rather than kept as a blow-by-blow — and is dated
 when it is tagged.
 
-## [Unreleased]
+## [0.1.3] - 2026-10-29
 
 ### Added
 
