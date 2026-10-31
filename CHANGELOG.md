@@ -10,7 +10,7 @@ first release; it is written from the code's final state — superseded interim
 entries have been collapsed rather than kept as a blow-by-blow — and is dated
 when it is tagged.
 
-## [Unreleased]
+## [0.2.0] - 2026-10-31
 
 ### Added
 - **More run-task project kinds.** `Run Task…` now also offers tasks for Maven
@@ -342,7 +342,8 @@ starts working.
 > tool. See [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md#provisioning). Windows is
 > not supported.
 
-[Unreleased]: https://github.com/etokiyra/koda/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/etokiyra/koda/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/etokiyra/koda/releases/tag/v0.2.0
 [0.1.2]: https://github.com/etokiyra/koda/releases/tag/v0.1.2
 [0.1.1]: https://github.com/etokiyra/koda/releases/tag/v0.1.1
 [0.1.0]: https://github.com/etokiyra/koda/releases/tag/v0.1.0

@@ -4,7 +4,7 @@ This directory contains two ready-to-push AUR packages:
 
 | Directory | AUR package | Source |
 | --- | --- | --- |
-| `koda/` | stable release | GitHub tag `v0.1.3` |
+| `koda/` | stable release | GitHub tag `v0.2.0` |
 | `koda-git/` | VCS package | `master` from GitHub |
 
 Both install `/usr/bin/koda`, so a normal Arch/Artix `sudo koda` resolves the
