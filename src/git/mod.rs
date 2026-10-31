@@ -97,28 +97,27 @@ impl GitInfo {
             "git",
             &["status", "--porcelain", "-z", "--untracked-files=normal"],
             Some(&repo_root),
-        )
-        && captured.status.map(|s| s.success()).unwrap_or(false)
+        ) && captured.status.map(|s| s.success()).unwrap_or(false)
         {
             let output = captured.stdout;
-                let mut fields = output.split(|byte| *byte == 0);
-                while let Some(entry) = fields.next() {
-                    if entry.len() < 4 {
-                        continue;
-                    }
-                    let code = &entry[..2];
-                    let status = parse_status(&String::from_utf8_lossy(code));
-                    let path = String::from_utf8_lossy(&entry[3..]).into_owned();
-                    if matches!(code[0], b'R' | b'C') || matches!(code[1], b'R' | b'C') {
-                        let _ = fields.next();
-                    }
-                    let absolute = repo_root.join(path);
-                    let index = code[0];
-                    if index != b' ' && index != b'?' {
-                        staged.insert(absolute.clone());
-                    }
-                    files.insert(absolute, status);
+            let mut fields = output.split(|byte| *byte == 0);
+            while let Some(entry) = fields.next() {
+                if entry.len() < 4 {
+                    continue;
                 }
+                let code = &entry[..2];
+                let status = parse_status(&String::from_utf8_lossy(code));
+                let path = String::from_utf8_lossy(&entry[3..]).into_owned();
+                if matches!(code[0], b'R' | b'C') || matches!(code[1], b'R' | b'C') {
+                    let _ = fields.next();
+                }
+                let absolute = repo_root.join(path);
+                let index = code[0];
+                if index != b' ' && index != b'?' {
+                    staged.insert(absolute.clone());
+                }
+                files.insert(absolute, status);
+            }
         }
 
         GitInfo {
@@ -169,11 +168,7 @@ fn run(dir: &Path, args: &[&str]) -> Option<String> {
         return None;
     }
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
-    }
+    if text.is_empty() { None } else { Some(text) }
 }
 
 /// Run a git subcommand, returning trimmed stdout or the first error line.
@@ -439,7 +434,7 @@ fn parse_unified_diff(text: &str) -> Vec<GitLineMarker> {
         // Excess removed lines: mark a deletion at the boundary.
         if removed > added_count {
             let boundary = new_start.saturating_sub(1); // 0-based line the deletion follows
-                                                        // Clamp to a valid line: if the file is empty, line 0.
+            // Clamp to a valid line: if the file is empty, line 0.
             let line = boundary;
             markers.push(GitLineMarker {
                 line,
@@ -558,7 +553,11 @@ pub fn branches(root: &Path) -> Vec<String> {
     let Some(output) = run(root, &["branch", "--format=%(refname:short)"]) else {
         return Vec::new();
     };
-    output.lines().map(|line| line.trim().to_string()).filter(|s| !s.is_empty()).collect()
+    output
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// Switch to an existing branch.
@@ -708,14 +707,18 @@ mod tests {
         };
         // A fresh repository with a deterministic identity.
         assert!(git(&["init", "-q"]).unwrap().status.success());
-        assert!(git(&["config", "user.email", "koda@example.com"])
-            .unwrap()
-            .status
-            .success());
-        assert!(git(&["config", "user.name", "Koda Test"])
-            .unwrap()
-            .status
-            .success());
+        assert!(
+            git(&["config", "user.email", "koda@example.com"])
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(
+            git(&["config", "user.name", "Koda Test"])
+                .unwrap()
+                .status
+                .success()
+        );
         std::fs::write(dir.join("a.txt"), "hello\n").unwrap();
 
         assert!(stage_all(&dir).is_ok());
@@ -748,14 +751,18 @@ mod tests {
                 .output()
         };
         assert!(git(&["init", "-q"]).unwrap().status.success());
-        assert!(git(&["config", "user.email", "koda@example.com"])
-            .unwrap()
-            .status
-            .success());
-        assert!(git(&["config", "user.name", "Koda Test"])
-            .unwrap()
-            .status
-            .success());
+        assert!(
+            git(&["config", "user.email", "koda@example.com"])
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(
+            git(&["config", "user.name", "Koda Test"])
+                .unwrap()
+                .status
+                .success()
+        );
         let path = dir.join("a.txt");
         std::fs::write(&path, "one\n").unwrap();
         assert!(stage_all(&dir).is_ok());
@@ -841,14 +848,18 @@ mod tests {
                 .output()
         };
         assert!(git(&["init", "-q"]).unwrap().status.success());
-        assert!(git(&["config", "user.email", "koda@example.com"])
-            .unwrap()
-            .status
-            .success());
-        assert!(git(&["config", "user.name", "Koda Test"])
-            .unwrap()
-            .status
-            .success());
+        assert!(
+            git(&["config", "user.email", "koda@example.com"])
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(
+            git(&["config", "user.name", "Koda Test"])
+                .unwrap()
+                .status
+                .success()
+        );
 
         let path = dir.join("a.txt");
         std::fs::write(&path, "one\ntwo\nthree\n").unwrap();

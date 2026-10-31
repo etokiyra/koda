@@ -626,7 +626,11 @@ impl App {
                     Event::Mouse(mouse) => {
                         use crossterm::event::{MouseButton, MouseEventKind};
                         // Helper closure to map a screen cell to a document position.
-                        let map = |app: &Self, rect: ratatui::layout::Rect, column: u16, row: u16| -> Option<Position> {
+                        let map = |app: &Self,
+                                   rect: ratatui::layout::Rect,
+                                   column: u16,
+                                   row: u16|
+                         -> Option<Position> {
                             let doc = app.editor.active_document()?;
                             let total_lines = doc.buffer.len_lines();
                             let number_width = if app.show_line_numbers {

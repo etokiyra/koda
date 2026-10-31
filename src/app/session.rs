@@ -210,9 +210,7 @@ impl App {
 
         // Remember the current project so it can be revisited.
         let previous_root = self.workspace.root().to_path_buf();
-        if previous_root != root
-            && !self.workspaces.iter().any(|w| w.root() == previous_root)
-        {
+        if previous_root != root && !self.workspaces.iter().any(|w| w.root() == previous_root) {
             let old = std::mem::replace(&mut self.workspace, workspace);
             self.workspaces.push(old);
         } else {

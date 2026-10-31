@@ -391,7 +391,11 @@ impl Document {
                 break;
             }
         }
-        if end > row { Some((row + 1, end)) } else { None }
+        if end > row {
+            Some((row + 1, end))
+        } else {
+            None
+        }
     }
 
     pub fn is_foldable(&self, row: usize) -> bool {

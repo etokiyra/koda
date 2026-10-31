@@ -3,7 +3,7 @@
 use super::*;
 
 use crate::language::setup::{
-    plan_project, ProjectSetupPlan, ProjectSetupRun, SetupState, SetupSummary,
+    ProjectSetupPlan, ProjectSetupRun, SetupState, SetupSummary, plan_project,
 };
 
 impl App {

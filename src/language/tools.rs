@@ -1860,7 +1860,9 @@ fn download_verified(
             .map(|dir| dir.join(cache_key(expected, kind)).is_file())
             .unwrap_or(false);
         if !cached {
-            return Err(format!("{err} (no cached artifact available; check the network)"));
+            return Err(format!(
+                "{err} (no cached artifact available; check the network)"
+            ));
         }
         return Err(err);
     }
@@ -2066,7 +2068,11 @@ fn evict_cache_if_needed(dir: &Path) -> std::io::Result<()> {
         }
         let metadata = entry.metadata()?;
         total += metadata.len();
-        entries.push((path, metadata.len(), metadata.modified().unwrap_or(std::time::UNIX_EPOCH)));
+        entries.push((
+            path,
+            metadata.len(),
+            metadata.modified().unwrap_or(std::time::UNIX_EPOCH),
+        ));
     }
     if total <= SOFT_LIMIT {
         return Ok(());

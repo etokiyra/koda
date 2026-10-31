@@ -5,11 +5,11 @@
 //! state lives in a quiet right-aligned column. Pressing `/` turns the sidebar
 //! into an inline fuzzy file filter.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::app::overlay::TreeFilter;
 use crate::git::{GitFileStatus, GitInfo};
@@ -199,11 +199,7 @@ fn filter_header(filter: &TreeFilter, width: u16) -> Line<'static> {
 fn entry_line(selected: bool, entry: &VisibleEntry, width: u16, git: &GitInfo) -> Line<'static> {
     let is_dir = entry.is_dir;
     let glyph = if is_dir {
-        if entry.expanded {
-            "▾"
-        } else {
-            "▸"
-        }
+        if entry.expanded { "▾" } else { "▸" }
     } else {
         file_icon(&entry.name)
     };

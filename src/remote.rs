@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::process::{wait_captured, Captured};
+use crate::process::{Captured, wait_captured};
 
 /// A runner that can execute a program with arguments in a working directory.
 pub trait CommandRunner: Send + Sync {

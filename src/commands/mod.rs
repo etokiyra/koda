@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 
-use crate::language::lsp::RequestKind;
 use crate::language::Capability;
+use crate::language::lsp::RequestKind;
 
 /// Stable command identifiers.
 pub mod ids {

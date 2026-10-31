@@ -339,7 +339,9 @@ impl DiffState {
         if self.hunk_starts.is_empty() {
             return None;
         }
-        let index = self.current_hunk.min(self.hunk_starts.len().saturating_sub(1));
+        let index = self
+            .current_hunk
+            .min(self.hunk_starts.len().saturating_sub(1));
         let start = self.hunk_starts[index];
         let end = self
             .hunk_starts

@@ -432,7 +432,9 @@ impl App {
         self.pending_workspace_symbols_query = query.clone();
         if let Some(language) = self.ready_server_for(RequestKind::WorkspaceSymbols) {
             self.ws_lsp_pending = true;
-            if let Some(server) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))
+            if let Some(server) = self
+                .lsp
+                .get_mut(&(self.workspace.root().to_path_buf(), language))
                 .and_then(|job| job.server.as_mut())
             {
                 server.workspace_symbols(query.as_deref().unwrap_or(""));
@@ -585,7 +587,9 @@ impl App {
                 .map(|doc| doc.indent_width())
                 .unwrap_or(4);
             let version = self.document_version(&path).unwrap_or(0);
-            if let Some(server) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))
+            if let Some(server) = self
+                .lsp
+                .get_mut(&(self.workspace.root().to_path_buf(), language))
                 .and_then(|job| job.server.as_mut())
             {
                 self.pending_lsp_format = server

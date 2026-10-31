@@ -12,13 +12,13 @@ use std::thread;
 use std::time::Duration;
 
 use crate::git::GitInfo;
+use crate::language::LanguageService;
+use crate::language::WorkspaceSymbol;
 use crate::language::detection::Confidence;
 use crate::language::diagnostics::Diagnostic;
 use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
 use crate::language::tools::{Tool, ToolRegistry};
-use crate::language::LanguageService;
-use crate::language::WorkspaceSymbol;
 use crate::project::tasks::Task;
 
 /// Work sent to the background thread.
