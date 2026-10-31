@@ -83,6 +83,10 @@ pub mod ids {
     pub const GIT_COMMIT: &str = "git.commit";
     pub const GIT_TOGGLE_STAGE: &str = "git.toggleStage";
     pub const DIFF: &str = "git.diff";
+    pub const GIT_PUSH: &str = "git.push";
+    pub const GIT_PULL: &str = "git.pull";
+    pub const GIT_FETCH: &str = "git.fetch";
+    pub const GITHUB_CREATE_REPO: &str = "github.createRepo";
     pub const HUNK_NEXT: &str = "git.hunkNext";
     pub const HUNK_PREV: &str = "git.hunkPrev";
 
@@ -186,7 +190,7 @@ impl CommandRegistry {
             Command::new(SAVE, "Save", "File", Some("Ctrl+S"))
                 .describes("Write the active file to disk")
                 .needs_doc(),
-            Command::new(SAVE_ALL, "Save All", "File", None)
+            Command::new(SAVE_ALL, "Save All", "File", Some("Ctrl+Shift+A"))
                 .describes("Save every modified file")
                 .needs_doc(),
             Command::new(SAVE_AS, "Save As…", "File", Some("Ctrl+Shift+S"))
@@ -326,7 +330,7 @@ impl CommandRegistry {
             )
             .describes("Jump to the bracket matching the one under the cursor")
             .needs_doc(),
-            Command::new(TOGGLE_BREAKPOINT, "Toggle Breakpoint", "Debug", None)
+            Command::new(TOGGLE_BREAKPOINT, "Toggle Breakpoint", "Debug", Some("F9"))
                 .describes("Toggle a breakpoint on the current line")
                 .needs_doc(),
             Command::new(DEBUG_START, "Start Debugging", "Debug", None)
@@ -426,21 +430,35 @@ impl CommandRegistry {
                 .describes("Scaffold a new Rust, Go, Python or Shell project"),
             Command::new(SETUP_PROJECT, "Set Up Project…", "Project", None)
                 .describes("Install the language tooling this project needs"),
-            Command::new(RUN_TASKS, "Run Task…", "Project", None)
+            Command::new(RUN_TASKS, "Run Task…", "Project", Some("Ctrl+Shift+R"))
                 .describes("Run one of the project's own commands"),
             Command::new(CHANGED_FILES, "Changed Files…", "Git", Some("Ctrl+Shift+G"))
                 .describes("List the files changed in the working tree"),
-            Command::new(GIT_COMMIT, "Commit Changes…", "Git", None)
+            Command::new(GIT_COMMIT, "Commit Changes…", "Git", Some("Ctrl+Shift+C"))
                 .describes("Stage all changes and commit with a message"),
             Command::new(GIT_TOGGLE_STAGE, "Stage / Unstage File", "Git", None)
                 .describes("Toggle the selected file in the git index"),
             Command::new(DIFF, "Diff File", "Git", Some("Alt+D"))
                 .describes("Show the unified diff for the active file")
                 .needs_doc(),
-            Command::new(HUNK_NEXT, "Next Hunk", "Git", None)
+            Command::new(GIT_PUSH, "Push", "Git", Some("Ctrl+Shift+U"))
+                .describes("Push the current branch to its upstream")
+                .needs_doc(),
+            Command::new(GIT_PULL, "Pull", "Git", Some("Ctrl+Shift+Y"))
+                .describes("Pull from the upstream")
+                .needs_doc(),
+            Command::new(GIT_FETCH, "Fetch", "Git", None).describes("Fetch from all remotes"),
+            Command::new(
+                GITHUB_CREATE_REPO,
+                "Create GitHub Repository…",
+                "GitHub",
+                None,
+            )
+            .describes("Create a GitHub repository for this project and push"),
+            Command::new(HUNK_NEXT, "Next Hunk", "Git", Some("Alt+]"))
                 .describes("Jump to the next changed hunk in the active file")
                 .needs_doc(),
-            Command::new(HUNK_PREV, "Previous Hunk", "Git", None)
+            Command::new(HUNK_PREV, "Previous Hunk", "Git", Some("Alt+["))
                 .describes("Jump to the previous changed hunk in the active file")
                 .needs_doc(),
             Command::new(

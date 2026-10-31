@@ -52,6 +52,63 @@ impl App {
         }
     }
 
+    pub(super) fn git_push(&mut self) {
+        let root = self.workspace.root().to_path_buf();
+        match crate::git::push(&root) {
+            Ok(msg) => {
+                self.set_status(msg);
+                self.request_git_refresh();
+            }
+            Err(err) => self.set_error(format!("Push failed: {err}")),
+        }
+    }
+
+    pub(super) fn git_pull(&mut self) {
+        let root = self.workspace.root().to_path_buf();
+        match crate::git::pull(&root) {
+            Ok(msg) => {
+                self.set_status(msg);
+                self.request_git_refresh();
+            }
+            Err(err) => self.set_error(format!("Pull failed: {err}")),
+        }
+    }
+
+    pub(super) fn git_fetch(&mut self) {
+        let root = self.workspace.root().to_path_buf();
+        match crate::git::fetch(&root) {
+            Ok(msg) => {
+                self.set_status(msg);
+                self.request_git_refresh();
+            }
+            Err(err) => self.set_error(format!("Fetch failed: {err}")),
+        }
+    }
+
+    pub(super) fn github_create_repo(&mut self) {
+        if !crate::github::available() {
+            self.set_error("GitHub CLI (gh) is not installed");
+            return;
+        }
+        if crate::github::auth_status().is_none() {
+            self.set_error("Not logged in to GitHub — run `gh auth login`");
+            return;
+        }
+        let root = self.workspace.root().to_path_buf();
+        let name = root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("koda-project")
+            .to_string();
+        match crate::github::create_repo(&root, &name, false) {
+            Ok(msg) => {
+                self.set_status(msg);
+                self.request_git_refresh();
+            }
+            Err(err) => self.set_error(format!("GitHub: {err}")),
+        }
+    }
+
     pub(super) fn show_diff(&mut self, path: PathBuf, staged: Option<bool>) {
         let root = self.workspace.root().to_path_buf();
         let try_show = |side: bool| crate::git::diff(&root, &path, side);

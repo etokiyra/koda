@@ -30,6 +30,7 @@ pub mod privileges;
 pub mod process;
 pub mod project;
 pub mod debug;
+pub mod github;
 pub mod recent;
 pub mod remote;
 pub mod regex;

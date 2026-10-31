@@ -687,6 +687,7 @@ Koda reports what happened rather than deleting anything.
 | Category | Shortcut | Action |
 | --- | --- | --- |
 | File | `Ctrl+S` | Save |
+| File | `Ctrl+Shift+A` | Save All |
 | File | `Ctrl+Shift+S` | Save As… |
 | File | `Ctrl+O` | Open File… |
 | File | `Ctrl+P` | Quick Open… |
@@ -717,6 +718,7 @@ Koda reports what happened rather than deleting anything.
 | Edit | `Ctrl+Shift+D` | Duplicate Line |
 | Edit | `Ctrl+Shift+K` | Delete Line |
 | Edit | `Alt+M` | Go to Matching Bracket |
+| Debug | `F9` | Toggle Breakpoint |
 | Language | `Ctrl+Shift+I` | Format Document |
 | Language | `Ctrl+Shift+H` | Hover |
 | Language | `F12` | Go to Definition |
@@ -729,8 +731,14 @@ Koda reports what happened rather than deleting anything.
 | Diagnostics | `Ctrl+Shift+M` | Show Diagnostics |
 | Project | `Ctrl+T` | Go to Symbol in Workspace… |
 | Project | `Ctrl+Shift+F` | Search in Project… |
+| Project | `Ctrl+Shift+R` | Run Task… |
 | Git | `Ctrl+Shift+G` | Changed Files… |
+| Git | `Ctrl+Shift+C` | Commit Changes… |
 | Git | `Alt+D` | Diff File |
+| Git | `Ctrl+Shift+U` | Push |
+| Git | `Ctrl+Shift+Y` | Pull |
+| Git | `Alt+]` | Next Hunk |
+| Git | `Alt+[` | Previous Hunk |
 | View | `Ctrl+B` | File Panel: Focus / Hide |
 | View | `Ctrl+E` | Focus File Tree / Editor |
 | View | `Alt+I` | Toggle Inline Diagnostics |

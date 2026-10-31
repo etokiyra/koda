@@ -520,6 +520,58 @@ pub fn apply_patch(root: &Path, patch: &str, reverse: bool, staged: bool) -> Res
     }
 }
 
+/// Push the current branch to its upstream (or `origin`).
+pub fn push(root: &Path) -> Result<String, String> {
+    run_checked(root, &["push"]).map(|out| {
+        if out.is_empty() {
+            "Pushed".to_string()
+        } else {
+            out
+        }
+    })
+}
+
+/// Pull from the upstream (fetch + merge).
+pub fn pull(root: &Path) -> Result<String, String> {
+    run_checked(root, &["pull"]).map(|out| {
+        if out.is_empty() {
+            "Pulled".to_string()
+        } else {
+            out
+        }
+    })
+}
+
+/// Fetch from all remotes.
+pub fn fetch(root: &Path) -> Result<String, String> {
+    run_checked(root, &["fetch", "--all"]).map(|out| {
+        if out.is_empty() {
+            "Fetched".to_string()
+        } else {
+            out
+        }
+    })
+}
+
+/// List local branches.
+pub fn branches(root: &Path) -> Vec<String> {
+    let Some(output) = run(root, &["branch", "--format=%(refname:short)"]) else {
+        return Vec::new();
+    };
+    output.lines().map(|line| line.trim().to_string()).filter(|s| !s.is_empty()).collect()
+}
+
+/// Switch to an existing branch.
+pub fn checkout(root: &Path, branch: &str) -> Result<String, String> {
+    run_checked(root, &["checkout", branch]).map(|out| {
+        if out.is_empty() {
+            format!("Switched to {branch}")
+        } else {
+            out
+        }
+    })
+}
+
 fn parse_status(code: &str) -> GitFileStatus {
     let mut chars = code.chars();
     let x = chars.next().unwrap_or(' ');

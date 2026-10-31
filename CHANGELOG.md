@@ -40,6 +40,9 @@ when it is tagged.
   previous one available; `Switch Workspace…` swaps between them, restoring
   each project's open tabs. The LSP server map is now keyed by workspace root,
   so projects never reuse another project's language server.
+- **Git push/pull/fetch.** New `Push`, `Pull` and `Fetch` commands.
+- **GitHub CLI integration.** `Create GitHub Repository…` uses `gh` to create
+  a repo and push, delegating authentication to `gh auth`.
 - **File iconography.** The file tree shows a per-extension glyph for files,
   falling back to a neutral dot on monochrome terminals.
 - **LSP incremental sync.** `didChange` now sends the smallest changed range

@@ -64,6 +64,11 @@ impl App {
             self.goto_diagnostic(if shift { -1 } else { 1 });
             return true;
         }
+        if key.code == KeyCode::F(9) {
+            self.completion = None;
+            self.execute_command(ids::TOGGLE_BREAKPOINT);
+            return true;
+        }
         if key.code == KeyCode::F(3) {
             // Repeat the last find, reopening the bar when it was closed.
             self.completion = None;
@@ -101,6 +106,14 @@ impl App {
                     self.execute_command(ids::TOGGLE_WRAP);
                     return true;
                 }
+                KeyCode::Char('[') => {
+                    self.execute_command(ids::HUNK_PREV);
+                    return true;
+                }
+                KeyCode::Char(']') => {
+                    self.execute_command(ids::HUNK_NEXT);
+                    return true;
+                }
                 _ => {}
             }
         }
@@ -127,6 +140,11 @@ impl App {
                     ('h', true) => self.open_hover(),
                     ('h', false) => self.open_search(true),
                     ('g', true) => self.execute_command(ids::CHANGED_FILES),
+                    ('a', true) => self.execute_command(ids::SAVE_ALL),
+                    ('r', true) => self.execute_command(ids::RUN_TASKS),
+                    ('c', true) => self.execute_command(ids::GIT_COMMIT),
+                    ('u', true) => self.execute_command(ids::GIT_PUSH),
+                    ('y', true) => self.execute_command(ids::GIT_PULL),
                     ('g', false) => self.execute_command(ids::GOTO_LINE),
                     ('b', _) => self.toggle_tree(),
                     ('e', _) => self.focus_tree(),
