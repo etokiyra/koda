@@ -75,6 +75,20 @@ impl App {
     }
 
     /// Save the active document, if it has a path.
+    pub(super) fn convert_to_utf8(&mut self) {
+        let read_only = self
+            .editor
+            .active_document()
+            .map(|doc| doc.is_read_only())
+            .unwrap_or(false);
+        if !read_only {
+            self.set_status("File is already UTF-8");
+            return;
+        }
+        self.with_doc(|doc| doc.convert_to_utf8());
+        self.set_status("Converted to UTF-8 — save to write");
+    }
+
     pub(super) fn save(&mut self) {
         let has_path = self
             .editor

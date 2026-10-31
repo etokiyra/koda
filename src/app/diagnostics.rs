@@ -54,8 +54,7 @@ impl App {
         // If a language server owns this document, stream the change to it and
         // let it publish fresh diagnostics.
         let owned_by_lsp = path.as_deref().is_some_and(|path| {
-            self.lsp
-                .get(&language)
+            self.lsp.get(&(self.workspace.root().to_path_buf(), language))
                 .and_then(|job| job.server.as_ref())
                 .is_some_and(|server| server.is_ready() && server.has_open_document(path))
         });
@@ -65,9 +64,7 @@ impl App {
                 .active_document()
                 .map(|doc| doc.buffer.text())
                 .unwrap_or_default();
-            if let Some(server) = self
-                .lsp
-                .get_mut(&language)
+            if let Some(server) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))
                 .and_then(|job| job.server.as_mut())
                 && let Some(path) = path.as_deref()
             {

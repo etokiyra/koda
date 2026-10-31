@@ -133,10 +133,12 @@ describes the current state.
 - **Terminal coverage is partial.** Colour support is detected once at startup
   (`NO_COLOR`, `COLORTERM`, `TERM`): a 16-colour terminal gets the bundled
   **Ansi** theme unless the user stored a choice, and `NO_COLOR` suppresses
-  every colour code, with selections falling back to reversed text. Still
-  open: a `Ctrl+Shift` chord fallback for terminals without the kitty keyboard
-  protocol, and an interactive check on a real light terminal (the Daylight
-  theme is covered by deterministic render tests only).
+  every colour code, with selections falling back to reversed text. Koda asks
+  for the kitty keyboard protocol at startup so `Ctrl+Shift` chords are reported
+  distinctly; on a terminal that ignores the request those commands remain
+  reachable through the command palette. Still open: an interactive check on a
+  real light terminal (the Daylight theme is covered by deterministic render
+  tests only).
 - **No file iconography.** The tree uses text only.
 - **No interactive diff/merge view.** The git diff is a read-only overlay; a
   conflicting-file merge view does not exist.

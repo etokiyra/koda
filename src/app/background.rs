@@ -82,7 +82,11 @@ impl App {
 
     pub(super) fn apply_background_event(&mut self, event: BackgroundEvent) -> bool {
         match event {
-            BackgroundEvent::Detected { path, language, .. } => {
+            BackgroundEvent::Detected {
+                path,
+                language,
+                confidence,
+            } => {
                 let changed = if let Some(doc) = self
                     .editor
                     .documents
@@ -101,6 +105,12 @@ impl App {
                 } else {
                     false
                 };
+                if confidence == crate::language::detection::Confidence::Low {
+                    self.set_status(format!(
+                        "Low-confidence detection for {} — use Set Language… to override",
+                        path.display()
+                    ));
+                }
                 if changed {
                     self.maybe_start_lsp(language);
                     // If a server for this language is already ready, attach the
@@ -139,7 +149,15 @@ impl App {
                 true
             }
             BackgroundEvent::Git(info) => {
+                let root = info.repo_root.clone();
                 self.workspace.git = info;
+                if let Some(root) = root {
+                    for doc in &mut self.editor.documents {
+                        if let Some(path) = doc.buffer.path.clone() {
+                            doc.set_git_markers(crate::git::line_changes(&root, &path));
+                        }
+                    }
+                }
                 if self.pending_stage_refresh {
                     self.pending_stage_refresh = false;
                     if matches!(&self.overlay, Overlay::Picker(picker) if picker.title == "Changed Files")

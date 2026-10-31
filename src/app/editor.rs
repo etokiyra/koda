@@ -25,6 +25,58 @@ impl App {
         });
     }
 
+    pub(super) fn goto_hunk(&mut self, direction: i32) {
+        let Some(doc) = self.editor.active_document() else {
+            return;
+        };
+        if doc.git_markers.is_empty() {
+            self.set_status("No hunks");
+            return;
+        }
+        let cursor = doc.clamped_cursor();
+        let mut lines: Vec<usize> = doc.git_markers.iter().map(|marker| marker.line).collect();
+        lines.sort();
+        lines.dedup();
+        let target = if direction >= 0 {
+            lines
+                .iter()
+                .copied()
+                .find(|line| *line > cursor.row)
+                .unwrap_or(lines[0])
+        } else {
+            lines
+                .iter()
+                .copied()
+                .rev()
+                .find(|line| *line < cursor.row)
+                .unwrap_or_else(|| *lines.last().expect("non-empty"))
+        };
+        let center = self.viewport_height / 2;
+        self.with_doc(|doc| {
+            doc.move_to(Position::new(target, 0));
+            doc.scroll_top = target.saturating_sub(center);
+        });
+        self.set_status(format!("Hunk at line {}", target + 1));
+    }
+
+    pub(super) fn toggle_breakpoint(&mut self) {
+        self.with_doc(|doc| doc.toggle_breakpoint());
+        self.set_status("Breakpoint toggled");
+    }
+
+    pub(super) fn debug_start(&mut self) {
+        let breakpoints: Vec<usize> = self
+            .editor
+            .active_document()
+            .map(|doc| doc.breakpoints.iter().copied().collect())
+            .unwrap_or_default();
+        let adapter = std::env::var("KODA_DEBUG_ADAPTER").unwrap_or_else(|_| "gdb".to_string());
+        match crate::debug::launch(&adapter, &[], &breakpoints) {
+            Ok(message) => self.set_status(message),
+            Err(err) => self.set_error(err),
+        }
+    }
+
     pub(super) fn toggle_comment(&mut self) {
         let Some(language) = self.editor.active_document().map(|d| d.buffer.language) else {
             return;

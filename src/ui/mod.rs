@@ -118,6 +118,7 @@ fn render_editor_area(frame: &mut Frame, area: Rect, app: &mut App) {
     let body = chunks[1];
     app.viewport_height = body.height.saturating_sub(2) as usize;
     app.cursor_screen = None;
+    app.editor_body_rect = Some(body);
 
     let editor_focused = app.focus == Focus::Editor;
     if app.split && app.pane_right_index().is_some() && body.width >= 34 {

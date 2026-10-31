@@ -3,7 +3,7 @@
 use super::*;
 
 use crate::language::setup::{
-    ProjectSetupPlan, ProjectSetupRun, SetupState, SetupSummary, plan_project,
+    plan_project, ProjectSetupPlan, ProjectSetupRun, SetupState, SetupSummary,
 };
 
 impl App {
@@ -23,6 +23,8 @@ impl App {
             PickerAction::DeletePath(path) => self.delete_path(&path),
             PickerAction::ShowDiff { path, staged } => self.show_diff(path, Some(staged)),
             PickerAction::RunTask(task) => self.run_task(task),
+            PickerAction::SetLanguage(language) => self.set_language(language),
+            PickerAction::SwitchWorkspace(index) => self.switch_workspace(index),
         }
     }
 
@@ -72,7 +74,7 @@ impl App {
                 let version = self.document_version(&path).unwrap_or(0);
                 if let Some(server) = self
                     .lsp
-                    .get_mut(&language)
+                    .get_mut(&(self.workspace.root().to_path_buf(), language))
                     .and_then(|job| job.server.as_mut())
                 {
                     self.pending_rename_request =
@@ -199,6 +201,7 @@ impl App {
             ids::CLOSE_TAB => self.close_tab(),
             ids::CLOSE_ALL => self.close_all(),
             ids::REVERT => self.revert_file(),
+            ids::CONVERT_TO_UTF8 => self.convert_to_utf8(),
             ids::NEW_FILE => self.new_file(),
             ids::RENAME_FILE => self.rename_selected(),
             ids::DELETE_FILE => self.delete_selected(),
@@ -222,6 +225,7 @@ impl App {
                 self.set_status(message);
             }
             ids::OPEN_PROJECT => self.open_dir_picker(),
+            ids::SWITCH_WORKSPACE => self.switch_workspace_picker(),
             ids::NEW_PROJECT => self.open_new_project(),
             ids::SETUP_PROJECT => self.open_project_setup(),
             ids::UNDO => self.with_doc(|d| d.undo()),
@@ -238,6 +242,8 @@ impl App {
             ids::COMPLETE => self.open_completion(),
             ids::HOVER => self.open_hover(),
             ids::SETUP => self.language_setup(),
+            ids::SET_LANGUAGE => self.set_language_picker(),
+            ids::LANGUAGE_SUPPORT => self.language_support(),
             ids::RESTART_SERVER => self.restart_language_server(),
             ids::WORKSPACE_SYMBOLS => self.open_workspace_symbols(),
             ids::PROJECT_SEARCH => self.open_project_search(),
@@ -258,11 +264,14 @@ impl App {
             ids::DUPLICATE_LINE => self.with_doc(|d| d.duplicate_line()),
             ids::DELETE_LINE => self.with_doc(|d| d.delete_line()),
             ids::MATCHING_BRACKET => self.goto_matching_bracket(),
+            ids::TOGGLE_BREAKPOINT => self.toggle_breakpoint(),
+            ids::DEBUG_START => self.debug_start(),
             ids::TOGGLE_TREE => self.toggle_tree(),
             ids::FOCUS_TREE => self.focus_tree(),
             ids::TOGGLE_HIDDEN => self.toggle_hidden(),
             ids::TOGGLE_INLINE_DIAGNOSTICS => self.toggle_inline_diagnostics(),
             ids::TOGGLE_WRAP => self.toggle_wrap(),
+            ids::FOLD_TOGGLE => self.toggle_fold(),
             ids::REFRESH => self.refresh_workspace(),
             ids::SPLIT => self.toggle_split(),
             ids::FOCUS_PANE => self.focus_other_pane(),
@@ -281,6 +290,8 @@ impl App {
             ids::DIAGNOSTICS_NEXT => self.goto_diagnostic(1),
             ids::DIAGNOSTICS_PREV => self.goto_diagnostic(-1),
             ids::DIAGNOSTICS_LIST => self.open_diagnostics_list(),
+            ids::HUNK_NEXT => self.goto_hunk(1),
+            ids::HUNK_PREV => self.goto_hunk(-1),
             _ => {}
         }
     }
@@ -853,6 +864,23 @@ impl App {
         picker.refilter();
         self.overlay = Overlay::Picker(picker);
     }
+    pub(super) fn language_support(&mut self) {
+        let items: Vec<_> = crate::language::support::all()
+            .into_iter()
+            .map(|(language, class)| {
+                let detail = class.to_string();
+                PickerItem::new(
+                    language.name().to_string(),
+                    detail.clone(),
+                    PickerAction::Info(detail),
+                )
+            })
+            .collect();
+        let mut picker = Picker::new("Language Support", "Language…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+    }
+
     pub(super) fn open_prompt(&mut self, kind: PromptKind, label: &str, placeholder: &str) {
         self.overlay = Overlay::Prompt(Prompt::new(kind, label, placeholder));
     }

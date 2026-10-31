@@ -44,6 +44,8 @@ pub struct Buffer {
     pub line_ending: LineEnding,
     /// Bumped on every mutation. Useful for invalidating caches.
     pub version: u64,
+    /// Whether the buffer is read-only (e.g. a non-UTF-8 file opened lossily).
+    pub read_only: bool,
 }
 
 impl Default for Buffer {
@@ -99,6 +101,7 @@ impl Buffer {
             language: LanguageId::Unknown,
             line_ending,
             version: 0,
+            read_only: false,
         }
     }
 
@@ -106,6 +109,50 @@ impl Buffer {
     pub fn from_path(path: &Path) -> std::io::Result<Self> {
         let text = read_text(path)?;
         Ok(Buffer::from_text(&text, Some(path.to_path_buf())))
+    }
+
+    /// Load a buffer from disk, opening non-UTF-8 files read-only as lossy text.
+    ///
+    /// Binary (NUL-containing) and oversized files are still refused. A file that
+    /// is valid UTF-8 loads normally and is writable.
+    pub fn from_path_lossy(path: &Path) -> std::io::Result<Self> {
+        let metadata = std::fs::metadata(path)?;
+        if metadata.len() > MAX_OPEN_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "file is too large to open ({} MiB)",
+                    metadata.len() / (1024 * 1024)
+                ),
+            ));
+        }
+        let bytes = std::fs::read(path)?;
+        if bytes.contains(&0) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "file appears to be binary",
+            ));
+        }
+        let read_only = std::str::from_utf8(&bytes).is_err();
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        let mut buffer = Buffer::from_text(&text, Some(path.to_path_buf()));
+        buffer.read_only = read_only;
+        Ok(buffer)
+    }
+
+    /// Whether this buffer is read-only.
+    pub fn is_read_only(&self) -> bool {
+        self.read_only
+    }
+
+    /// Drop the read-only flag so a (lossily opened) non-UTF-8 file can be
+    /// saved as UTF-8, marking the buffer dirty so the conversion is written.
+    pub fn convert_to_utf8(&mut self) {
+        if self.read_only {
+            self.read_only = false;
+            self.dirty = true;
+            self.version = self.version.wrapping_add(1);
+        }
     }
 
     /// The full text, ready to be written to disk.
@@ -236,6 +283,12 @@ impl Buffer {
 
     /// Write the buffer to its path. Does nothing if the buffer is untitled.
     pub fn save(&mut self) -> std::io::Result<bool> {
+        if self.read_only {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "file is read-only (not valid UTF-8)",
+            ));
+        }
         match self.path.clone() {
             Some(path) => self.save_as(&path),
             None => Ok(false),
@@ -243,6 +296,12 @@ impl Buffer {
     }
 
     pub fn save_as(&mut self, path: &Path) -> std::io::Result<bool> {
+        if self.read_only {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "file is read-only (not valid UTF-8)",
+            ));
+        }
         crate::filesystem::write_atomic(path, &self.text())?;
         self.path = Some(path.to_path_buf());
         self.mark_clean();
@@ -284,6 +343,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("file")
+    }
+
+    #[test]
+    fn opens_a_large_file_within_a_budget() {
+        // A 10 MiB file must load and index quickly enough that opening it
+        // does not stall the UI; the rope backend keeps this well under a
+        // second on the supported platforms.
+        let size = 10 * 1024 * 1024;
+        let text = "a".repeat(size);
+        let started = std::time::Instant::now();
+        let buffer = Buffer::from_text(&text, None);
+        let elapsed = started.elapsed();
+        assert_eq!(buffer.len_lines(), 1);
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "loading 10 MiB took {elapsed:?}"
+        );
     }
 
     #[test]

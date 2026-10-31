@@ -1854,6 +1854,14 @@ fn download_verified(
     })();
     if let Err(err) = result {
         let _ = std::fs::remove_file(&tmp);
+        // Make an offline/air-gapped failure actionable: say whether a cached
+        // artifact exists that could have satisfied the request.
+        let cached = cache
+            .map(|dir| dir.join(cache_key(expected, kind)).is_file())
+            .unwrap_or(false);
+        if !cached {
+            return Err(format!("{err} (no cached artifact available; check the network)"));
+        }
         return Err(err);
     }
     // Only a verified artifact enters the cache, and a cache failure never
@@ -2034,7 +2042,44 @@ fn cache_store(dir: &Path, expected: &str, source: &Path, kind: HashKind) -> Res
         std::fs::copy(source, &tmp)
             .map_err(|err| format!("could not cache the download: {err}"))?;
     }
-    atomic_replace(&tmp, &dest)
+    let result = atomic_replace(&tmp, &dest);
+    // Best-effort: keep the verified cache from growing without bound. Eviction
+    // never fails the install it is accelerating.
+    let _ = evict_cache_if_needed(dir);
+    result
+}
+
+/// Best-effort cache eviction: when the verified cache exceeds a soft limit,
+/// remove the oldest entries until it is back under a lower target. Only files
+/// directly in `dir` are considered; the metadata cache lives beside them and is
+/// evicted together.
+fn evict_cache_if_needed(dir: &Path) -> std::io::Result<()> {
+    const SOFT_LIMIT: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
+    const TARGET: u64 = 3 * 1024 * 1024 * 1024 / 2; // 1.5 GiB
+    let mut entries: Vec<(PathBuf, u64, std::time::SystemTime)> = Vec::new();
+    let mut total = 0u64;
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let metadata = entry.metadata()?;
+        total += metadata.len();
+        entries.push((path, metadata.len(), metadata.modified().unwrap_or(std::time::UNIX_EPOCH)));
+    }
+    if total <= SOFT_LIMIT {
+        return Ok(());
+    }
+    entries.sort_by_key(|entry| entry.2);
+    for (path, size, _) in entries {
+        if total <= TARGET {
+            break;
+        }
+        let _ = std::fs::remove_file(&path);
+        total = total.saturating_sub(size);
+    }
+    Ok(())
 }
 
 /// Place `src` at `dest` without destroying `dest` if the move fails.

@@ -18,6 +18,7 @@ use ratatui::widgets::Paragraph;
 use crate::app::overlay::Search;
 use crate::editor::layout::{LineLayout, segment_index, wrap_segments};
 use crate::editor::{Document, Position};
+use crate::git::GitLineChange;
 use crate::language::diagnostics::{Diagnostic, Severity};
 use crate::language::provider::{LanguageProvider, TokenKind};
 use crate::ui::{art, theme};
@@ -93,6 +94,11 @@ pub fn render(
         let mut row = doc.scroll_top;
         let mut subline = doc.scroll_subline;
         while lines.len() < view_height && row < total_lines {
+            if doc.is_hidden(row) {
+                row += 1;
+                subline = 0;
+                continue;
+            }
             let segments = doc.row_segments(row, text_width);
             if subline >= segments.len() {
                 subline = 0;
@@ -141,7 +147,12 @@ pub fn render(
             subline = 0;
         }
     } else {
-        for row in doc.scroll_top..(doc.scroll_top + view_height).min(total_lines) {
+        let mut row = doc.scroll_top;
+        while lines.len() < view_height && row < total_lines {
+            if doc.is_hidden(row) {
+                row += 1;
+                continue;
+            }
             let context = build_row(
                 doc,
                 provider,
@@ -173,6 +184,7 @@ pub fn render(
                 false,
                 show_line_numbers,
             ));
+            row += 1;
         }
     }
 
@@ -323,6 +335,9 @@ struct RowContext {
     indent: usize,
     current: bool,
     marker_severity: Option<Severity>,
+    git_change: Option<GitLineChange>,
+    folded: bool,
+    breakpoint: bool,
     /// The most severe diagnostic touching this line, with how many touch it,
     /// for the inline note.
     note: Option<(Diagnostic, usize)>,
@@ -447,6 +462,9 @@ fn build_row(
         indent,
         current,
         marker_severity: doc.diagnostic_severity_on_line(row),
+        git_change: doc.git_change_on_line(row),
+        folded: doc.folded.contains(&row),
+        breakpoint: doc.has_breakpoint(row),
         note,
     }
 }
@@ -479,11 +497,30 @@ fn render_segment(
     let mut spans: Vec<Span> = Vec::new();
 
     if first {
-        let marker_style = match context.marker_severity {
-            Some(severity) => with_bg(severity_style(severity), base_bg),
-            None => with_bg(gutter_style, base_bg),
+        let (marker, marker_style) = match context.marker_severity {
+            Some(severity) => (
+                Severity::gutter(severity),
+                with_bg(severity_style(severity), base_bg),
+            ),
+            None => {
+                if context.breakpoint {
+                    ('●', with_bg(theme::error(), base_bg))
+                } else {
+                    match context.git_change {
+                        Some(GitLineChange::Added) => ('+', with_bg(theme::success(), base_bg)),
+                        Some(GitLineChange::Modified) => ('~', with_bg(theme::info(), base_bg)),
+                        Some(GitLineChange::Removed) => ('-', with_bg(theme::error(), base_bg)),
+                        None => {
+                            if context.folded {
+                                ('▸', with_bg(gutter_style, base_bg))
+                            } else {
+                                (' ', with_bg(gutter_style, base_bg))
+                            }
+                        }
+                    }
+                }
+            }
         };
-        let marker = context.marker_severity.map(Severity::gutter).unwrap_or(' ');
         spans.push(Span::styled(marker.to_string(), marker_style));
         if show_line_numbers {
             spans.push(Span::styled(

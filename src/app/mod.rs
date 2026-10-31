@@ -242,6 +242,8 @@ pub struct WelcomeItem {
 /// The root application object.
 pub struct App {
     pub workspace: Workspace,
+    /// Additional projects opened this session, for multi-project navigation.
+    pub workspaces: Vec<Workspace>,
     pub editor: Editor,
     pub language: Arc<LanguageService>,
     background: Background,
@@ -359,7 +361,7 @@ pub struct App {
     /// External tools Koda has probed for, once discovery completes.
     pub tools: Option<ToolRegistry>,
     /// One language server per language.
-    lsp: HashMap<LanguageId, LspJob>,
+    lsp: HashMap<(PathBuf, LanguageId), LspJob>,
     /// The symbol awaiting a new name, from the rename prompt.
     pending_rename: Option<(PathBuf, usize, usize)>,
     /// The path awaiting a new name, from the file-rename prompt.
@@ -379,6 +381,10 @@ pub struct App {
     pending_code_actions: Vec<convert::CodeAction>,
     /// When open files were last checked for on-disk changes.
     last_disk_check: Instant,
+    /// Last rendered editor body rectangle, for mouse hit-testing.
+    pub editor_body_rect: Option<ratatui::layout::Rect>,
+    /// Anchor for an in-progress mouse drag selection.
+    pub mouse_drag_anchor: Option<Position>,
     /// Languages for which Koda has already offered to install a missing
     /// language server this session.
     setup_offered: std::collections::HashSet<LanguageId>,
@@ -441,6 +447,7 @@ impl App {
         let workspace = Workspace::open(target)?;
         let mut app = App {
             workspace,
+            workspaces: Vec::new(),
             editor: Editor::new(),
             language,
             background,
@@ -513,6 +520,8 @@ impl App {
             pending_stage_refresh: false,
             pending_code_actions: Vec::new(),
             last_disk_check: Instant::now(),
+            editor_body_rect: None,
+            mouse_drag_anchor: None,
             setup_offered: std::collections::HashSet::new(),
             project_languages: None,
             project_scan_started: false,
@@ -614,6 +623,75 @@ impl App {
                         needs_redraw = true;
                     }
                     Event::Resize(..) => needs_redraw = true,
+                    Event::Mouse(mouse) => {
+                        use crossterm::event::{MouseButton, MouseEventKind};
+                        // Helper closure to map a screen cell to a document position.
+                        let map = |app: &Self, rect: ratatui::layout::Rect, column: u16, row: u16| -> Option<Position> {
+                            let doc = app.editor.active_document()?;
+                            let total_lines = doc.buffer.len_lines();
+                            let number_width = if app.show_line_numbers {
+                                total_lines.max(1).to_string().len()
+                            } else {
+                                0
+                            };
+                            let gutter = number_width + 2;
+                            let r = (row as usize)
+                                .saturating_sub(rect.y as usize + 1)
+                                .saturating_add(doc.scroll_top);
+                            let c = (column as usize)
+                                .saturating_sub(rect.x as usize + gutter)
+                                .saturating_add(doc.scroll_left);
+                            let r = r.min(total_lines.saturating_sub(1));
+                            Some(Position::new(r, c))
+                        };
+                        match mouse.kind {
+                            MouseEventKind::ScrollUp => {
+                                self.with_doc(|doc| doc.move_up(false));
+                                needs_redraw = true;
+                            }
+                            MouseEventKind::ScrollDown => {
+                                self.with_doc(|doc| doc.move_down(false));
+                                needs_redraw = true;
+                            }
+                            MouseEventKind::Down(MouseButton::Left) => {
+                                if let Some(rect) = self.editor_body_rect
+                                    && mouse.column >= rect.x
+                                    && mouse.column < rect.x + rect.width
+                                    && mouse.row > rect.y
+                                    && mouse.row < rect.y + rect.height
+                                    && let Some(pos) = map(self, rect, mouse.column, mouse.row)
+                                {
+                                    self.mouse_drag_anchor = Some(pos);
+                                    self.with_doc(|d| {
+                                        d.selection = None;
+                                        d.move_to(pos);
+                                    });
+                                    self.focus = Focus::Editor;
+                                    needs_redraw = true;
+                                }
+                            }
+                            MouseEventKind::Drag(MouseButton::Left) => {
+                                if let Some(anchor) = self.mouse_drag_anchor
+                                    && let Some(rect) = self.editor_body_rect
+                                    && mouse.column >= rect.x
+                                    && mouse.column < rect.x + rect.width
+                                    && mouse.row > rect.y
+                                    && mouse.row < rect.y + rect.height
+                                    && let Some(pos) = map(self, rect, mouse.column, mouse.row)
+                                {
+                                    self.with_doc(|d| {
+                                        d.selection = Some(Selection::new(anchor));
+                                        d.cursor = pos;
+                                    });
+                                    needs_redraw = true;
+                                }
+                            }
+                            MouseEventKind::Up(MouseButton::Left) => {
+                                self.mouse_drag_anchor = None;
+                            }
+                            _ => {}
+                        }
+                    }
                     _ => {}
                 }
             }

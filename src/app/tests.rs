@@ -1,7 +1,7 @@
 use super::*;
 use std::fs;
 
-use super::overlay::{SETTINGS_ROWS, SettingsRow};
+use super::overlay::{SettingsRow, SETTINGS_ROWS};
 use crate::settings::{Settings, ThemeId};
 
 fn temp_project(name: &str) -> PathBuf {
@@ -286,18 +286,14 @@ fn split_shows_two_documents_and_focus_switches() {
     // Typing edits only the focused (right) document.
     app.with_doc(|doc| doc.insert_text("// right\n"));
     let right = (active + 1) % 2;
-    assert!(
-        app.editor.documents[right]
-            .buffer
-            .text()
-            .contains("// right")
-    );
-    assert!(
-        !app.editor.documents[active]
-            .buffer
-            .text()
-            .contains("// right")
-    );
+    assert!(app.editor.documents[right]
+        .buffer
+        .text()
+        .contains("// right"));
+    assert!(!app.editor.documents[active]
+        .buffer
+        .text()
+        .contains("// right"));
 
     fs::remove_dir_all(&dir).ok();
 }
@@ -496,7 +492,7 @@ fn a_run_task_executes_and_shows_its_output() {
 
 #[test]
 fn the_task_output_parser_reads_compiler_style_references() {
-    use crate::app::overlay::{TaskRunState, reference_position};
+    use crate::app::overlay::{reference_position, TaskRunState};
 
     // rustc's "path:line:col" form, the most common.
     assert_eq!(
@@ -624,23 +620,21 @@ fn refresh_picks_up_new_files() {
     let dir = temp_project("refresh");
     let file = dir.join("src/main.rs");
     let mut app = app_with_file(&file);
-    assert!(
-        !app.workspace
-            .tree
-            .entries()
-            .iter()
-            .any(|entry| entry.name == "added.rs")
-    );
+    assert!(!app
+        .workspace
+        .tree
+        .entries()
+        .iter()
+        .any(|entry| entry.name == "added.rs"));
 
     fs::write(dir.join("added.rs"), "pub fn added() {}\n").unwrap();
     app.execute_command(ids::REFRESH);
-    assert!(
-        app.workspace
-            .tree
-            .entries()
-            .iter()
-            .any(|entry| entry.name == "added.rs")
-    );
+    assert!(app
+        .workspace
+        .tree
+        .entries()
+        .iter()
+        .any(|entry| entry.name == "added.rs"));
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -1638,11 +1632,10 @@ fn commit_flow_reports_state_and_prompts() {
     app.workspace.git = crate::git::GitInfo::default();
     app.execute_command(ids::GIT_COMMIT);
     assert!(matches!(app.overlay, Overlay::None));
-    assert!(
-        app.status_message()
-            .unwrap_or("")
-            .contains("Not a git repository")
-    );
+    assert!(app
+        .status_message()
+        .unwrap_or("")
+        .contains("Not a git repository"));
 
     // With changes, it opens a commit-message prompt and dispatches work.
     let mut files = std::collections::HashMap::new();
@@ -1711,25 +1704,19 @@ fn diff_active_file_shows_working_tree_changes() {
             .output()
     };
     assert!(git(&["init", "-q"]).unwrap().status.success());
-    assert!(
-        git(&["config", "user.email", "koda@example.com"])
-            .unwrap()
-            .status
-            .success()
-    );
-    assert!(
-        git(&["config", "user.name", "Koda Test"])
-            .unwrap()
-            .status
-            .success()
-    );
+    assert!(git(&["config", "user.email", "koda@example.com"])
+        .unwrap()
+        .status
+        .success());
+    assert!(git(&["config", "user.name", "Koda Test"])
+        .unwrap()
+        .status
+        .success());
     assert!(git(&["add", "-A"]).unwrap().status.success());
-    assert!(
-        git(&["commit", "-q", "-m", "init"])
-            .unwrap()
-            .status
-            .success()
-    );
+    assert!(git(&["commit", "-q", "-m", "init"])
+        .unwrap()
+        .status
+        .success());
 
     let file = dir.join("src/main.rs");
     let mut app = app_with_file(&file);
@@ -2032,13 +2019,19 @@ fn lsp_handshake_timeout_falls_back_to_builtin() {
     let mut app = app_with_file(&file);
     app.start_lsp(LanguageId::Rust, script.to_str().unwrap(), &[]);
     // Pretend the handshake has been pending for too long.
-    if let Some(job) = app.lsp.get_mut(&LanguageId::Rust) {
+    if let Some(job) = app
+        .lsp
+        .get_mut(&(app.workspace.root().to_path_buf(), LanguageId::Rust))
+    {
         job.started_at = Some(Instant::now() - Duration::from_secs(60));
     }
 
     assert!(app.poll_lsp_health());
     assert!(matches!(app.lsp_status(), LspStatus::Failed(_)));
-    let job = app.lsp.get(&LanguageId::Rust).unwrap();
+    let job = app
+        .lsp
+        .get(&(app.workspace.root().to_path_buf(), LanguageId::Rust))
+        .unwrap();
     assert!(job.server.is_none());
     assert!(job.started_at.is_none());
     fs::remove_dir_all(&dir).ok();
@@ -2050,7 +2043,7 @@ fn automatic_restart_stops_after_the_budget() {
     let file = dir.join("src/main.rs");
     let mut app = app_with_file(&file);
     app.lsp.insert(
-        LanguageId::Rust,
+        (app.workspace.root().to_path_buf(), LanguageId::Rust),
         LspJob {
             restarts: MAX_LSP_RESTARTS,
             ..LspJob::default()
@@ -2059,7 +2052,11 @@ fn automatic_restart_stops_after_the_budget() {
 
     app.schedule_lsp_restart(LanguageId::Rust);
     assert!(
-        app.lsp.get(&LanguageId::Rust).unwrap().start_at.is_none(),
+        app.lsp
+            .get(&(app.workspace.root().to_path_buf(), LanguageId::Rust))
+            .unwrap()
+            .start_at
+            .is_none(),
         "the budget is exhausted"
     );
     fs::remove_dir_all(&dir).ok();
@@ -2072,7 +2069,7 @@ fn a_successful_handshake_does_not_forgive_an_earlier_crash() {
     let mut app = app_with_file(&file);
     app.lsp.clear();
     app.lsp.insert(
-        LanguageId::Rust,
+        (app.workspace.root().to_path_buf(), LanguageId::Rust),
         LspJob {
             restarts: 1,
             ..LspJob::default()
@@ -2082,7 +2079,10 @@ fn a_successful_handshake_does_not_forgive_an_earlier_crash() {
     // Connecting must not reset the budget on its own.
     app.lsp_ready(LanguageId::Rust);
     assert_eq!(
-        app.lsp.get(&LanguageId::Rust).unwrap().restarts,
+        app.lsp
+            .get(&(app.workspace.root().to_path_buf(), LanguageId::Rust))
+            .unwrap()
+            .restarts,
         1,
         "a fresh handshake must not grant a fresh restart budget"
     );
@@ -2230,7 +2230,7 @@ done
     while Instant::now() < deadline
         && !app
             .lsp
-            .get(&LanguageId::Rust)
+            .get(&(app.workspace.root().to_path_buf(), LanguageId::Rust))
             .and_then(|job| job.server.as_ref())
             .is_some_and(|server| server.is_ready())
     {
@@ -2308,7 +2308,7 @@ done
             .iter()
             .all(|language| {
                 app.lsp
-                    .get(language)
+                    .get(&(app.workspace.root().to_path_buf(), *language))
                     .and_then(|job| job.server.as_ref())
                     .is_some_and(|server| server.is_ready())
             })
@@ -2400,7 +2400,7 @@ done
     assert!(
         wait(&mut app, &|app| app
             .lsp
-            .get(&LanguageId::Rust)
+            .get(&(app.workspace.root().to_path_buf(), LanguageId::Rust))
             .and_then(|job| job.server.as_ref())
             .is_some_and(|server| server.is_ready())),
         "server should become ready"
@@ -2585,7 +2585,7 @@ done
     assert!(
         wait(&mut app, &|app| app
             .lsp
-            .get(&LanguageId::Python)
+            .get(&(app.workspace.root().to_path_buf(), LanguageId::Python))
             .and_then(|job| job.server.as_ref())
             .is_some_and(|server| server.is_ready())),
         "server should become ready"
@@ -2845,20 +2845,18 @@ fn warns_when_a_dirty_file_changes_on_disk() {
 
     assert!(app.poll_external_changes());
     assert!(app.status.error);
-    assert!(
-        app.status_message()
-            .unwrap_or("")
-            .contains("changed on disk")
-    );
+    assert!(app
+        .status_message()
+        .unwrap_or("")
+        .contains("changed on disk"));
     // The edit is preserved rather than silently overwritten.
-    assert!(
-        app.editor
-            .active_document()
-            .unwrap()
-            .buffer
-            .text()
-            .starts_with("// mine")
-    );
+    assert!(app
+        .editor
+        .active_document()
+        .unwrap()
+        .buffer
+        .text()
+        .starts_with("// mine"));
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -2883,11 +2881,9 @@ fn startup_shows_the_welcome_screen_for_a_file_target() {
         .map(|item| item.label)
         .collect();
     assert!(labels.iter().any(|label| label.contains("Open a file")));
-    assert!(
-        labels
-            .iter()
-            .any(|label| label.contains("Create a new project"))
-    );
+    assert!(labels
+        .iter()
+        .any(|label| label.contains("Create a new project")));
     assert!(
         labels.iter().any(|label| label.contains("main.rs")),
         "the CLI target should be offered: {labels:?}"
@@ -3168,10 +3164,9 @@ fn project_setup_reports_when_nothing_is_detected() {
 
     app.open_project_setup();
     assert!(app.overlay.is_none());
-    assert!(
-        app.status_message()
-            .is_some_and(|message| message.contains("No project languages"))
-    );
+    assert!(app
+        .status_message()
+        .is_some_and(|message| message.contains("No project languages")));
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -3185,10 +3180,9 @@ fn starting_setup_with_nothing_missing_reports_already_set_up() {
 
     app.start_project_setup();
     assert!(app.project_setup.is_none());
-    assert!(
-        app.status_message()
-            .is_some_and(|message| message.contains("already set up"))
-    );
+    assert!(app
+        .status_message()
+        .is_some_and(|message| message.contains("already set up")));
     fs::remove_dir_all(&dir).ok();
 }
 

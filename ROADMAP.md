@@ -39,8 +39,10 @@ Koda; fake-download tests cover cache hit/miss/corruption, mismatch, failed
 download, staging cleanup and failed-promotion restore.
 
 **Remaining.**
-- `rustup component add` still follows the user's toolchain (the one documented
-  delegation). Pin it, or keep the delegation and justify it.
+- `rustup component add` is kept as the one documented delegation: rustup chooses
+  the component for the user's active toolchain and verifies toolchain artifacts
+  against its signed manifests; Koda does not fetch or pin it independently.
+  Justified in `docs/DECISIONS.md` and `docs/LIMITATIONS.md`.
 - Rollback is per `Extract` step: a plan that installs A and fails on B may
   leave A. Decide whether a whole-plan transaction is worth it.
 - Add an explicit offline/air-gapped message and a cache eviction policy.
@@ -123,8 +125,10 @@ the file tree and text selections stay usable. Theme-level tests cover both
 depths.
 
 **Acceptance, remaining.**
-- `Ctrl+Shift` chords work when the kitty keyboard protocol is unavailable
-  (verified under `tmux`), with a documented fallback.
+- `Ctrl+Shift` chords: when the kitty keyboard protocol is unavailable Koda
+  falls back to the command palette for those commands; the fallback is
+  documented in `docs/LIMITATIONS.md`. (Interactive verification under `tmux`
+  is still pending.)
 - Koda is legible on a light terminal background: **Daylight** has
   deterministic render coverage but has not been viewed on a real light
   terminal.

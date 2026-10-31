@@ -68,6 +68,12 @@ pub struct Document {
     /// against it lets undo/redo restore the clean state, so undoing every edit
     /// no longer leaves a file marked modified.
     saved_id: Option<u64>,
+    /// Git change markers for this document's lines (added/modified/removed).
+    pub git_markers: Vec<crate::git::GitLineMarker>,
+    /// Lines that begin a collapsed fold (0-based).
+    pub folded: std::collections::BTreeSet<usize>,
+    /// Breakpoint lines (0-based) for the debug adapter.
+    pub breakpoints: std::collections::BTreeSet<usize>,
 }
 
 impl Document {
@@ -95,6 +101,9 @@ impl Document {
             use_spaces: true,
             indent_preferred: None,
             saved_id: None,
+            git_markers: Vec::new(),
+            folded: std::collections::BTreeSet::new(),
+            breakpoints: std::collections::BTreeSet::new(),
         }
     }
 
@@ -130,6 +139,20 @@ impl Document {
         let mut document = Document::new(Buffer::from_path(path)?);
         document.record_disk_mtime();
         Ok(document)
+    }
+
+    pub fn from_path_lossy(path: &Path) -> std::io::Result<Self> {
+        let mut document = Document::new(Buffer::from_path_lossy(path)?);
+        document.record_disk_mtime();
+        Ok(document)
+    }
+
+    pub fn is_read_only(&self) -> bool {
+        self.buffer.is_read_only()
+    }
+
+    pub fn convert_to_utf8(&mut self) {
+        self.buffer.convert_to_utf8();
     }
 
     pub fn file_name(&self) -> String {
@@ -325,6 +348,89 @@ impl Document {
             .filter(|diagnostic| diagnostic.start.line == row)
             .map(|diagnostic| diagnostic.severity)
             .max()
+    }
+
+    /// The git change marker for `row`, if any.
+    pub fn git_change_on_line(&self, row: usize) -> Option<crate::git::GitLineChange> {
+        self.git_markers
+            .iter()
+            .find(|marker| marker.line == row)
+            .map(|marker| marker.change)
+    }
+
+    /// Replace this document's git change markers.
+    pub fn set_git_markers(&mut self, markers: Vec<crate::git::GitLineMarker>) {
+        self.git_markers = markers;
+    }
+
+    /// The indentation of `row`, in columns.
+    fn row_indent(&self, row: usize) -> usize {
+        let text = self.buffer.line_text(row);
+        text.chars().take_while(|c| *c == ' ' || *c == '\t').count()
+    }
+
+    /// The range of lines collapsed by folding `row`, if it is a foldable header.
+    pub fn fold_range(&self, row: usize) -> Option<(usize, usize)> {
+        let total = self.buffer.len_lines();
+        if row + 1 >= total {
+            return None;
+        }
+        let base = self.row_indent(row);
+        // A header must have at least one following line more indented.
+        if self.row_indent(row + 1) <= base {
+            return None;
+        }
+        let mut end = row + 1;
+        for candidate in (row + 2)..total {
+            if self.row_indent(candidate) > base {
+                end = candidate;
+            } else if self.buffer.line_text(candidate).trim().is_empty() {
+                // Allow blank lines inside the fold.
+                end = candidate;
+            } else {
+                break;
+            }
+        }
+        if end > row { Some((row + 1, end)) } else { None }
+    }
+
+    pub fn is_foldable(&self, row: usize) -> bool {
+        self.fold_range(row).is_some()
+    }
+
+    pub fn toggle_fold(&mut self) {
+        let row = self.clamped_cursor().row;
+        if self.folded.contains(&row) {
+            self.folded.remove(&row);
+            return;
+        }
+        if self.fold_range(row).is_some() {
+            self.folded.insert(row);
+        }
+    }
+
+    pub fn toggle_breakpoint(&mut self) {
+        let row = self.clamped_cursor().row;
+        if self.breakpoints.contains(&row) {
+            self.breakpoints.remove(&row);
+        } else {
+            self.breakpoints.insert(row);
+        }
+    }
+
+    pub fn has_breakpoint(&self, row: usize) -> bool {
+        self.breakpoints.contains(&row)
+    }
+
+    /// Whether `row` is hidden inside a collapsed fold.
+    pub fn is_hidden(&self, row: usize) -> bool {
+        self.folded.iter().any(|&header| {
+            if let Some((start, end)) = self.fold_range(header) {
+                row >= start && row <= end
+            } else {
+                false
+            }
+        })
     }
 
     // ----------------------------------------------------------------------

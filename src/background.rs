@@ -12,13 +12,13 @@ use std::thread;
 use std::time::Duration;
 
 use crate::git::GitInfo;
-use crate::language::LanguageService;
-use crate::language::WorkspaceSymbol;
 use crate::language::detection::Confidence;
 use crate::language::diagnostics::Diagnostic;
 use crate::language::format::FormatOutcome;
 use crate::language::id::LanguageId;
 use crate::language::tools::{Tool, ToolRegistry};
+use crate::language::LanguageService;
+use crate::language::WorkspaceSymbol;
 use crate::project::tasks::Task;
 
 /// Work sent to the background thread.
@@ -383,7 +383,11 @@ fn handle_request(request: Request, language: &LanguageService, events: &Sender<
             let _ = events.send(Event::Tools(ToolRegistry::discover_cached()));
         }
         Request::RefreshGit { root } => {
-            let _ = events.send(Event::Git(GitInfo::detect(&root)));
+            // Routed through the pluggable command runner: local unless
+            // KODA_REMOTE names an SSH host.
+            let remote = std::env::var("KODA_REMOTE").ok();
+            let runner = crate::remote::runner_for(remote.as_deref());
+            let _ = events.send(Event::Git(GitInfo::detect_with(runner.as_ref(), &root)));
         }
         Request::GitCommit { root, message } => {
             let result = crate::git::commit_all(&root, &message);

@@ -5,9 +5,7 @@ use super::*;
 impl App {
     /// Tell a language's server that a document was closed, if it had it open.
     pub(super) fn notify_lsp_close(&mut self, path: &Path, language: LanguageId) {
-        if let Some(server) = self
-            .lsp
-            .get_mut(&language)
+        if let Some(server) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))
             .and_then(|job| job.server.as_mut())
         {
             server.did_close(path);
@@ -21,10 +19,10 @@ impl App {
             .lsp
             .iter()
             .filter(|(_, job)| job.server.is_none() && job.start_at.is_some_and(|at| now >= at))
-            .map(|(language, _)| *language)
+            .map(|((_, language), _)| *language)
             .collect();
         for language in due {
-            if let Some(job) = self.lsp.get_mut(&language) {
+            if let Some(job) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language)) {
                 job.start_at = None;
             }
             let Some(launch) = self.lsp_launch(language) else {
@@ -61,12 +59,12 @@ impl App {
         // Drop this language's connection and schedule a fresh one now. The
         // restart budget resets because the user asked explicitly.
         self.clear_lsp_pending();
-        self.lsp.remove(&language);
+        self.lsp.remove(&(self.workspace.root().to_path_buf(), language));
         for doc in &mut self.editor.documents {
             doc.use_builtin_diagnostics();
         }
         self.lsp.insert(
-            language,
+            (self.workspace.root().to_path_buf(), language),
             LspJob {
                 start_at: Some(Instant::now()),
                 ..LspJob::default()
@@ -91,11 +89,11 @@ impl App {
                         .started_at
                         .is_some_and(|started| now.duration_since(started) >= LSP_HANDSHAKE_TIMEOUT)
             })
-            .map(|(language, _)| *language)
+            .map(|((_, language), _)| *language)
             .collect();
         let mut changed = false;
         for language in timed_out {
-            if let Some(job) = self.lsp.get_mut(&language) {
+            if let Some(job) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language)) {
                 job.server = None;
                 job.started_at = None;
                 job.failed = Some("initialize timed out".to_string());
@@ -185,14 +183,14 @@ impl App {
         let root = self.workspace.root().to_path_buf();
         match Server::start_with_env(language, program, args, &root, env) {
             Ok(server) => {
-                let job = self.lsp.entry(language).or_default();
+                let job = self.lsp.entry((self.workspace.root().to_path_buf(), language)).or_default();
                 job.server = Some(server);
                 job.start_at = None;
                 job.started_at = Some(Instant::now());
                 job.failed = None;
             }
             Err(err) => {
-                let job = self.lsp.entry(language).or_default();
+                let job = self.lsp.entry((self.workspace.root().to_path_buf(), language)).or_default();
                 job.server = None;
                 job.start_at = None;
                 job.started_at = None;
@@ -205,7 +203,7 @@ impl App {
 
     /// A server exited or failed to start: fall back for its language.
     pub(super) fn lsp_failed(&mut self, language: LanguageId, message: String) {
-        if let Some(job) = self.lsp.get_mut(&language) {
+        if let Some(job) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language)) {
             job.server = None;
             job.started_at = None;
             // A server that served for a good while earns a fresh budget; one
@@ -240,9 +238,7 @@ impl App {
             Some(doc) => doc.buffer.text(),
             None => return,
         };
-        if let Some(server) = self
-            .lsp
-            .get_mut(&language)
+        if let Some(server) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))
             .and_then(|job| job.server.as_mut())
             && server.is_ready()
             && !server.has_open_document(path)
@@ -286,7 +282,7 @@ impl App {
             let Some(tool) = Tool::available_server(language, tools) else {
                 return;
             };
-            let Some(job) = self.lsp.get_mut(&language) else {
+            let Some(job) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language)) else {
                 return;
             };
             if job.restarts >= MAX_LSP_RESTARTS || job.start_at.is_some() {
@@ -301,7 +297,7 @@ impl App {
 
     /// The handshake finished: open every matching document on the server.
     pub(super) fn lsp_ready(&mut self, language: LanguageId) {
-        if let Some(job) = self.lsp.get_mut(&language) {
+        if let Some(job) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language)) {
             // Do not reset the restart budget here: a server that initializes
             // and then crashes must still exhaust its budget. A stable server
             // earns a fresh budget when it eventually crashes (see `lsp_failed`).
@@ -321,9 +317,7 @@ impl App {
                     .map(|path| (path, doc.buffer.text()))
             })
             .collect();
-        if let Some(server) = self
-            .lsp
-            .get_mut(&language)
+        if let Some(server) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))
             .and_then(|job| job.server.as_mut())
         {
             for (path, text) in documents {
@@ -335,7 +329,7 @@ impl App {
     /// Start a language server for `language` when one is installed, after a
     /// short delay so opening a file never waits on server startup.
     pub(super) fn maybe_start_lsp(&mut self, language: LanguageId) {
-        if self.lsp.contains_key(&language) {
+        if self.lsp.contains_key(&(self.workspace.root().to_path_buf(), language)) {
             return;
         }
         let Some(tools) = &self.tools else {
@@ -345,7 +339,7 @@ impl App {
             return;
         };
         self.lsp.insert(
-            language,
+            (self.workspace.root().to_path_buf(), language),
             LspJob {
                 start_at: Some(Instant::now() + LSP_START_DELAY),
                 ..LspJob::default()
@@ -356,12 +350,15 @@ impl App {
     /// Drain every language server's events. Returns `true` when something
     /// changed.
     pub(super) fn poll_lsp(&mut self) -> bool {
-        let languages: Vec<LanguageId> = self.lsp.keys().copied().collect();
+        let languages: Vec<LanguageId> = self
+            .lsp
+            .keys()
+            .filter(|(root, _)| *root == self.workspace.root().to_path_buf())
+            .map(|(_, language)| *language)
+            .collect();
         let mut changed = false;
         for language in languages {
-            let events = match self
-                .lsp
-                .get_mut(&language)
+            let events = match self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))
                 .and_then(|job| job.server.as_mut())
             {
                 Some(server) => server.poll(),
@@ -385,9 +382,7 @@ impl App {
                         let edit = params.get("edit").cloned().unwrap_or(Value::Null);
                         let files = convert::workspace_edit(&edit);
                         let applied = self.apply_workspace_edit(files, language);
-                        if let Some(server) = self
-                            .lsp
-                            .get_mut(&language)
+                        if let Some(server) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))
                             .and_then(|job| job.server.as_mut())
                         {
                             server.apply_edit_response(&id, applied > 0);
@@ -413,8 +408,7 @@ impl App {
     /// The position encoding the server for `language` negotiated, or the
     /// protocol default when there is no server.
     pub(super) fn lsp_encoding(&self, language: LanguageId) -> PositionEncoding {
-        self.lsp
-            .get(&language)
+        self.lsp.get(&(self.workspace.root().to_path_buf(), language))
             .and_then(|job| job.server.as_ref())
             .map(Server::position_encoding)
             .unwrap_or_default()
@@ -424,14 +418,14 @@ impl App {
     pub(super) fn lsp_language(&self) -> Option<LanguageId> {
         let doc = self.editor.active_document()?;
         let language = doc.buffer.language;
-        let server = self.lsp.get(&language)?.server.as_ref()?;
+        let server = self.lsp.get(&(self.workspace.root().to_path_buf(), language))?.server.as_ref()?;
         server.is_ready().then_some(language)
     }
 
     /// Whether the active document's ready server advertises `kind`.
     pub(super) fn lsp_supports(&self, kind: RequestKind) -> bool {
         self.lsp_language()
-            .and_then(|language| self.lsp.get(&language))
+            .and_then(|language| self.lsp.get(&(self.workspace.root().to_path_buf(), language)))
             .and_then(|job| job.server.as_ref())
             .is_some_and(|server| server.supports(kind))
     }
@@ -439,7 +433,7 @@ impl App {
     /// A mutable handle to the ready server for the active document.
     pub(super) fn active_server_mut(&mut self) -> Option<&mut Server> {
         let language = self.lsp_language()?;
-        self.lsp.get_mut(&language)?.server.as_mut()
+        self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))?.server.as_mut()
     }
 
     /// The active language's ready server that supports `kind`, or any ready
@@ -447,14 +441,20 @@ impl App {
     pub(super) fn ready_server_for(&self, kind: RequestKind) -> Option<LanguageId> {
         let supports = |language: &LanguageId| {
             self.lsp
-                .get(language)
+                .get(&(self.workspace.root().to_path_buf(), *language))
                 .and_then(|job| job.server.as_ref())
                 .is_some_and(|server| server.is_ready() && server.supports(kind))
         };
         let preferred = self.editor.active_document().map(|doc| doc.buffer.language);
         preferred
             .filter(supports)
-            .or_else(|| self.lsp.keys().copied().find(supports))
+            .or_else(|| {
+                self.lsp
+                    .keys()
+                    .filter(|(root, _)| *root == self.workspace.root().to_path_buf())
+                    .map(|(_, language)| *language)
+                    .find(supports)
+            })
     }
 
     /// Convert a Koda character column to the LSP `character` offset the
@@ -481,7 +481,7 @@ impl App {
     pub(super) fn lsp_target(&self) -> Option<(PathBuf, usize, usize)> {
         let language = self.lsp_language()?;
         let doc = self.editor.active_document()?;
-        let server = self.lsp.get(&language)?.server.as_ref()?;
+        let server = self.lsp.get(&(self.workspace.root().to_path_buf(), language))?.server.as_ref()?;
         let path = doc.buffer.path.clone()?;
         if !server.has_open_document(&path) {
             return None;

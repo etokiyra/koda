@@ -101,6 +101,31 @@ impl App {
     }
 
     /// Jump to the definition of the word under the cursor.
+    pub(super) fn set_language_picker(&mut self) {
+        let items: Vec<_> = crate::language::id::LanguageId::ALL
+            .iter()
+            .copied()
+            .map(|language| {
+                PickerItem::new(
+                    language.name().to_string(),
+                    String::new(),
+                    PickerAction::SetLanguage(language),
+                )
+            })
+            .collect();
+        let mut picker = Picker::new("Set Language", "Language…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+    }
+
+    pub(super) fn set_language(&mut self, language: crate::language::id::LanguageId) {
+        if let Some(doc) = self.editor.active_document_mut() {
+            doc.buffer.language = language;
+            doc.set_language(language);
+            self.set_status(format!("Language set to {}", language.name()));
+        }
+    }
+
     pub(super) fn goto_definition(&mut self) {
         if let Some(language) = self.lsp_language()
             && let Some((path, row, col)) = self.lsp_target_for(RequestKind::Definition)
@@ -407,9 +432,7 @@ impl App {
         self.pending_workspace_symbols_query = query.clone();
         if let Some(language) = self.ready_server_for(RequestKind::WorkspaceSymbols) {
             self.ws_lsp_pending = true;
-            if let Some(server) = self
-                .lsp
-                .get_mut(&language)
+            if let Some(server) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))
                 .and_then(|job| job.server.as_mut())
             {
                 server.workspace_symbols(query.as_deref().unwrap_or(""));
@@ -562,9 +585,7 @@ impl App {
                 .map(|doc| doc.indent_width())
                 .unwrap_or(4);
             let version = self.document_version(&path).unwrap_or(0);
-            if let Some(server) = self
-                .lsp
-                .get_mut(&language)
+            if let Some(server) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))
                 .and_then(|job| job.server.as_mut())
             {
                 self.pending_lsp_format = server

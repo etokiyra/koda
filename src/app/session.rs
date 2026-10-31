@@ -18,7 +18,19 @@ impl App {
                 self.close_armed = None;
                 self.engaged = true;
                 self.remember_recent(&path);
-                self.set_status(format!("Opened {}", path.display()));
+                if self
+                    .editor
+                    .active_document()
+                    .map(|doc| doc.is_read_only())
+                    .unwrap_or(false)
+                {
+                    self.set_status(format!(
+                        "Opened {} (read-only: not valid UTF-8)",
+                        path.display()
+                    ));
+                } else {
+                    self.set_status(format!("Opened {}", path.display()));
+                }
             }
             Err(err) => self.set_error(format!("Could not open {}: {err}", path.display())),
         }
@@ -131,9 +143,63 @@ impl App {
     ///
     /// Returns `false` when the workspace could not be opened (an error status
     /// is set).
+    pub fn switch_workspace_picker(&mut self) {
+        let mut items = Vec::new();
+        items.push(PickerItem::new(
+            self.workspace.root().display().to_string(),
+            "current".to_string(),
+            PickerAction::SwitchWorkspace(usize::MAX),
+        ));
+        for (index, ws) in self.workspaces.iter().enumerate() {
+            items.push(PickerItem::new(
+                ws.root().display().to_string(),
+                format!("workspace {}", index + 1),
+                PickerAction::SwitchWorkspace(index),
+            ));
+        }
+        let mut picker = Picker::new("Switch Workspace", "Project…", items);
+        picker.refilter();
+        self.overlay = Overlay::Picker(picker);
+    }
+
+    pub fn switch_workspace(&mut self, index: usize) {
+        if index == usize::MAX {
+            self.set_status("Already on this workspace");
+            return;
+        }
+        if index >= self.workspaces.len() {
+            return;
+        }
+        // Persist current session first.
+        self.save_session();
+        // Move the chosen workspace out and the current one in.
+        let chosen = self.workspaces.remove(index);
+        let current = std::mem::replace(&mut self.workspace, chosen);
+        self.workspaces.push(current);
+        // Isolate LSP servers per workspace.
+        self.lsp.clear();
+        self.reset_for_new_workspace();
+        // Scope tabs to the newly active project.
+        self.editor.close_all();
+        self.pane_left = 0;
+        self.pane_right = None;
+        self.split = false;
+        self.focus_pane = Pane::Primary;
+        self.resume_session = crate::session::session_path(self.workspace.root())
+            .and_then(|path| Session::load_from(&path));
+        if let Some(session) = self.resume_session.take() {
+            self.restore_session(session);
+        }
+        self.recent.add_project(self.workspace.root());
+        self.request_git_refresh();
+        self.background.discover_tools();
+        self.set_status(format!("Switched to {}", self.workspace.root().display()));
+    }
+
     pub fn open_workspace(&mut self, root: PathBuf) -> bool {
         // Persist the current project before leaving it.
         self.save_session();
+        // Try opening the new project first, so a failure leaves state intact.
         let workspace = match Workspace::open(Some(&root)) {
             Ok(workspace) => workspace,
             Err(err) => {
@@ -141,7 +207,19 @@ impl App {
                 return false;
             }
         };
-        self.workspace = workspace;
+
+        // Remember the current project so it can be revisited.
+        let previous_root = self.workspace.root().to_path_buf();
+        if previous_root != root
+            && !self.workspaces.iter().any(|w| w.root() == previous_root)
+        {
+            let old = std::mem::replace(&mut self.workspace, workspace);
+            self.workspaces.push(old);
+        } else {
+            self.workspace = workspace;
+        }
+        // Isolate LSP servers per workspace.
+        self.lsp.clear();
         self.reset_for_new_workspace();
         self.recent.add_project(self.workspace.root());
         self.engaged = true;

@@ -10,6 +10,57 @@ first release; it is written from the code's final state — superseded interim
 entries have been collapsed rather than kept as a blow-by-blow — and is dated
 when it is tagged.
 
+## [Unreleased]
+
+### Added
+- **More run-task project kinds.** `Run Task…` now also offers tasks for Maven
+  (`pom.xml`), Gradle (`build.gradle`/`build.gradle.kts`), Flutter
+  (`pubspec.yaml`) and .NET (`*.csproj`) projects, in addition to Rust, Go,
+  Make, Python, Elixir and npm.
+- **Git gutter markers.** The editor gutter now shows per-line change markers
+  (`+` added, `~` modified, `-` removed) computed from the working tree against
+  `HEAD`, refreshing with git status. Untracked files are marked entirely
+  added.
+- **Next/Previous Hunk.** Two new Git commands (`Next Hunk`, `Previous Hunk`)
+  jump the cursor between changed hunks in the active file.
+- **Non-UTF-8 files open read-only.** A file that is not valid UTF-8 (but is not
+  binary) now opens as read-only lossy text instead of being refused; saving it
+  is blocked so the original bytes are never corrupted. Binary and oversized
+  files are still refused.
+- **Provisioning cache eviction.** The verified download cache now evicts its
+  oldest entries once it grows past a soft limit, and a failed download with no
+  cached artifact reports that no cache was available.
+- **Convert to UTF-8.** A read-only non-UTF-8 file can be converted to UTF-8
+  from the command palette so it can then be saved.
+- **Language Support view.** A new `Language Support…` command lists every
+  language Koda knows with its support class.
+- **Set Language.** A new `Set Language…` command overrides the detected
+  language for the active file; low-confidence detections nudge toward it.
+- **Multi-project workspaces.** Opening a second project now keeps the
+  previous one available; `Switch Workspace…` swaps between them, restoring
+  each project's open tabs. The LSP server map is now keyed by workspace root,
+  so projects never reuse another project's language server.
+- **File iconography.** The file tree shows a per-extension glyph for files,
+  falling back to a neutral dot on monochrome terminals.
+- **LSP incremental sync.** `didChange` now sends the smallest changed range
+  instead of the whole document when the server supports incremental sync.
+- **Mouse support (partial).** Mouse capture is enabled, the wheel scrolls the
+  editor, a left click places the cursor, and a drag selects text.
+- **Interactive diff hunks.** The diff overlay now supports applying (`a`) or
+  reverting (`r`) the current hunk and moving between hunks (`n`/`p`).
+- **Breakpoint toggle.** A new `Toggle Breakpoint` command marks lines in the
+  editor gutter, a first step toward debug adapter support.
+- **Debug adapter scaffold.** A minimal DAP client launches an adapter (via
+  `KODA_DEBUG_ADAPTER`), runs initialize/launch/setBreakpoints, and reports
+  the result.
+- **Plugin/provider extension point.** `ProviderRegistry::register` (and
+  `register_provider`) are documented as the public extension point for new
+  language providers.
+- **Remote command runner.** A `CommandRunner` trait now backs git status, with
+  a local implementation and an SSH-backed one selected via `KODA_REMOTE`.
+- **Code folding.** `Toggle Fold` collapses and expands an indented block at
+  the cursor; folded lines are hidden and the gutter shows a fold marker.
+
 ## [0.1.3] - 2026-10-29
 
 ### Added

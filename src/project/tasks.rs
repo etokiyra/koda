@@ -66,8 +66,38 @@ pub fn detect(root: &Path) -> Vec<Task> {
     if root.join("mix.exs").is_file() {
         tasks.push(Task::builtin("Test (mix)", "mix", &["test"]));
     }
+    if root.join("pom.xml").is_file() {
+        tasks.push(Task::builtin("Test (maven)", "mvn", &["test"]));
+    }
+    if root.join("build.gradle").is_file() || root.join("build.gradle.kts").is_file() {
+        tasks.push(Task::builtin("Test (gradle)", "gradle", &["test"]));
+    }
+    if root.join("pubspec.yaml").is_file() {
+        tasks.push(Task::builtin("Test (flutter)", "flutter", &["test"]));
+    }
+    if has_csproj(root) {
+        tasks.push(Task::builtin("Build (dotnet)", "dotnet", &["build"]));
+        tasks.push(Task::builtin("Test (dotnet)", "dotnet", &["test"]));
+    }
     tasks.extend(detect_scripts(&root.join("package.json")));
     tasks
+}
+
+/// Whether the project contains a .NET project file.
+fn has_csproj(root: &Path) -> bool {
+    std::fs::read_dir(root)
+        .ok()
+        .map(|entries| {
+            entries.flatten().any(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("csproj"))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// The tasks implied by `package.json`: every declared script, capped so one
@@ -175,6 +205,22 @@ mod tests {
             vec!["npm run build", "npm run test", "npm run zeta"],
             "scripts are sorted and pre/post hooks are not listed"
         );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn more_project_kinds_are_offered() {
+        let dir = scratch("more");
+        fs::write(dir.join("pom.xml"), "<project/>\n").unwrap();
+        fs::write(dir.join("build.gradle.kts"), "plugins {}\n").unwrap();
+        fs::write(dir.join("pubspec.yaml"), "name: x\n").unwrap();
+        fs::write(dir.join("App.csproj"), "<Project/>\n").unwrap();
+        let lines: Vec<String> = detect(&dir).iter().map(Task::command_line).collect();
+        assert!(lines.contains(&"mvn test".to_string()));
+        assert!(lines.contains(&"gradle test".to_string()));
+        assert!(lines.contains(&"flutter test".to_string()));
+        assert!(lines.contains(&"dotnet build".to_string()));
+        assert!(lines.contains(&"dotnet test".to_string()));
         fs::remove_dir_all(&dir).ok();
     }
 

@@ -615,6 +615,22 @@ impl App {
                     diff.scroll = diff.lines.len();
                     Outcome::Nothing
                 }
+                KeyCode::Char('a') => {
+                    self.apply_diff_hunk(false);
+                    Outcome::Nothing
+                }
+                KeyCode::Char('r') => {
+                    self.apply_diff_hunk(true);
+                    Outcome::Nothing
+                }
+                KeyCode::Char('n') => {
+                    diff.next_hunk();
+                    Outcome::Nothing
+                }
+                KeyCode::Char('p') => {
+                    diff.prev_hunk();
+                    Outcome::Nothing
+                }
                 _ => Outcome::Nothing,
             },
             Overlay::TaskRun(run) => match key.code {

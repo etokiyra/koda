@@ -281,8 +281,22 @@ impl ProviderRegistry {
         registry
     }
 
+    /// Register an additional language provider.
+    ///
+    /// This is the extension point for new languages: implement
+    /// [`LanguageProvider`] and register it here. Built-in languages are wired
+    /// in [`ProviderRegistry::builtin`]; extra providers can be added at
+    /// runtime to extend Koda without modifying the editor or UI, which stay
+    /// language-agnostic. A provider with an id that is already registered
+    /// replaces the previous one.
     pub fn register(&mut self, provider: Box<dyn LanguageProvider>) {
         self.providers.insert(provider.id(), provider);
+    }
+
+    /// Alias for [`ProviderRegistry::register`], kept for callers that prefer
+    /// the longer name.
+    pub fn register_provider(&mut self, provider: Box<dyn LanguageProvider>) {
+        self.register(provider);
     }
 
     /// Resolve a language to its provider, falling back to plain text.

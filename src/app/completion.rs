@@ -132,9 +132,7 @@ impl App {
             return;
         };
         let col = self.lsp_col(language, &path, row, col);
-        if let Some(server) = self
-            .lsp
-            .get_mut(&language)
+        if let Some(server) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))
             .and_then(|job| job.server.as_mut())
         {
             self.signature_request = server
@@ -240,9 +238,7 @@ impl App {
             return;
         };
         let col = self.lsp_col(language, &path, row, col);
-        if let Some(server) = self
-            .lsp
-            .get_mut(&language)
+        if let Some(server) = self.lsp.get_mut(&(self.workspace.root().to_path_buf(), language))
             .and_then(|job| job.server.as_mut())
         {
             self.completion_request = server.completion(&path, row, col).map(|id| (language, id));

@@ -6,8 +6,9 @@
 use std::io::{self, Write};
 
 use crossterm::event::{
-    DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+    EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use ratatui::DefaultTerminal;
@@ -26,6 +27,7 @@ pub fn init() -> io::Result<DefaultTerminal> {
         io::stdout(),
         EnableBracketedPaste,
         EnableFocusChange,
+        EnableMouseCapture,
         PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
     );
     Ok(terminal)
@@ -37,7 +39,8 @@ pub fn restore() {
         io::stdout(),
         PopKeyboardEnhancementFlags,
         DisableBracketedPaste,
-        DisableFocusChange
+        DisableFocusChange,
+        DisableMouseCapture
     );
     ratatui::restore();
 }

@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 /// The status of a single file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,45 +63,62 @@ pub struct GitInfo {
 }
 
 impl GitInfo {
-    /// Inspect the repository containing `dir`.
+    /// Inspect the repository containing `dir` using the local runner.
     pub fn detect(dir: &Path) -> GitInfo {
-        let Some(repo_root) = run(dir, &["rev-parse", "--show-toplevel"]).map(PathBuf::from) else {
-            return GitInfo::default();
-        };
+        Self::detect_with(&crate::remote::LocalRunner, dir)
+    }
 
-        let branch = run(&repo_root, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    /// Inspect the repository containing `dir` using the given runner.
+    ///
+    /// This is the seam a future remote (SSH) backend plugs into.
+    pub fn detect_with(runner: &dyn crate::remote::CommandRunner, dir: &Path) -> GitInfo {
+        let repo_root = match runner.run("git", &["rev-parse", "--show-toplevel"], Some(dir)) {
+            Ok(captured) if captured.status.map(|s| s.success()).unwrap_or(false) => {
+                String::from_utf8_lossy(&captured.stdout).trim().to_string()
+            }
+            _ => return GitInfo::default(),
+        };
+        let repo_root = PathBuf::from(repo_root);
+        let branch = runner
+            .run(
+                "git",
+                &["rev-parse", "--abbrev-ref", "HEAD"],
+                Some(&repo_root),
+            )
+            .ok()
+            .filter(|c| c.status.map(|s| s.success()).unwrap_or(false))
+            .map(|c| String::from_utf8_lossy(&c.stdout).trim().to_string())
+            .filter(|s| !s.is_empty());
+
         let mut files = HashMap::new();
         let mut staged = std::collections::HashSet::new();
 
-        if let Some(output) = run_bytes(
-            &repo_root,
+        if let Ok(captured) = runner.run(
+            "git",
             &["status", "--porcelain", "-z", "--untracked-files=normal"],
-        ) {
-            // `-z` NUL-separates entries and emits paths verbatim (no C-style
-            // quoting), which keeps spaces, non-ASCII bytes and even a leading
-            // space in the status columns intact. A rename/copy entry is
-            // `XY <destination>\0<source>\0`, so the source field is consumed
-            // for the next entry rather than parsed as its own.
-            let mut fields = output.split(|byte| *byte == 0);
-            while let Some(entry) = fields.next() {
-                if entry.len() < 4 {
-                    continue;
+            Some(&repo_root),
+        )
+        && captured.status.map(|s| s.success()).unwrap_or(false)
+        {
+            let output = captured.stdout;
+                let mut fields = output.split(|byte| *byte == 0);
+                while let Some(entry) = fields.next() {
+                    if entry.len() < 4 {
+                        continue;
+                    }
+                    let code = &entry[..2];
+                    let status = parse_status(&String::from_utf8_lossy(code));
+                    let path = String::from_utf8_lossy(&entry[3..]).into_owned();
+                    if matches!(code[0], b'R' | b'C') || matches!(code[1], b'R' | b'C') {
+                        let _ = fields.next();
+                    }
+                    let absolute = repo_root.join(path);
+                    let index = code[0];
+                    if index != b' ' && index != b'?' {
+                        staged.insert(absolute.clone());
+                    }
+                    files.insert(absolute, status);
                 }
-                let code = &entry[..2];
-                let status = parse_status(&String::from_utf8_lossy(code));
-                let path = String::from_utf8_lossy(&entry[3..]).into_owned();
-                if matches!(code[0], b'R' | b'C') || matches!(code[1], b'R' | b'C') {
-                    // The destination path was reported first; drop the source.
-                    let _ = fields.next();
-                }
-                let absolute = repo_root.join(path);
-                // The first column is the index (staged) state; `?` is untracked.
-                let index = code[0];
-                if index != b' ' && index != b'?' {
-                    staged.insert(absolute.clone());
-                }
-                files.insert(absolute, status);
-            }
         }
 
         GitInfo {
@@ -151,24 +169,11 @@ fn run(dir: &Path, args: &[&str]) -> Option<String> {
         return None;
     }
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if text.is_empty() { None } else { Some(text) }
-}
-
-/// Run a git subcommand and return its raw stdout bytes.
-///
-/// Used where the exact bytes matter — `status --porcelain -z` separates
-/// records with NUL and must not be trimmed or lossily decoded first.
-fn run_bytes(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
     }
-    Some(output.stdout)
 }
 
 /// Run a git subcommand, returning trimmed stdout or the first error line.
@@ -273,6 +278,246 @@ pub fn diff(root: &Path, path: &Path, staged: bool) -> Result<String, String> {
         out.push('\n');
     }
     Ok(out)
+}
+
+/// The kind of change a line in the working tree has relative to `HEAD`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GitLineChange {
+    Added,
+    Modified,
+    Removed,
+}
+
+/// One gutter marker: a change kind attached to a (0-based) line in the new
+/// file. A `Removed` marker is attached to the line the deletion sits after.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GitLineMarker {
+    pub line: usize,
+    pub change: GitLineChange,
+}
+
+/// Compute per-line change markers for `path` against `HEAD`.
+///
+/// An untracked file is reported as entirely added. Returns an empty list when
+/// git is unavailable, the path is not in a repository, or the file is clean.
+pub fn line_changes(root: &Path, path: &Path) -> Vec<GitLineMarker> {
+    use std::process::{Command, Stdio};
+
+    let repo_root = match run(root, &["rev-parse", "--show-toplevel"]) {
+        Some(root) => PathBuf::from(root),
+        None => return Vec::new(),
+    };
+    let relative = path.strip_prefix(&repo_root).unwrap_or(path);
+    let relative_str = relative.to_string_lossy().to_string();
+
+    // Untracked files are entirely new.
+    let tracked = run(
+        &repo_root,
+        &["ls-files", "--error-unmatch", "--", relative_str.as_str()],
+    )
+    .is_some();
+    if !tracked {
+        if !path.is_file() {
+            return Vec::new();
+        }
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return Vec::new();
+        };
+        let count = text.lines().count();
+        return (0..count)
+            .map(|line| GitLineMarker {
+                line,
+                change: GitLineChange::Added,
+            })
+            .collect();
+    }
+
+    // Diff against HEAD, falling back to the empty tree when there is no HEAD
+    // yet (a brand-new repository).
+    let empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    let head_ref = if run(&repo_root, &["rev-parse", "--verify", "HEAD"]).is_some() {
+        "HEAD"
+    } else {
+        empty_tree
+    };
+
+    let mut child = match Command::new("git")
+        .arg("-C")
+        .arg(&repo_root)
+        .args([
+            "diff",
+            "--no-color",
+            "--unified=0",
+            head_ref,
+            "--",
+            relative_str.as_str(),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return Vec::new(),
+    };
+    let captured =
+        match crate::process::wait_captured(&mut child, Duration::from_secs(10), 1024 * 1024) {
+            Ok(captured) => captured,
+            Err(_) => return Vec::new(),
+        };
+    if captured
+        .status
+        .map(|status| !status.success())
+        .unwrap_or(true)
+    {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&captured.stdout);
+
+    parse_unified_diff(&text)
+}
+
+/// Parse `git diff --unified=0` output into per-line markers.
+fn parse_unified_diff(text: &str) -> Vec<GitLineMarker> {
+    let mut markers = Vec::new();
+    let mut lines = text.lines().peekable();
+
+    while let Some(line) = lines.next() {
+        if !line.starts_with("@@") {
+            continue;
+        }
+        // Parse the hunk header.
+        let (old_start, old_count, new_start, new_count) = match parse_hunk_header(line) {
+            Some(values) => values,
+            None => continue,
+        };
+        // Collect the body until the next hunk header or EOF.
+        let mut removed = 0usize;
+        let mut added_lines: Vec<usize> = Vec::new();
+        let mut body: Vec<&str> = Vec::new();
+        while let Some(next) = lines.peek() {
+            if next.starts_with("@@") || next.starts_with("diff ") || next.starts_with("index ") {
+                break;
+            }
+            // A hunk body line; consume it.
+            let consumed = lines.next().unwrap();
+            if consumed.starts_with("+++") || consumed.starts_with("---") {
+                continue;
+            }
+            if consumed.starts_with('-') {
+                removed += 1;
+            } else if consumed.starts_with('+') {
+                added_lines.push(0); // placeholder, counted below
+            }
+            body.push(consumed);
+        }
+        // Recompute added positions precisely.
+        let mut added_positions: Vec<usize> = Vec::new();
+        let mut added_index = 0usize;
+        for entry in &body {
+            if entry.starts_with('+') && !entry.starts_with("+++") {
+                added_positions.push(new_start.saturating_sub(1) + added_index);
+                added_index += 1;
+            }
+        }
+        let added_count = added_positions.len();
+
+        // Pair removed lines with added lines as modifications.
+        let paired = removed.min(added_count);
+        let mut removed_remaining = removed;
+        for (i, pos) in added_positions.iter().enumerate() {
+            let change = if i < paired {
+                GitLineChange::Modified
+            } else {
+                GitLineChange::Added
+            };
+            markers.push(GitLineMarker { line: *pos, change });
+            if i < paired {
+                removed_remaining = removed_remaining.saturating_sub(1);
+            }
+        }
+        // Excess removed lines: mark a deletion at the boundary.
+        if removed > added_count {
+            let boundary = new_start.saturating_sub(1); // 0-based line the deletion follows
+                                                        // Clamp to a valid line: if the file is empty, line 0.
+            let line = boundary;
+            markers.push(GitLineMarker {
+                line,
+                change: GitLineChange::Removed,
+            });
+            let _ = removed_remaining;
+        }
+        let _ = (old_start, old_count, new_count);
+    }
+
+    // De-duplicate markers on the same line, preferring Modified/Added over Removed.
+    markers.sort_by_key(|marker| marker.line);
+    markers
+}
+
+fn parse_hunk_header(line: &str) -> Option<(usize, usize, usize, usize)> {
+    // @@ -a,b +c,d @@
+    let start = line.find("@@")?;
+    let rest = &line[start + 2..];
+    let end = rest.find("@@")?;
+    let header = rest[..end].trim();
+    let mut parts = header.split_whitespace();
+    let old = parts.next()?;
+    let new = parts.next()?;
+    let (old_start, old_count) = parse_range(old.trim_start_matches('-'))?;
+    let (new_start, new_count) = parse_range(new.trim_start_matches('+'))?;
+    Some((old_start, old_count, new_start, new_count))
+}
+
+fn parse_range(range: &str) -> Option<(usize, usize)> {
+    if let Some((a, b)) = range.split_once(',') {
+        Some((a.parse().ok()?, b.parse().ok()?))
+    } else {
+        Some((range.parse().ok()?, 1))
+    }
+}
+
+/// Apply (or revert, when `reverse`) a single patch `patch` to the working
+/// tree or index. `patch` must be a valid unified diff fragment.
+pub fn apply_patch(root: &Path, patch: &str, reverse: bool, staged: bool) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut args = vec!["apply", "--whitespace=nowarn"];
+    if staged {
+        args.push("--cached");
+    }
+    if reverse {
+        args.push("-R");
+    }
+    args.push("-");
+
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| err.to_string())?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        let _ = stdin.write_all(patch.as_bytes());
+    }
+    drop(child.stdin.take());
+
+    let captured = crate::process::wait_captured(&mut child, Duration::from_secs(30), 1024 * 1024)
+        .map_err(|err| err.to_string())?;
+    if captured.status.map(|s| s.success()).unwrap_or(false) {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&captured.stderr);
+        Err(if stderr.trim().is_empty() {
+            "git apply failed".to_string()
+        } else {
+            stderr.trim().to_string()
+        })
+    }
 }
 
 fn parse_status(code: &str) -> GitFileStatus {
@@ -411,18 +656,14 @@ mod tests {
         };
         // A fresh repository with a deterministic identity.
         assert!(git(&["init", "-q"]).unwrap().status.success());
-        assert!(
-            git(&["config", "user.email", "koda@example.com"])
-                .unwrap()
-                .status
-                .success()
-        );
-        assert!(
-            git(&["config", "user.name", "Koda Test"])
-                .unwrap()
-                .status
-                .success()
-        );
+        assert!(git(&["config", "user.email", "koda@example.com"])
+            .unwrap()
+            .status
+            .success());
+        assert!(git(&["config", "user.name", "Koda Test"])
+            .unwrap()
+            .status
+            .success());
         std::fs::write(dir.join("a.txt"), "hello\n").unwrap();
 
         assert!(stage_all(&dir).is_ok());
@@ -455,18 +696,14 @@ mod tests {
                 .output()
         };
         assert!(git(&["init", "-q"]).unwrap().status.success());
-        assert!(
-            git(&["config", "user.email", "koda@example.com"])
-                .unwrap()
-                .status
-                .success()
-        );
-        assert!(
-            git(&["config", "user.name", "Koda Test"])
-                .unwrap()
-                .status
-                .success()
-        );
+        assert!(git(&["config", "user.email", "koda@example.com"])
+            .unwrap()
+            .status
+            .success());
+        assert!(git(&["config", "user.name", "Koda Test"])
+            .unwrap()
+            .status
+            .success());
         let path = dir.join("a.txt");
         std::fs::write(&path, "one\n").unwrap();
         assert!(stage_all(&dir).is_ok());
@@ -527,6 +764,102 @@ mod tests {
 
         unstage(&dir, &path).unwrap();
         assert!(!GitInfo::detect(&dir).is_staged(&path));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn line_changes_reports_added_and_modified_lines() {
+        if std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("koda-git-lines-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+        };
+        assert!(git(&["init", "-q"]).unwrap().status.success());
+        assert!(git(&["config", "user.email", "koda@example.com"])
+            .unwrap()
+            .status
+            .success());
+        assert!(git(&["config", "user.name", "Koda Test"])
+            .unwrap()
+            .status
+            .success());
+
+        let path = dir.join("a.txt");
+        std::fs::write(&path, "one\ntwo\nthree\n").unwrap();
+        assert!(git(&["add", "--", "a.txt"]).unwrap().status.success());
+        assert!(git(&["commit", "-qm", "init"]).unwrap().status.success());
+
+        // Modify line 2 and add a line.
+        std::fs::write(&path, "one\ntwo changed\nthree\nfour\n").unwrap();
+
+        let changes = line_changes(&dir, &path);
+        let kinds: Vec<(usize, GitLineChange)> =
+            changes.into_iter().map(|m| (m.line, m.change)).collect();
+        assert!(
+            kinds.contains(&(1, GitLineChange::Modified)),
+            "line 2 modified: {kinds:?}"
+        );
+        assert!(
+            kinds.contains(&(3, GitLineChange::Added)),
+            "line 4 added: {kinds:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn line_changes_untracked_file_is_all_added() {
+        if std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("koda-git-untracked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+        };
+        assert!(git(&["init", "-q"]).unwrap().status.success());
+
+        let path = dir.join("new.txt");
+        std::fs::write(&path, "a\nb\n").unwrap();
+
+        let changes = line_changes(&dir, &path);
+        assert_eq!(
+            changes,
+            vec![
+                GitLineMarker {
+                    line: 0,
+                    change: GitLineChange::Added
+                },
+                GitLineMarker {
+                    line: 1,
+                    change: GitLineChange::Added
+                },
+            ]
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

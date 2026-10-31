@@ -7,6 +7,51 @@ impl App {
     ///
     /// When `staged` is `None`, the working-tree diff is preferred and the
     /// staged diff is shown if the working tree is clean.
+    pub(super) fn apply_diff_hunk(&mut self, reverse: bool) {
+        let (root, path, staged, patch) = match &self.overlay {
+            Overlay::Diff(diff) => {
+                let root = match diff.root.clone() {
+                    Some(root) => root,
+                    None => {
+                        self.set_error("This diff cannot be applied");
+                        return;
+                    }
+                };
+                let path = match diff.path.clone() {
+                    Some(path) => path,
+                    None => {
+                        self.set_error("This diff has no target file");
+                        return;
+                    }
+                };
+                let patch = match diff.current_hunk_patch() {
+                    Some(patch) => patch,
+                    None => {
+                        self.set_error("No hunk to apply");
+                        return;
+                    }
+                };
+                (root, path, diff.staged, patch)
+            }
+            _ => return,
+        };
+
+        match crate::git::apply_patch(&root, &patch, reverse, staged) {
+            Ok(()) => {
+                self.set_status(if reverse {
+                    "Hunk reverted".to_string()
+                } else {
+                    "Hunk applied".to_string()
+                });
+                // Refresh so the diff and gutter reflect the new state.
+                self.request_git_refresh();
+                // Reopen the diff for the same file.
+                self.show_diff(path, Some(staged));
+            }
+            Err(err) => self.set_error(format!("Could not apply hunk: {err}")),
+        }
+    }
+
     pub(super) fn show_diff(&mut self, path: PathBuf, staged: Option<bool>) {
         let root = self.workspace.root().to_path_buf();
         let try_show = |side: bool| crate::git::diff(&root, &path, side);
@@ -45,7 +90,8 @@ impl App {
             .to_string();
         let where_ = if side { "staged" } else { "working tree" };
         let title = format!("{where_} · {name}");
-        self.overlay = Overlay::Diff(DiffState::from_unified(title, &text));
+        self.overlay =
+            Overlay::Diff(DiffState::from_unified(title, &text).with_context(root, path, side));
     }
 
     /// Build and show the changed-files picker from the current snapshot.

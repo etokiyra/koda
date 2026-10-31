@@ -45,6 +45,10 @@ pub enum PickerAction {
     },
     /// Run one of the project's own tasks in the project root.
     RunTask(crate::project::tasks::Task),
+    /// Override the active document's language.
+    SetLanguage(crate::language::id::LanguageId),
+    /// Switch to an already-open workspace by index.
+    SwitchWorkspace(usize),
 }
 
 /// A single row in a picker.
@@ -279,24 +283,91 @@ pub struct DiffLine {
     pub text: String,
 }
 
-/// A read-only unified diff, scrolled with the arrows.
+/// A unified diff, scrolled with the arrows.
+///
+/// `path`, `root` and `staged` let individual hunks be applied or reverted
+/// interactively; they are `None` for a diff that cannot be mutated.
 pub struct DiffState {
     pub title: String,
     pub lines: Vec<DiffLine>,
     pub scroll: usize,
+    pub path: Option<PathBuf>,
+    pub root: Option<PathBuf>,
+    pub staged: bool,
+    /// Indices into `lines` where each `@@` hunk header begins.
+    pub hunk_starts: Vec<usize>,
+    /// Index of the hunk currently selected for apply/reject.
+    pub current_hunk: usize,
 }
 impl DiffState {
     /// Build state from the output of `git diff`, classifying each line.
     pub fn from_unified(title: impl Into<String>, text: &str) -> Self {
+        let lines: Vec<DiffLine> = text.lines().map(classify_diff_line).collect();
+        let hunk_starts: Vec<usize> = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| line.kind == DiffLineKind::Hunk)
+            .map(|(i, _)| i)
+            .collect();
         DiffState {
             title: title.into(),
-            lines: text.lines().map(classify_diff_line).collect(),
+            lines,
             scroll: 0,
+            path: None,
+            root: None,
+            staged: false,
+            hunk_starts,
+            current_hunk: 0,
         }
+    }
+
+    /// Attach mutation context so individual hunks can be applied or reverted.
+    pub fn with_context(mut self, root: PathBuf, path: PathBuf, staged: bool) -> Self {
+        self.root = Some(root);
+        self.path = Some(path);
+        self.staged = staged;
+        self
     }
 
     pub fn scroll_by(&mut self, delta: i64) {
         self.scroll = (self.scroll as i64 + delta).max(0) as usize;
+    }
+
+    /// The patch text for the currently selected hunk, including the file
+    /// headers git needs to apply it. `None` when there is no hunk.
+    pub fn current_hunk_patch(&self) -> Option<String> {
+        if self.hunk_starts.is_empty() {
+            return None;
+        }
+        let index = self.current_hunk.min(self.hunk_starts.len().saturating_sub(1));
+        let start = self.hunk_starts[index];
+        let end = self
+            .hunk_starts
+            .get(index + 1)
+            .copied()
+            .unwrap_or(self.lines.len());
+        let mut patch = String::new();
+        for line in &self.lines {
+            if line.kind == DiffLineKind::Header {
+                patch.push_str(&line.text);
+                patch.push('\n');
+            }
+        }
+        for line in &self.lines[start..end] {
+            patch.push_str(&line.text);
+            patch.push('\n');
+        }
+        Some(patch)
+    }
+
+    pub fn next_hunk(&mut self) {
+        if !self.hunk_starts.is_empty() {
+            self.current_hunk = (self.current_hunk + 1).min(self.hunk_starts.len() - 1);
+        }
+    }
+
+    pub fn prev_hunk(&mut self) {
+        self.current_hunk = self.current_hunk.saturating_sub(1);
     }
 }
 

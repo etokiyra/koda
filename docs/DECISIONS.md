@@ -72,6 +72,10 @@ this file, and add or change a test.
   at exactly three, and the project-context bonus applies only to a language
   with a file-level signal (name, shebang or extension) — a project marker never
   overrides a file's own nature.
+- **Highlighting engine.** Koda uses hand-written, line-based tokenizers that
+  carry a small state. They have not been benchmarked against tree-sitter in this
+  repository; a migration would require an explicit OK and is not planned. This
+  stays a documented non-decision until measurement exists.
 - **The web tokenizer uses lookback heuristics, not a parser.** A `/` in
   expression position starts a regex literal (division after a value does not),
   and `<` opens a JSX tag only after an expression start, so `Array<Foo>` and

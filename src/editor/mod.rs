@@ -64,7 +64,13 @@ impl Editor {
             self.active = idx;
             return Ok(idx);
         }
-        let doc = Document::from_path(&canonical)?;
+        let doc = match Document::from_path(&canonical) {
+            Ok(doc) => doc,
+            Err(err) if err.to_string().contains("not valid UTF-8") => {
+                Document::from_path_lossy(&canonical)?
+            }
+            Err(err) => return Err(err),
+        };
         Ok(self.push(doc))
     }
 

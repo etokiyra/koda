@@ -5,11 +5,11 @@
 //! state lives in a quiet right-aligned column. Pressing `/` turns the sidebar
 //! into an inline fuzzy file filter.
 
-use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
+use ratatui::Frame;
 
 use crate::app::overlay::TreeFilter;
 use crate::git::{GitFileStatus, GitInfo};
@@ -199,9 +199,13 @@ fn filter_header(filter: &TreeFilter, width: u16) -> Line<'static> {
 fn entry_line(selected: bool, entry: &VisibleEntry, width: u16, git: &GitInfo) -> Line<'static> {
     let is_dir = entry.is_dir;
     let glyph = if is_dir {
-        if entry.expanded { "▾" } else { "▸" }
+        if entry.expanded {
+            "▾"
+        } else {
+            "▸"
+        }
     } else {
-        "·"
+        file_icon(&entry.name)
     };
     let glyph_style = if is_dir {
         theme::accent()
@@ -268,6 +272,47 @@ fn render_empty(frame: &mut Frame, area: Rect) {
     }
     padded.extend(lines);
     frame.render_widget(Paragraph::new(Text::from(padded)), area);
+}
+
+/// A single-character icon for a file, based on its extension.
+///
+/// On a colourless terminal (`NO_COLOR`) every file keeps the neutral dot so
+/// the tree stays readable without relying on colour.
+fn file_icon(name: &str) -> &'static str {
+    if crate::ui::theme::color_depth() == crate::ui::theme::ColorDepth::None {
+        return "·";
+    }
+    let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "rs" => "R",
+        "go" => "G",
+        "py" => "P",
+        "ts" | "tsx" => "T",
+        "js" | "jsx" => "J",
+        "c" | "h" => "C",
+        "cpp" | "hpp" | "cc" => "+",
+        "java" => "J",
+        "cs" => "#",
+        "php" => "P",
+        "lua" => "L",
+        "kt" | "kts" => "K",
+        "sql" => "S",
+        "rb" => "R",
+        "pl" | "pm" => "P",
+        "dart" => "D",
+        "ex" | "exs" => "E",
+        "swift" => "S",
+        "nix" => "N",
+        "html" | "htm" => "H",
+        "css" => "C",
+        "md" => "M",
+        "json" => "{",
+        "toml" => "T",
+        "yaml" | "yml" => "Y",
+        "sh" | "bash" => "$",
+        "asm" | "s" => "A",
+        _ => "·",
+    }
 }
 
 fn status_style(status: GitFileStatus) -> Style {

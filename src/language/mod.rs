@@ -41,6 +41,7 @@ pub mod setup;
 pub mod shell;
 pub mod sql;
 pub mod swift;
+pub mod support;
 pub mod symbols;
 pub mod toml;
 pub mod tools;

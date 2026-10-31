@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 
-use crate::language::Capability;
 use crate::language::lsp::RequestKind;
+use crate::language::Capability;
 
 /// Stable command identifiers.
 pub mod ids {
@@ -19,6 +19,7 @@ pub mod ids {
     pub const CLOSE_TAB: &str = "file.closeTab";
     pub const CLOSE_ALL: &str = "file.closeAll";
     pub const REVERT: &str = "file.revert";
+    pub const CONVERT_TO_UTF8: &str = "file.convertToUtf8";
     pub const NEW_FILE: &str = "file.new";
     pub const RENAME_FILE: &str = "file.rename";
     pub const DELETE_FILE: &str = "file.delete";
@@ -51,10 +52,15 @@ pub mod ids {
     pub const DUPLICATE_LINE: &str = "edit.duplicateLine";
     pub const DELETE_LINE: &str = "edit.deleteLine";
     pub const MATCHING_BRACKET: &str = "edit.matchingBracket";
+    pub const TOGGLE_BREAKPOINT: &str = "debug.toggleBreakpoint";
+    pub const DEBUG_START: &str = "debug.start";
+    pub const FOLD_TOGGLE: &str = "view.foldToggle";
 
     pub const FORMAT: &str = "language.format";
     pub const HOVER: &str = "language.hover";
     pub const SETUP: &str = "language.setup";
+    pub const SET_LANGUAGE: &str = "language.setLanguage";
+    pub const LANGUAGE_SUPPORT: &str = "language.support";
     pub const RESTART_SERVER: &str = "language.restartServer";
     pub const GOTO_DEFINITION: &str = "language.gotoDefinition";
     pub const FIND_REFERENCES: &str = "language.findReferences";
@@ -70,12 +76,15 @@ pub mod ids {
     pub const PROJECT_SEARCH: &str = "project.search";
     pub const RUN_TASKS: &str = "project.tasks";
     pub const OPEN_PROJECT: &str = "project.openDir";
+    pub const SWITCH_WORKSPACE: &str = "project.switchWorkspace";
     pub const NEW_PROJECT: &str = "project.new";
     pub const SETUP_PROJECT: &str = "project.setup";
     pub const CHANGED_FILES: &str = "git.changedFiles";
     pub const GIT_COMMIT: &str = "git.commit";
     pub const GIT_TOGGLE_STAGE: &str = "git.toggleStage";
     pub const DIFF: &str = "git.diff";
+    pub const HUNK_NEXT: &str = "git.hunkNext";
+    pub const HUNK_PREV: &str = "git.hunkPrev";
 
     pub const TOGGLE_TREE: &str = "view.toggleTree";
     pub const FOCUS_TREE: &str = "view.focusTree";
@@ -194,6 +203,9 @@ impl CommandRegistry {
                 .describes("Close every open tab"),
             Command::new(REVERT, "Revert File", "File", None)
                 .describes("Discard changes and reload the file from disk")
+                .needs_doc(),
+            Command::new(CONVERT_TO_UTF8, "Convert to UTF-8", "File", None)
+                .describes("Convert a read-only non-UTF-8 file to UTF-8 so it can be saved")
                 .needs_doc(),
             Command::new(NEW_FILE, "New File…", "File", Some("Ctrl+N"))
                 .describes("Create a file in the selected folder"),
@@ -314,6 +326,12 @@ impl CommandRegistry {
             )
             .describes("Jump to the bracket matching the one under the cursor")
             .needs_doc(),
+            Command::new(TOGGLE_BREAKPOINT, "Toggle Breakpoint", "Debug", None)
+                .describes("Toggle a breakpoint on the current line")
+                .needs_doc(),
+            Command::new(DEBUG_START, "Start Debugging", "Debug", None)
+                .describes("Launch a debug adapter for the active file")
+                .needs_doc(),
             Command::new(FORMAT, "Format Document", "Language", Some("Ctrl+Shift+I"))
                 .describes("Format the active file with its language formatter")
                 .needs_doc()
@@ -324,6 +342,11 @@ impl CommandRegistry {
                 .capability(Capability::Hover),
             Command::new(SETUP, "Language Setup…", "Language", None)
                 .describes("See which language tools Koda found"),
+            Command::new(SET_LANGUAGE, "Set Language…", "Language", None)
+                .describes("Override the detected language for the active file")
+                .needs_doc(),
+            Command::new(LANGUAGE_SUPPORT, "Language Support…", "Language", None)
+                .describes("See what Koda supports for each language"),
             Command::new(RESTART_SERVER, "Restart Language Server", "Language", None)
                 .describes("Reconnect the language server for the active file")
                 .needs_doc(),
@@ -397,6 +420,8 @@ impl CommandRegistry {
             .describes("Find text across every file in the project"),
             Command::new(OPEN_PROJECT, "Open Project…", "Project", None)
                 .describes("Open a folder as a project"),
+            Command::new(SWITCH_WORKSPACE, "Switch Workspace…", "Project", None)
+                .describes("Switch between open projects"),
             Command::new(NEW_PROJECT, "Create New Project…", "Project", None)
                 .describes("Scaffold a new Rust, Go, Python or Shell project"),
             Command::new(SETUP_PROJECT, "Set Up Project…", "Project", None)
@@ -410,7 +435,14 @@ impl CommandRegistry {
             Command::new(GIT_TOGGLE_STAGE, "Stage / Unstage File", "Git", None)
                 .describes("Toggle the selected file in the git index"),
             Command::new(DIFF, "Diff File", "Git", Some("Alt+D"))
-                .describes("Show the unified diff for the active file"),
+                .describes("Show the unified diff for the active file")
+                .needs_doc(),
+            Command::new(HUNK_NEXT, "Next Hunk", "Git", None)
+                .describes("Jump to the next changed hunk in the active file")
+                .needs_doc(),
+            Command::new(HUNK_PREV, "Previous Hunk", "Git", None)
+                .describes("Jump to the previous changed hunk in the active file")
+                .needs_doc(),
             Command::new(
                 TOGGLE_TREE,
                 "File Panel: Focus / Hide",
@@ -436,6 +468,9 @@ impl CommandRegistry {
             .describes("Show or hide diagnostic messages at the end of each line"),
             Command::new(TOGGLE_WRAP, "Toggle Soft Wrap", "View", Some("Alt+Z"))
                 .describes("Wrap long lines to the width of the editor"),
+            Command::new(FOLD_TOGGLE, "Toggle Fold", "View", None)
+                .describes("Collapse or expand the fold at the cursor")
+                .needs_doc(),
             Command::new(REFRESH, "Refresh File Tree", "View", Some("F5"))
                 .describes("Re-read the project tree and git status"),
             Command::new(SPLIT, "Split Editor", "View", Some("Alt+V"))

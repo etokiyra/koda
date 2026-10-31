@@ -170,6 +170,9 @@ pub struct Server {
     ready: bool,
     root: PathBuf,
     versions: HashMap<PathBuf, i64>,
+    /// Last text sent to the server for each open document, so a change can be
+    /// reported incrementally when the server supports it.
+    documents: HashMap<PathBuf, String>,
     pending: HashMap<i64, PendingRequest>,
     language: LanguageId,
     /// The encoding the server uses for `character` offsets.
@@ -282,6 +285,7 @@ impl Server {
             ready: false,
             root: root.to_path_buf(),
             versions: HashMap::new(),
+            documents: HashMap::new(),
             pending: HashMap::new(),
             language,
             encoding: PositionEncoding::default(),
@@ -382,6 +386,7 @@ impl Server {
             return;
         }
         let version = self.next_version(path);
+        self.documents.insert(path.to_path_buf(), text.to_string());
         let _ = self.notify(
             "textDocument/didOpen",
             json!({
@@ -401,11 +406,60 @@ impl Server {
             return self.did_open(path, text);
         }
         let version = self.next_version(path);
+        let old = self.documents.get(path).cloned().unwrap_or_default();
+        let incremental = self.capabilities.sync == TextDocumentSyncKind::Incremental;
+        let content_changes = if incremental {
+            // Send the smallest possible change: common prefix/suffix are left
+            // untouched, only the middle is replaced.
+            let old_chars: Vec<char> = old.chars().collect();
+            let new_chars: Vec<char> = text.chars().collect();
+            let mut prefix = 0usize;
+            while prefix < old_chars.len()
+                && prefix < new_chars.len()
+                && old_chars[prefix] == new_chars[prefix]
+            {
+                prefix += 1;
+            }
+            let mut suffix = 0usize;
+            while suffix < old_chars.len().saturating_sub(prefix)
+                && suffix < new_chars.len().saturating_sub(prefix)
+                && old_chars[old_chars.len() - 1 - suffix]
+                    == new_chars[new_chars.len() - 1 - suffix]
+            {
+                suffix += 1;
+            }
+            let start_line = old_chars[..prefix].iter().filter(|c| **c == '\n').count();
+            let start_col = old_chars[..prefix]
+                .iter()
+                .rev()
+                .take_while(|c| **c != '\n')
+                .count();
+            let end_old = old_chars.len() - suffix;
+            let end_line = old_chars[..end_old].iter().filter(|c| **c == '\n').count();
+            let end_col = old_chars[..end_old]
+                .iter()
+                .rev()
+                .take_while(|c| **c != '\n')
+                .count();
+            let changed_text: String = new_chars[prefix..new_chars.len().saturating_sub(suffix)]
+                .iter()
+                .collect();
+            json!([{
+                "range": {
+                    "start": { "line": start_line, "character": start_col },
+                    "end": { "line": end_line, "character": end_col }
+                },
+                "text": changed_text
+            }])
+        } else {
+            json!([ { "text": text } ])
+        };
+        self.documents.insert(path.to_path_buf(), text.to_string());
         let _ = self.notify(
             "textDocument/didChange",
             json!({
                 "textDocument": { "uri": path_to_uri(path), "version": version },
-                "contentChanges": [ { "text": text } ]
+                "contentChanges": content_changes
             }),
         );
     }
@@ -415,6 +469,7 @@ impl Server {
         if self.versions.remove(path).is_none() {
             return;
         }
+        self.documents.remove(path);
         let _ = self.notify(
             "textDocument/didClose",
             json!({ "textDocument": { "uri": path_to_uri(path) } }),

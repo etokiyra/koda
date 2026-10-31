@@ -24,6 +24,11 @@ impl App {
 
     /// Turn soft wrap on or off. The wrap width itself is recomputed by the
     /// renderer on the next frame.
+    pub(super) fn toggle_fold(&mut self) {
+        self.with_doc(|doc| doc.toggle_fold());
+        self.set_status("Fold toggled");
+    }
+
     pub(super) fn toggle_wrap(&mut self) {
         self.wrap = !self.wrap;
         // Soft wrap is also a user preference, so the palette toggle persists
