@@ -2,7 +2,7 @@
 # The crate is `koda-ide` because `koda` is already taken on crates.io; the
 # installed binary is still `koda`.
 name = "koda-ide"
-version = "0.2.0"
+version = "2.1.0"
 edition = "2024"
 rust-version = "1.88"
 description = "A modern, lightweight, terminal-native IDE"
